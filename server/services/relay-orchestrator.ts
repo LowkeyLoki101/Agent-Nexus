@@ -27,27 +27,40 @@ function buildContextMessages(context: ConversationContext, currentAgentId: stri
   const history: { role: "user" | "assistant"; content: string }[] = [];
   
   for (const msg of context.messages) {
-    const isCurrentAgent = msg.agentId === currentAgentId;
-    history.push({
-      role: isCurrentAgent ? "assistant" : "user",
-      content: `${msg.agentName ? `[${msg.agentName}]: ` : ""}${msg.content}`,
-    });
+    if (msg.role === "user") {
+      history.push({
+        role: "user",
+        content: `${msg.agentName ? `[${msg.agentName}]: ` : ""}${msg.content}`,
+      });
+    } else if (msg.role === "assistant") {
+      const isCurrentAgent = msg.agentId === currentAgentId;
+      if (isCurrentAgent) {
+        history.push({
+          role: "assistant",
+          content: msg.content,
+        });
+      } else {
+        history.push({
+          role: "user",
+          content: `[${msg.agentName || "Other Agent"}]: ${msg.content}`,
+        });
+      }
+    }
   }
   
   return history;
 }
 
-function getAgentProvider(agent: Agent): "openai" | "anthropic" | "unknown" {
+function getAgentProvider(agent: Agent): "openai" | "anthropic" {
   const name = agent.name.toLowerCase();
+  const description = agent.description?.toLowerCase() || "";
   const capabilities = agent.capabilities?.join(" ").toLowerCase() || "";
+  const allText = `${name} ${description} ${capabilities}`;
   
-  if (name.includes("chatgpt") || name.includes("gpt") || capabilities.includes("openai")) {
-    return "openai";
-  }
-  if (name.includes("claude") || capabilities.includes("anthropic")) {
+  if (allText.includes("claude") || allText.includes("anthropic")) {
     return "anthropic";
   }
-  return "unknown";
+  return "openai";
 }
 
 async function callOpenAI(
@@ -101,13 +114,10 @@ export async function generateAgentResponse(
   const messages = buildContextMessages(context, agent.id);
   const temperature = config.temperature ?? 0.7;
   
-  if (provider === "openai") {
-    return callOpenAI(systemPrompt, messages, temperature);
-  } else if (provider === "anthropic") {
+  if (provider === "anthropic") {
     return callAnthropic(systemPrompt, messages, temperature);
-  } else {
-    throw new Error(`Unknown provider for agent ${agent.name}`);
   }
+  return callOpenAI(systemPrompt, messages, temperature);
 }
 
 export async function runConversationTurn(
