@@ -5,6 +5,8 @@ import {
   apiTokens,
   auditLogs,
   briefings,
+  conversations,
+  messages,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -16,7 +18,11 @@ import {
   type AuditLog,
   type InsertAuditLog,
   type Briefing,
-  type InsertBriefing
+  type InsertBriefing,
+  type Conversation,
+  type InsertConversation,
+  type Message,
+  type InsertMessage
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
@@ -61,6 +67,18 @@ export interface IStorage {
   createBriefing(briefing: InsertBriefing): Promise<Briefing>;
   updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined>;
   deleteBriefing(id: string): Promise<void>;
+
+  getConversation(id: string): Promise<Conversation | undefined>;
+  getConversationsByWorkspace(workspaceId: string): Promise<Conversation[]>;
+  getConversationsByUser(userId: string): Promise<Conversation[]>;
+  createConversation(conversation: InsertConversation): Promise<Conversation>;
+  updateConversation(id: string, updates: Partial<InsertConversation>): Promise<Conversation | undefined>;
+  deleteConversation(id: string): Promise<void>;
+
+  getMessage(id: string): Promise<Message | undefined>;
+  getMessagesByConversation(conversationId: string): Promise<Message[]>;
+  createMessage(message: InsertMessage): Promise<Message>;
+  deleteMessage(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -282,6 +300,67 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBriefing(id: string): Promise<void> {
     await db.delete(briefings).where(eq(briefings.id, id));
+  }
+
+  async getConversation(id: string): Promise<Conversation | undefined> {
+    const [conversation] = await db.select().from(conversations).where(eq(conversations.id, id));
+    return conversation;
+  }
+
+  async getConversationsByWorkspace(workspaceId: string): Promise<Conversation[]> {
+    return db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.workspaceId, workspaceId))
+      .orderBy(desc(conversations.createdAt));
+  }
+
+  async getConversationsByUser(userId: string): Promise<Conversation[]> {
+    return db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.createdById, userId))
+      .orderBy(desc(conversations.createdAt));
+  }
+
+  async createConversation(conversation: InsertConversation): Promise<Conversation> {
+    const [created] = await db.insert(conversations).values(conversation).returning();
+    return created;
+  }
+
+  async updateConversation(id: string, updates: Partial<InsertConversation>): Promise<Conversation | undefined> {
+    const [updated] = await db
+      .update(conversations)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(conversations.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    await db.delete(conversations).where(eq(conversations.id, id));
+  }
+
+  async getMessage(id: string): Promise<Message | undefined> {
+    const [message] = await db.select().from(messages).where(eq(messages.id, id));
+    return message;
+  }
+
+  async getMessagesByConversation(conversationId: string): Promise<Message[]> {
+    return db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(messages.createdAt);
+  }
+
+  async createMessage(message: InsertMessage): Promise<Message> {
+    const [created] = await db.insert(messages).values(message).returning();
+    return created;
+  }
+
+  async deleteMessage(id: string): Promise<void> {
+    await db.delete(messages).where(eq(messages.id, id));
   }
 }
 
