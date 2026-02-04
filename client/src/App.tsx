@@ -23,6 +23,9 @@ import BriefingDetail from "@/pages/briefing-detail";
 import Conversations from "@/pages/conversations";
 import ConversationNew from "@/pages/conversation-new";
 import ConversationDetail from "@/pages/conversation-detail";
+import Gifts from "@/pages/gifts";
+import GiftNew from "@/pages/gift-new";
+import Memory from "@/pages/memory";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
 import NotFound from "@/pages/not-found";
@@ -68,6 +71,9 @@ function AuthenticatedRouter() {
         <Route path="/conversations" component={Conversations} />
         <Route path="/conversations/new" component={ConversationNew} />
         <Route path="/conversations/:id" component={ConversationDetail} />
+        <Route path="/gifts" component={Gifts} />
+        <Route path="/gifts/new" component={GiftNew} />
+        <Route path="/memory" component={Memory} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />
