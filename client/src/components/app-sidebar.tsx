@@ -26,6 +26,7 @@ import {
   Bot,
   Key,
   FileText,
+  ClipboardList,
   Settings,
   LogOut,
   ChevronUp,
@@ -42,6 +43,11 @@ const mainNavItems = [
     title: "Studios",
     url: "/workspaces",
     icon: Building2,
+  },
+  {
+    title: "Briefings",
+    url: "/briefings",
+    icon: ClipboardList,
   },
   {
     title: "Agents",

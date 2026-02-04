@@ -415,5 +415,213 @@ export async function registerRoutes(
     }
   });
 
+  // Briefings routes
+  app.get("/api/briefings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const briefings = await storage.getBriefingsByUser(userId);
+      res.json(briefings);
+    } catch (error) {
+      console.error("Error fetching briefings:", error);
+      res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
+  app.get("/api/briefings/recent", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const briefings = await storage.getRecentBriefings(userId, 10);
+      res.json(briefings);
+    } catch (error) {
+      console.error("Error fetching recent briefings:", error);
+      res.status(500).json({ message: "Failed to fetch recent briefings" });
+    }
+  });
+
+  app.get("/api/briefings/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const briefing = await storage.getBriefing(id);
+      if (!briefing) {
+        return res.status(404).json({ message: "Briefing not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, briefing.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      res.json(briefing);
+    } catch (error) {
+      console.error("Error fetching briefing:", error);
+      res.status(500).json({ message: "Failed to fetch briefing" });
+    }
+  });
+
+  const createBriefingSchema = z.object({
+    title: z.string().min(1).max(200),
+    content: z.string().min(1),
+    summary: z.string().max(500).optional(),
+    workspaceId: z.string().min(1),
+    status: z.enum(["draft", "published", "archived"]).optional().default("draft"),
+    priority: z.enum(["low", "medium", "high", "urgent"]).optional().default("medium"),
+    tags: z.array(z.string()).optional().default([]),
+  });
+
+  app.post("/api/briefings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+
+      const validation = createBriefingSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { title, content, summary, workspaceId, status, priority, tags } = validation.data;
+
+      const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const briefing = await storage.createBriefing({
+        title,
+        content,
+        summary: summary || null,
+        workspaceId,
+        status: status ?? "draft",
+        priority: priority ?? "medium",
+        tags: tags || [],
+        createdById: userId,
+      });
+
+      await storage.createAuditLog({
+        workspaceId,
+        userId,
+        action: "briefing_created",
+        entityType: "briefing",
+        entityId: briefing.id,
+        metadata: JSON.stringify({ title: briefing.title }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(201).json(briefing);
+    } catch (error) {
+      console.error("Error creating briefing:", error);
+      res.status(500).json({ message: "Failed to create briefing" });
+    }
+  });
+
+  const updateBriefingSchema = z.object({
+    title: z.string().min(1).max(200).optional(),
+    content: z.string().min(1).optional(),
+    summary: z.string().max(500).optional().nullable(),
+    status: z.enum(["draft", "published", "archived"]).optional(),
+    priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+    tags: z.array(z.string()).optional(),
+  });
+
+  app.patch("/api/briefings/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const briefing = await storage.getBriefing(id);
+      if (!briefing) {
+        return res.status(404).json({ message: "Briefing not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, briefing.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = updateBriefingSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const updated = await storage.updateBriefing(id, validation.data);
+
+      await storage.createAuditLog({
+        workspaceId: briefing.workspaceId,
+        userId,
+        action: "briefing_updated",
+        entityType: "briefing",
+        entityId: id,
+        metadata: JSON.stringify({ title: updated?.title }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating briefing:", error);
+      res.status(500).json({ message: "Failed to update briefing" });
+    }
+  });
+
+  app.delete("/api/briefings/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const briefing = await storage.getBriefing(id);
+      if (!briefing) {
+        return res.status(404).json({ message: "Briefing not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, briefing.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      await storage.deleteBriefing(id);
+
+      await storage.createAuditLog({
+        workspaceId: briefing.workspaceId,
+        userId,
+        action: "briefing_deleted",
+        entityType: "briefing",
+        entityId: id,
+        metadata: JSON.stringify({ title: briefing.title }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting briefing:", error);
+      res.status(500).json({ message: "Failed to delete briefing" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/briefings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const briefings = await storage.getBriefingsByWorkspace(access.workspaceId);
+      res.json(briefings);
+    } catch (error) {
+      console.error("Error fetching workspace briefings:", error);
+      res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
   return httpServer;
 }
