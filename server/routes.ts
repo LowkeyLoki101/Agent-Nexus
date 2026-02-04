@@ -849,5 +849,382 @@ export async function registerRoutes(
     }
   });
 
+  // ============ GIFTS ============
+
+  app.get("/api/workspaces/:slug/gifts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin", "member", "viewer"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const gifts = await storage.getGiftsByWorkspace(workspace.id);
+      res.json(gifts);
+    } catch (error) {
+      console.error("Error fetching gifts:", error);
+      res.status(500).json({ message: "Failed to fetch gifts" });
+    }
+  });
+
+  const createGiftSchema = z.object({
+    title: z.string().min(1),
+    description: z.string().optional(),
+    type: z.enum(["pdf", "slides", "document", "code", "data"]),
+    prompt: z.string().min(1),
+    agentId: z.string().optional(),
+    conversationId: z.string().optional(),
+    sourceData: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  });
+
+  app.post("/api/workspaces/:slug/gifts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createGiftSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { createGift } = await import("./services/gift-generator");
+      const gift = await createGift({
+        workspaceId: workspace.id,
+        createdById: userId,
+        ...validation.data,
+      });
+
+      await storage.createAuditLog({
+        workspaceId: workspace.id,
+        userId,
+        action: "gift_created",
+        entityType: "gift",
+        entityId: gift.id,
+        metadata: JSON.stringify({ title: gift.title, type: gift.type }),
+      });
+
+      res.status(201).json(gift);
+    } catch (error) {
+      console.error("Error creating gift:", error);
+      res.status(500).json({ message: "Failed to create gift" });
+    }
+  });
+
+  app.get("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const gift = await storage.getGift(id);
+      if (!gift) {
+        return res.status(404).json({ message: "Gift not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, gift.workspaceId, ["owner", "admin", "member", "viewer"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      res.json(gift);
+    } catch (error) {
+      console.error("Error fetching gift:", error);
+      res.status(500).json({ message: "Failed to fetch gift" });
+    }
+  });
+
+  app.get("/api/gifts/:id/download", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const gift = await storage.getGift(id);
+      if (!gift) {
+        return res.status(404).json({ message: "Gift not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, gift.workspaceId, ["owner", "admin", "member", "viewer"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { getGiftContent } = await import("./services/gift-generator");
+      const content = await getGiftContent(id);
+      if (!content) {
+        return res.status(404).json({ message: "Gift content not available" });
+      }
+
+      await storage.createAuditLog({
+        workspaceId: gift.workspaceId,
+        userId,
+        action: "gift_downloaded",
+        entityType: "gift",
+        entityId: gift.id,
+      });
+
+      res.setHeader('Content-Type', content.mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${content.fileName}"`);
+      res.send(content.buffer);
+    } catch (error) {
+      console.error("Error downloading gift:", error);
+      res.status(500).json({ message: "Failed to download gift" });
+    }
+  });
+
+  app.delete("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const gift = await storage.getGift(id);
+      if (!gift) {
+        return res.status(404).json({ message: "Gift not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, gift.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      await storage.deleteGift(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting gift:", error);
+      res.status(500).json({ message: "Failed to delete gift" });
+    }
+  });
+
+  // ============ MEMORY ============
+
+  app.get("/api/workspaces/:slug/memory", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+      const { tier } = req.query;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin", "member", "viewer"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const entries = await storage.getMemoryEntriesByWorkspace(workspace.id, tier as string | undefined);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching memory entries:", error);
+      res.status(500).json({ message: "Failed to fetch memory" });
+    }
+  });
+
+  const searchMemorySchema = z.object({
+    query: z.string().min(1),
+    tier: z.enum(["hot", "warm", "cold"]).optional(),
+    summarize: z.boolean().optional(),
+  });
+
+  app.post("/api/workspaces/:slug/memory/search", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = searchMemorySchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { queryMemory } = await import("./services/memory-service");
+      const result = await queryMemory(workspace.id, validation.data.query, {
+        tier: validation.data.tier,
+        summarize: validation.data.summarize,
+      });
+
+      await storage.createAuditLog({
+        workspaceId: workspace.id,
+        userId,
+        action: "memory_queried",
+        metadata: JSON.stringify({ query: validation.data.query, resultsCount: result.entries.length }),
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error searching memory:", error);
+      res.status(500).json({ message: "Failed to search memory" });
+    }
+  });
+
+  const createMemorySchema = z.object({
+    tier: z.enum(["hot", "warm", "cold"]).optional(),
+    type: z.enum(["identity", "goal", "fact", "event", "artifact", "summary"]),
+    title: z.string().min(1),
+    content: z.string().min(1),
+    agentId: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    generateSummary: z.boolean().optional(),
+  });
+
+  app.post("/api/workspaces/:slug/memory", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createMemorySchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { createMemory } = await import("./services/memory-service");
+      const entry = await createMemory({
+        workspaceId: workspace.id,
+        ...validation.data,
+      });
+
+      await storage.createAuditLog({
+        workspaceId: workspace.id,
+        userId,
+        action: "memory_created",
+        entityType: "memory",
+        entityId: entry.id,
+        metadata: JSON.stringify({ type: entry.type, tier: entry.tier }),
+      });
+
+      res.status(201).json(entry);
+    } catch (error) {
+      console.error("Error creating memory entry:", error);
+      res.status(500).json({ message: "Failed to create memory entry" });
+    }
+  });
+
+  app.patch("/api/memory/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const entry = await storage.getMemoryEntry(id);
+      if (!entry) {
+        return res.status(404).json({ message: "Memory entry not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, entry.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { tier, type, title, content, tags } = req.body;
+      const updated = await storage.updateMemoryEntry(id, {
+        tier,
+        type,
+        title,
+        content,
+        tags,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating memory entry:", error);
+      res.status(500).json({ message: "Failed to update memory entry" });
+    }
+  });
+
+  app.delete("/api/memory/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const entry = await storage.getMemoryEntry(id);
+      if (!entry) {
+        return res.status(404).json({ message: "Memory entry not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, entry.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      await storage.deleteMemoryEntry(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting memory entry:", error);
+      res.status(500).json({ message: "Failed to delete memory entry" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/memory/maintain", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const { runMemoryMaintenance } = await import("./services/memory-service");
+      const result = await runMemoryMaintenance(workspace.id);
+
+      res.json({
+        message: "Memory maintenance completed",
+        ...result
+      });
+    } catch (error) {
+      console.error("Error running memory maintenance:", error);
+      res.status(500).json({ message: "Failed to run memory maintenance" });
+    }
+  });
+
   return httpServer;
 }

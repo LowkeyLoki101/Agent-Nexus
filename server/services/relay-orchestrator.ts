@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { storage } from "../storage";
 import type { Agent, Conversation, Message, InsertMessage } from "@shared/schema";
+import { queryMemory, getHotMemory, buildAgentContext, extractAndStoreInsights } from "./memory-service";
+import { createGift } from "./gift-generator";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -106,10 +108,18 @@ export async function generateAgentResponse(
   config: RelayConfig = {}
 ): Promise<string> {
   const provider = getAgentProvider(agent);
-  const systemPrompt = config.systemPrompt || context.conversation.systemPrompt || 
+  
+  const hotMemories = await getHotMemory(context.conversation.workspaceId, agent.id);
+  const memoryContext = buildAgentContext(hotMemories);
+  
+  const basePrompt = config.systemPrompt || context.conversation.systemPrompt || 
     `You are ${agent.name}, an AI assistant collaborating with other agents. 
      Be concise, helpful, and build on previous messages in the conversation.
      Focus on the task at hand and contribute meaningfully to the discussion.`;
+  
+  const systemPrompt = memoryContext 
+    ? `${basePrompt}\n\n## Your Memory\n${memoryContext}`
+    : basePrompt;
   
   const messages = buildContextMessages(context, agent.id);
   const temperature = config.temperature ?? 0.7;
