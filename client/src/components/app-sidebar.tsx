@@ -12,7 +12,6 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +26,6 @@ import {
   Bot,
   Key,
   FileText,
-  Shield,
   Settings,
   LogOut,
   ChevronUp,
@@ -41,7 +39,7 @@ const mainNavItems = [
     icon: LayoutDashboard,
   },
   {
-    title: "Workspaces",
+    title: "Studios",
     url: "/workspaces",
     icon: Building2,
   },
@@ -73,13 +71,12 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b px-4 py-3">
+      <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
         <Link href="/">
           <div className="flex items-center gap-2 cursor-pointer" data-testid="link-home">
-            <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
-              <Shield className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="font-semibold">AgentHub</span>
+            <span className="text-lg font-bold tracking-tight text-primary">CB</span>
+            <span className="text-sidebar-foreground/50">|</span>
+            <span className="text-lg font-bold tracking-tight text-sidebar-foreground">CREATIVES</span>
           </div>
         </Link>
       </SidebarHeader>
@@ -105,7 +102,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="border-t">
+      <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -127,7 +124,7 @@ export function AppSidebar() {
                         ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`
                         : user?.email || "User"}
                     </span>
-                    <span className="truncate text-xs text-muted-foreground">
+                    <span className="truncate text-xs text-sidebar-foreground/60">
                       {user?.email || ""}
                     </span>
                   </div>
