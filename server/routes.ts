@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import { insertWorkspaceSchema, insertAgentSchema } from "@shared/schema";
 import { z } from "zod";
+import { orchestrateConversation, sendSingleMessage } from "./services/relay-orchestrator";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -620,6 +621,231 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching workspace briefings:", error);
       res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
+  // Conversation routes
+  app.get("/api/conversations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const conversations = await storage.getConversationsByUser(userId);
+      res.json(conversations);
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+      res.status(500).json({ message: "Failed to fetch conversations" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/conversations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const conversations = await storage.getConversationsByWorkspace(access.workspaceId);
+      res.json(conversations);
+    } catch (error) {
+      console.error("Error fetching workspace conversations:", error);
+      res.status(500).json({ message: "Failed to fetch conversations" });
+    }
+  });
+
+  app.get("/api/conversations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const conversation = await storage.getConversation(id);
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, conversation.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      res.json(conversation);
+    } catch (error) {
+      console.error("Error fetching conversation:", error);
+      res.status(500).json({ message: "Failed to fetch conversation" });
+    }
+  });
+
+  app.get("/api/conversations/:id/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const conversation = await storage.getConversation(id);
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, conversation.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const messages = await storage.getMessagesByConversation(id);
+      res.json(messages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+      res.status(500).json({ message: "Failed to fetch messages" });
+    }
+  });
+
+  const createConversationSchema = z.object({
+    title: z.string().min(1).max(200),
+    description: z.string().max(500).optional(),
+    workspaceId: z.string().min(1),
+    participantAgentIds: z.array(z.string()).min(1),
+    systemPrompt: z.string().optional(),
+    mode: z.enum(["chat", "relay"]).optional().default("chat"),
+  });
+
+  app.post("/api/conversations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+
+      const validation = createConversationSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { title, description, workspaceId, participantAgentIds, systemPrompt, mode } = validation.data;
+
+      const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const conversation = await storage.createConversation({
+        title,
+        description: description || null,
+        workspaceId,
+        participantAgentIds,
+        systemPrompt: systemPrompt || null,
+        mode: mode || "chat",
+        status: "active",
+        createdById: userId,
+      });
+
+      res.status(201).json(conversation);
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+      res.status(500).json({ message: "Failed to create conversation" });
+    }
+  });
+
+  const sendMessageSchema = z.object({
+    content: z.string().min(1),
+    agentId: z.string().min(1),
+  });
+
+  app.post("/api/conversations/:id/send", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const conversation = await storage.getConversation(id);
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, conversation.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = sendMessageSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { content, agentId } = validation.data;
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const responseMessage = await sendSingleMessage(id, agentId, content);
+      res.json(responseMessage);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  const orchestrateSchema = z.object({
+    prompt: z.string().min(1),
+    maxTurns: z.number().min(1).max(10).optional().default(2),
+  });
+
+  app.post("/api/conversations/:id/orchestrate", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const conversation = await storage.getConversation(id);
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, conversation.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = orchestrateSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
+        });
+      }
+
+      const { prompt, maxTurns } = validation.data;
+
+      const newMessages = await orchestrateConversation(id, prompt, { maxTurns });
+      res.json({ messages: newMessages });
+    } catch (error) {
+      console.error("Error orchestrating conversation:", error);
+      res.status(500).json({ message: "Failed to orchestrate conversation" });
+    }
+  });
+
+  app.delete("/api/conversations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const conversation = await storage.getConversation(id);
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, conversation.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      await storage.deleteConversation(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting conversation:", error);
+      res.status(500).json({ message: "Failed to delete conversation" });
     }
   });
 
