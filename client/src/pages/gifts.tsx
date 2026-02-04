@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Download, FileText, Presentation, Code, FileJson, Trash2, Clock } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Gift, Workspace } from "@shared/schema";
+import type { Gift } from "@shared/schema";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,15 +37,8 @@ const statusColors: Record<string, string> = {
 export default function Gifts() {
   const { toast } = useToast();
 
-  const { data: workspaces, isLoading: loadingWorkspaces } = useQuery<Workspace[]>({
-    queryKey: ["/api/workspaces"],
-  });
-
-  const firstWorkspace = workspaces?.[0];
-
   const { data: gifts, isLoading: loadingGifts } = useQuery<Gift[]>({
-    queryKey: ["/api/workspaces", firstWorkspace?.slug, "gifts"],
-    enabled: !!firstWorkspace?.slug,
+    queryKey: ["/api/gifts"],
   });
 
   const deleteMutation = useMutation({
@@ -53,7 +46,7 @@ export default function Gifts() {
       await apiRequest("DELETE", `/api/gifts/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspaces", firstWorkspace?.slug, "gifts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/gifts"] });
       toast({ title: "Gift deleted" });
     },
     onError: () => {
@@ -84,7 +77,7 @@ export default function Gifts() {
     }
   };
 
-  if (loadingWorkspaces || loadingGifts) {
+  if (loadingGifts) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
