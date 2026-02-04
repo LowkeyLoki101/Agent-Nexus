@@ -7,6 +7,8 @@ import {
   briefings,
   conversations,
   messages,
+  gifts,
+  memoryEntries,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -22,10 +24,14 @@ import {
   type Conversation,
   type InsertConversation,
   type Message,
-  type InsertMessage
+  type InsertMessage,
+  type Gift,
+  type InsertGift,
+  type MemoryEntry,
+  type InsertMemoryEntry
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or, ilike, sql } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 
 export interface IStorage {
@@ -79,6 +85,23 @@ export interface IStorage {
   getMessagesByConversation(conversationId: string): Promise<Message[]>;
   createMessage(message: InsertMessage): Promise<Message>;
   deleteMessage(id: string): Promise<void>;
+
+  getGift(id: string): Promise<Gift | undefined>;
+  getGiftsByWorkspace(workspaceId: string): Promise<Gift[]>;
+  getGiftsByUser(userId: string): Promise<Gift[]>;
+  createGift(gift: InsertGift): Promise<Gift>;
+  updateGift(id: string, updates: Partial<InsertGift>): Promise<Gift | undefined>;
+  deleteGift(id: string): Promise<void>;
+
+  getMemoryEntry(id: string): Promise<MemoryEntry | undefined>;
+  getMemoryEntriesByWorkspace(workspaceId: string, tier?: string): Promise<MemoryEntry[]>;
+  getMemoryEntriesByAgent(agentId: string, tier?: string): Promise<MemoryEntry[]>;
+  searchMemory(workspaceId: string, query: string, tier?: string): Promise<MemoryEntry[]>;
+  createMemoryEntry(entry: InsertMemoryEntry): Promise<MemoryEntry>;
+  updateMemoryEntry(id: string, updates: Partial<InsertMemoryEntry>): Promise<MemoryEntry | undefined>;
+  incrementMemoryAccess(id: string): Promise<void>;
+  deleteMemoryEntry(id: string): Promise<void>;
+  archiveOldMemories(workspaceId: string, olderThanDays: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -361,6 +384,153 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMessage(id: string): Promise<void> {
     await db.delete(messages).where(eq(messages.id, id));
+  }
+
+  async getGift(id: string): Promise<Gift | undefined> {
+    const [gift] = await db.select().from(gifts).where(eq(gifts.id, id));
+    return gift;
+  }
+
+  async getGiftsByWorkspace(workspaceId: string): Promise<Gift[]> {
+    return db
+      .select()
+      .from(gifts)
+      .where(eq(gifts.workspaceId, workspaceId))
+      .orderBy(desc(gifts.createdAt));
+  }
+
+  async getGiftsByUser(userId: string): Promise<Gift[]> {
+    return db
+      .select()
+      .from(gifts)
+      .where(eq(gifts.createdById, userId))
+      .orderBy(desc(gifts.createdAt));
+  }
+
+  async createGift(gift: InsertGift): Promise<Gift> {
+    const [created] = await db.insert(gifts).values(gift).returning();
+    return created;
+  }
+
+  async updateGift(id: string, updates: Partial<InsertGift>): Promise<Gift | undefined> {
+    const [updated] = await db
+      .update(gifts)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(gifts.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteGift(id: string): Promise<void> {
+    await db.delete(gifts).where(eq(gifts.id, id));
+  }
+
+  async getMemoryEntry(id: string): Promise<MemoryEntry | undefined> {
+    const [entry] = await db.select().from(memoryEntries).where(eq(memoryEntries.id, id));
+    return entry;
+  }
+
+  async getMemoryEntriesByWorkspace(workspaceId: string, tier?: string): Promise<MemoryEntry[]> {
+    if (tier) {
+      return db
+        .select()
+        .from(memoryEntries)
+        .where(and(eq(memoryEntries.workspaceId, workspaceId), eq(memoryEntries.tier, tier as any)))
+        .orderBy(desc(memoryEntries.createdAt));
+    }
+    return db
+      .select()
+      .from(memoryEntries)
+      .where(eq(memoryEntries.workspaceId, workspaceId))
+      .orderBy(desc(memoryEntries.createdAt));
+  }
+
+  async getMemoryEntriesByAgent(agentId: string, tier?: string): Promise<MemoryEntry[]> {
+    if (tier) {
+      return db
+        .select()
+        .from(memoryEntries)
+        .where(and(eq(memoryEntries.agentId, agentId), eq(memoryEntries.tier, tier as any)))
+        .orderBy(desc(memoryEntries.createdAt));
+    }
+    return db
+      .select()
+      .from(memoryEntries)
+      .where(eq(memoryEntries.agentId, agentId))
+      .orderBy(desc(memoryEntries.createdAt));
+  }
+
+  async searchMemory(workspaceId: string, query: string, tier?: string): Promise<MemoryEntry[]> {
+    const searchPattern = `%${query.toLowerCase()}%`;
+    const conditions = [
+      eq(memoryEntries.workspaceId, workspaceId),
+      or(
+        ilike(memoryEntries.title, searchPattern),
+        ilike(memoryEntries.content, searchPattern),
+        ilike(memoryEntries.summary, searchPattern)
+      )
+    ];
+    
+    if (tier) {
+      conditions.push(eq(memoryEntries.tier, tier as any));
+    }
+    
+    return db
+      .select()
+      .from(memoryEntries)
+      .where(and(...conditions))
+      .orderBy(desc(memoryEntries.accessCount))
+      .limit(20);
+  }
+
+  async createMemoryEntry(entry: InsertMemoryEntry): Promise<MemoryEntry> {
+    const [created] = await db.insert(memoryEntries).values(entry).returning();
+    return created;
+  }
+
+  async updateMemoryEntry(id: string, updates: Partial<InsertMemoryEntry>): Promise<MemoryEntry | undefined> {
+    const [updated] = await db
+      .update(memoryEntries)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(memoryEntries.id, id))
+      .returning();
+    return updated;
+  }
+
+  async incrementMemoryAccess(id: string): Promise<void> {
+    const entry = await this.getMemoryEntry(id);
+    if (entry) {
+      await db
+        .update(memoryEntries)
+        .set({
+          accessCount: (entry.accessCount || 0) + 1,
+          lastAccessedAt: new Date()
+        })
+        .where(eq(memoryEntries.id, id));
+    }
+  }
+
+  async deleteMemoryEntry(id: string): Promise<void> {
+    await db.delete(memoryEntries).where(eq(memoryEntries.id, id));
+  }
+
+  async archiveOldMemories(workspaceId: string, olderThanDays: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    
+    const result = await db
+      .update(memoryEntries)
+      .set({ tier: 'cold' as any })
+      .where(
+        and(
+          eq(memoryEntries.workspaceId, workspaceId),
+          eq(memoryEntries.tier, 'warm' as any),
+          sql`${memoryEntries.createdAt} < ${cutoffDate}`
+        )
+      )
+      .returning();
+    
+    return result.length;
   }
 }
 
