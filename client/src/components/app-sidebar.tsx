@@ -73,8 +73,13 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
         <Link href="/">
-          <div className="flex items-center gap-2 cursor-pointer" data-testid="link-home">
-            <span className="text-base font-bold tracking-widest text-sidebar-foreground">CREATIVE INTELLIGENCE</span>
+          <div className="flex flex-col cursor-pointer" data-testid="link-home">
+            <div className="flex items-center gap-1">
+              <span className="text-sm font-bold tracking-tight text-primary">CB</span>
+              <span className="text-sidebar-foreground/50">|</span>
+              <span className="text-sm font-bold tracking-tight text-sidebar-foreground">CREATIVES</span>
+            </div>
+            <span className="text-xs font-medium tracking-wider text-sidebar-foreground/70">CREATIVE INTELLIGENCE</span>
           </div>
         </Link>
       </SidebarHeader>

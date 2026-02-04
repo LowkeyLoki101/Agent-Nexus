@@ -6,8 +6,8 @@ Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for aut
 
 ## Branding
 
-- **Platform Name**: Creative Intelligence
-- **Brand Identity**: CB | CREATIVES
+- **App Name**: Creative Intelligence (the application)
+- **Company Name**: CB | CREATIVES (the company that makes the app)
 - **Color Scheme**: Gold/amber primary (#E5A824) with dark charcoal backgrounds
 - **Terminology**: "Workspaces" are referred to as "Studios" in the UI
 

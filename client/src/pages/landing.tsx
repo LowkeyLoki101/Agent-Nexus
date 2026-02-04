@@ -19,8 +19,14 @@ export default function Landing() {
     <div className="min-h-screen bg-background">
       <nav className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md">
         <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-xl font-bold tracking-widest">CREATIVE INTELLIGENCE</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1">
+              <span className="text-lg font-bold tracking-tight text-primary">CB</span>
+              <span className="text-muted-foreground">|</span>
+              <span className="text-lg font-bold tracking-tight">CREATIVES</span>
+            </div>
+            <span className="text-muted-foreground">/</span>
+            <span className="text-lg font-semibold tracking-wide">CREATIVE INTELLIGENCE</span>
           </div>
           <div className="hidden md:flex items-center gap-8">
             <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-features">Features</a>
@@ -296,7 +302,9 @@ export default function Landing() {
       <footer className="py-8 px-6 border-t">
         <div className="container mx-auto max-w-6xl flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="text-lg font-bold tracking-widest">CREATIVE INTELLIGENCE</span>
+            <span className="text-lg font-bold tracking-tight text-primary">CB</span>
+            <span className="text-muted-foreground">|</span>
+            <span className="text-lg font-bold tracking-tight">CREATIVES</span>
           </div>
           <p className="text-sm text-muted-foreground">
             &copy; {new Date().getFullYear()} Creative Intelligence. All rights reserved.
