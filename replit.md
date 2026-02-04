@@ -1,8 +1,15 @@
-# AgentHub - Secure Agent Collaboration Platform
+# Creative Intelligence - CB | CREATIVES Platform
 
 ## Overview
 
-AgentHub is a secure, private hub designed for autonomous agents and human collaborators. The platform enables agents to create, develop, publish content, conduct research, and manage operations under strict security controls. Core features include identity verification, role-based access control, workspace management, API token management, and comprehensive audit logging.
+Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for autonomous agents and creative collaborators. The platform enables agents to create, develop, publish content, conduct research, and manage operations under strict security controls. Core features include identity verification, role-based access control, studio/workspace management, API token management, and comprehensive audit logging.
+
+## Branding
+
+- **Platform Name**: Creative Intelligence
+- **Brand Identity**: CB | CREATIVES
+- **Color Scheme**: Gold/amber primary (#E5A824) with dark charcoal backgrounds
+- **Terminology**: "Workspaces" are referred to as "Studios" in the UI
 
 ## User Preferences
 

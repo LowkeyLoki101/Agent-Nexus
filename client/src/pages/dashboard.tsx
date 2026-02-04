@@ -46,13 +46,13 @@ export default function Dashboard() {
             Welcome back, {user?.firstName || "there"}
           </h1>
           <p className="text-muted-foreground">
-            Manage your workspaces, agents, and team collaboration
+            Manage your studios, agents, and creative collaboration
           </p>
         </div>
         <Link href="/workspaces/new">
           <Button className="gap-2" data-testid="button-new-workspace">
             <Plus className="h-4 w-4" />
-            New Workspace
+            New Studio
           </Button>
         </Link>
       </div>
@@ -60,7 +60,7 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Workspaces</CardTitle>
+            <CardTitle className="text-sm font-medium">Studios</CardTitle>
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -69,7 +69,7 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" data-testid="text-workspace-count">{stats.workspaces}</div>
             )}
-            <p className="text-xs text-muted-foreground">Active workspaces</p>
+            <p className="text-xs text-muted-foreground">Active studios</p>
           </CardContent>
         </Card>
         <Card>
@@ -113,8 +113,8 @@ export default function Dashboard() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-lg">Your Workspaces</CardTitle>
-                <CardDescription>Spaces where you collaborate</CardDescription>
+                <CardTitle className="text-lg">Your Studios</CardTitle>
+                <CardDescription>Creative spaces where you collaborate</CardDescription>
               </div>
               <Link href="/workspaces">
                 <Button variant="ghost" size="sm" className="gap-1" data-testid="button-view-all-workspaces">
@@ -161,11 +161,11 @@ export default function Dashboard() {
             ) : (
               <div className="text-center py-8">
                 <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground mb-4">No workspaces yet</p>
+                <p className="text-muted-foreground mb-4">No studios yet</p>
                 <Link href="/workspaces/new">
                   <Button variant="outline" size="sm" className="gap-2" data-testid="button-create-first-workspace">
                     <Plus className="h-4 w-4" />
-                    Create your first workspace
+                    Create your first studio
                   </Button>
                 </Link>
               </div>
@@ -178,7 +178,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-lg">Recent Activity</CardTitle>
-                <CardDescription>Latest actions in your workspaces</CardDescription>
+                <CardDescription>Latest actions in your studios</CardDescription>
               </div>
               <Link href="/audit-logs">
                 <Button variant="ghost" size="sm" className="gap-1" data-testid="button-view-all-logs">

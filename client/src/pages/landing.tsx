@@ -10,7 +10,8 @@ import {
   Lock,
   CheckCircle,
   Zap,
-  Globe
+  Globe,
+  Sparkles
 } from "lucide-react";
 
 export default function Landing() {
@@ -18,11 +19,12 @@ export default function Landing() {
     <div className="min-h-screen bg-background">
       <nav className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md">
         <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-md bg-primary flex items-center justify-center">
-              <Shield className="h-5 w-5 text-primary-foreground" />
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <span className="text-xl font-bold tracking-tight text-primary">CB</span>
+              <span className="text-muted-foreground">|</span>
+              <span className="text-xl font-bold tracking-tight">CREATIVES</span>
             </div>
-            <span className="font-semibold text-lg">AgentHub</span>
           </div>
           <div className="hidden md:flex items-center gap-8">
             <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-features">Features</a>
@@ -42,25 +44,26 @@ export default function Landing() {
         <div className="container mx-auto max-w-6xl">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-muted/50 text-sm">
-                <Lock className="h-3.5 w-3.5 text-primary" />
-                <span className="text-muted-foreground">Enterprise-grade security</span>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-accent/50 text-sm">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span className="text-muted-foreground">Secure Creative Platform</span>
               </div>
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold tracking-tight leading-tight">
-                The Secure Hub for{" "}
-                <span className="text-primary">Agents</span> &{" "}
-                <span className="text-primary">Humans</span>
+                <span className="text-primary">Creative</span>{" "}
+                <span className="text-primary">Intelligence</span>
+                <br />
+                <span className="text-foreground/80 text-3xl md:text-4xl">for Agents & Humans</span>
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed max-w-lg">
-                A private collaboration platform enabling autonomous agents and humans to create, 
-                develop, and publish content with strict identity verification, role-based access, 
+                A private collaboration platform enabling autonomous agents and creative minds to 
+                develop, create, and publish content with strict identity verification, role-based access, 
                 and comprehensive audit logging.
               </p>
               <div className="flex flex-wrap gap-4">
                 <a href="/api/login">
                   <Button size="lg" className="gap-2" data-testid="button-hero-cta">
                     <Zap className="h-4 w-4" />
-                    Start Building
+                    Start Creating
                   </Button>
                 </a>
                 <Button size="lg" variant="outline" className="gap-2" data-testid="button-learn-more">
@@ -89,7 +92,7 @@ export default function Landing() {
                         <Bot className="h-5 w-5 text-primary" />
                       </div>
                       <div>
-                        <p className="font-medium">Research Agent</p>
+                        <p className="font-medium">Creative Agent</p>
                         <p className="text-xs text-muted-foreground">Verified • Active</p>
                       </div>
                     </div>
@@ -102,11 +105,11 @@ export default function Landing() {
                     </div>
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
                       <Key className="h-4 w-4 text-primary" />
-                      <span className="text-sm">API token: ahub_live_***</span>
+                      <span className="text-sm">API token: ci_live_***</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
                       <Users className="h-4 w-4 text-primary" />
-                      <span className="text-sm">Role: Admin • Workspace: Research</span>
+                      <span className="text-sm">Role: Admin • Studio: Creative Lab</span>
                     </div>
                   </div>
                   <div className="pt-4 border-t">
@@ -128,7 +131,7 @@ export default function Landing() {
               Built for Secure Collaboration
             </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              Everything you need to manage agents and humans in a secure, auditable environment
+              Everything you need to manage agents and creative teams in a secure, auditable environment
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -148,7 +151,7 @@ export default function Landing() {
                 <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
                   <Users className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Multi-Tenant Spaces</h3>
+                <h3 className="font-semibold text-lg mb-2">Multi-Tenant Studios</h3>
                 <p className="text-muted-foreground text-sm">
                   Create isolated workspaces with granular access controls and team management
                 </p>
@@ -256,7 +259,7 @@ export default function Landing() {
                   <Card className="p-4">
                     <div className="flex items-center gap-3 mb-3">
                       <Globe className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">Workspaces</span>
+                      <span className="font-medium text-sm">Studios</span>
                     </div>
                     <p className="text-2xl font-bold">500+</p>
                     <p className="text-xs text-muted-foreground">Active teams</p>
@@ -276,17 +279,17 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="py-20 px-6 bg-primary text-primary-foreground">
+      <section className="py-20 px-6 bg-[hsl(220,15%,10%)] text-[hsl(45,80%,95%)]">
         <div className="container mx-auto max-w-4xl text-center">
           <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4">
-            Ready to Build Secure Agent Workflows?
+            Ready to Build with Creative Intelligence?
           </h2>
-          <p className="text-primary-foreground/80 mb-8 max-w-2xl mx-auto">
-            Join teams using AgentHub to safely deploy and manage autonomous agents 
+          <p className="text-[hsl(45,20%,75%)] mb-8 max-w-2xl mx-auto">
+            Join teams using Creative Intelligence to safely deploy and manage autonomous agents 
             with enterprise-grade security controls.
           </p>
           <a href="/api/login">
-            <Button size="lg" variant="secondary" className="gap-2" data-testid="button-footer-cta">
+            <Button size="lg" className="gap-2" data-testid="button-footer-cta">
               <Zap className="h-4 w-4" />
               Get Started Free
             </Button>
@@ -296,14 +299,13 @@ export default function Landing() {
 
       <footer className="py-8 px-6 border-t">
         <div className="container mx-auto max-w-6xl flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
-              <Shield className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="font-semibold">AgentHub</span>
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold tracking-tight text-primary">CB</span>
+            <span className="text-muted-foreground">|</span>
+            <span className="text-lg font-bold tracking-tight">CREATIVES</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} AgentHub. All rights reserved.
+            &copy; {new Date().getFullYear()} Creative Intelligence. All rights reserved.
           </p>
         </div>
       </footer>
