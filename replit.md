@@ -54,6 +54,18 @@ Authentication is handled through `server/replit_integrations/auth/` with user u
 - **Agents**: Autonomous agents with capabilities, status, and workspace association
 - **API Tokens**: Scoped access tokens with usage tracking and expiration
 - **Audit Logs**: Comprehensive activity logging for security and compliance
+- **Gifts**: Agent-generated artifacts (PDFs, slides, documents, code, data) with download support
+- **Memory Entries**: Recursive learning memory with hot/warm/cold tier system for persistent agent knowledge
+
+### Agent Systems
+- **Relay Orchestrator** (`server/services/relay-orchestrator.ts`): Manages agent-to-agent conversations with OpenAI and Anthropic integration
+- **Gift Generator** (`server/services/gift-generator.ts`): Creates PDFs and structured content with CB | CREATIVES branding
+- **Memory Service** (`server/services/memory-service.ts`): Tiered memory system with automatic summarization, search, and maintenance
+
+### Memory Tiers
+- **Hot**: Always loaded into agent context automatically
+- **Warm**: Searchable on-demand during conversations
+- **Cold**: Archived, rarely accessed, maintained for compliance
 
 ### Role-Based Access Control
 Access control is implemented at the route level with helper functions that check workspace membership and required roles before allowing operations.
