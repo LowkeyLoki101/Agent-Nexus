@@ -17,6 +17,9 @@ import WorkspaceNew from "@/pages/workspace-new";
 import WorkspaceDetail from "@/pages/workspace-detail";
 import Agents from "@/pages/agents";
 import AgentNew from "@/pages/agent-new";
+import Briefings from "@/pages/briefings";
+import BriefingNew from "@/pages/briefing-new";
+import BriefingDetail from "@/pages/briefing-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
 import NotFound from "@/pages/not-found";
@@ -56,6 +59,9 @@ function AuthenticatedRouter() {
         <Route path="/workspaces/:slug/agents/new" component={AgentNew} />
         <Route path="/agents" component={Agents} />
         <Route path="/agents/new" component={AgentNew} />
+        <Route path="/briefings" component={Briefings} />
+        <Route path="/briefings/new" component={BriefingNew} />
+        <Route path="/briefings/:id" component={BriefingDetail} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />

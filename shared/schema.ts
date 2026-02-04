@@ -8,6 +8,9 @@ export * from "./models/auth";
 export const memberRoleEnum = pgEnum("member_role", ["owner", "admin", "member", "viewer"]);
 export const entityTypeEnum = pgEnum("entity_type", ["human", "agent"]);
 export const tokenStatusEnum = pgEnum("token_status", ["active", "revoked", "expired"]);
+export const briefingStatusEnum = pgEnum("briefing_status", ["draft", "published", "archived"]);
+export const briefingPriorityEnum = pgEnum("briefing_priority", ["low", "medium", "high", "urgent"]);
+
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
   "workspace_updated",
@@ -21,6 +24,9 @@ export const auditActionEnum = pgEnum("audit_action", [
   "token_revoked",
   "content_published",
   "permission_changed",
+  "briefing_created",
+  "briefing_updated",
+  "briefing_deleted",
   "login",
   "logout"
 ]);
@@ -129,6 +135,27 @@ export const auditLogRelations = relations(auditLogs, ({ one }) => ({
   }),
 }));
 
+export const briefings = pgTable("briefings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  summary: text("summary"),
+  status: briefingStatusEnum("status").notNull().default("draft"),
+  priority: briefingPriorityEnum("priority").notNull().default("medium"),
+  tags: text("tags").array(),
+  createdById: varchar("created_by_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const briefingRelations = relations(briefings, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [briefings.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,
   createdAt: true,
@@ -156,6 +183,12 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
   createdAt: true,
 });
 
+export const insertBriefingSchema = createInsertSchema(briefings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
@@ -166,3 +199,5 @@ export type ApiToken = typeof apiTokens.$inferSelect;
 export type InsertApiToken = z.infer<typeof insertApiTokenSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type Briefing = typeof briefings.$inferSelect;
+export type InsertBriefing = z.infer<typeof insertBriefingSchema>;

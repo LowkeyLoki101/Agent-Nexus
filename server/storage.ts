@@ -1,9 +1,10 @@
-import { 
-  workspaces, 
-  workspaceMembers, 
-  agents, 
-  apiTokens, 
+import {
+  workspaces,
+  workspaceMembers,
+  agents,
+  apiTokens,
   auditLogs,
+  briefings,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -13,7 +14,9 @@ import {
   type ApiToken,
   type InsertApiToken,
   type AuditLog,
-  type InsertAuditLog
+  type InsertAuditLog,
+  type Briefing,
+  type InsertBriefing
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
@@ -50,6 +53,14 @@ export interface IStorage {
   getAuditLogsByWorkspace(workspaceId: string, limit?: number): Promise<AuditLog[]>;
   getAuditLogsByUser(userId: string, limit?: number): Promise<AuditLog[]>;
   getRecentAuditLogs(userId: string, limit?: number): Promise<AuditLog[]>;
+
+  getBriefing(id: string): Promise<Briefing | undefined>;
+  getBriefingsByWorkspace(workspaceId: string): Promise<Briefing[]>;
+  getBriefingsByUser(userId: string): Promise<Briefing[]>;
+  getRecentBriefings(userId: string, limit?: number): Promise<Briefing[]>;
+  createBriefing(briefing: InsertBriefing): Promise<Briefing>;
+  updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined>;
+  deleteBriefing(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -223,6 +234,54 @@ export class DatabaseStorage implements IStorage {
       .where(eq(auditLogs.userId, userId))
       .orderBy(desc(auditLogs.createdAt))
       .limit(limit);
+  }
+
+  async getBriefing(id: string): Promise<Briefing | undefined> {
+    const [briefing] = await db.select().from(briefings).where(eq(briefings.id, id));
+    return briefing;
+  }
+
+  async getBriefingsByWorkspace(workspaceId: string): Promise<Briefing[]> {
+    return db
+      .select()
+      .from(briefings)
+      .where(eq(briefings.workspaceId, workspaceId))
+      .orderBy(desc(briefings.createdAt));
+  }
+
+  async getBriefingsByUser(userId: string): Promise<Briefing[]> {
+    return db
+      .select()
+      .from(briefings)
+      .where(eq(briefings.createdById, userId))
+      .orderBy(desc(briefings.createdAt));
+  }
+
+  async getRecentBriefings(userId: string, limit = 10): Promise<Briefing[]> {
+    return db
+      .select()
+      .from(briefings)
+      .where(eq(briefings.createdById, userId))
+      .orderBy(desc(briefings.createdAt))
+      .limit(limit);
+  }
+
+  async createBriefing(briefing: InsertBriefing): Promise<Briefing> {
+    const [created] = await db.insert(briefings).values(briefing).returning();
+    return created;
+  }
+
+  async updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined> {
+    const [updated] = await db
+      .update(briefings)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(briefings.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteBriefing(id: string): Promise<void> {
+    await db.delete(briefings).where(eq(briefings.id, id));
   }
 }
 
