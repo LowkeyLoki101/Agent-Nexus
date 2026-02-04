@@ -20,6 +20,9 @@ import AgentNew from "@/pages/agent-new";
 import Briefings from "@/pages/briefings";
 import BriefingNew from "@/pages/briefing-new";
 import BriefingDetail from "@/pages/briefing-detail";
+import Conversations from "@/pages/conversations";
+import ConversationNew from "@/pages/conversation-new";
+import ConversationDetail from "@/pages/conversation-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
 import NotFound from "@/pages/not-found";
@@ -62,6 +65,9 @@ function AuthenticatedRouter() {
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
+        <Route path="/conversations" component={Conversations} />
+        <Route path="/conversations/new" component={ConversationNew} />
+        <Route path="/conversations/:id" component={ConversationDetail} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />

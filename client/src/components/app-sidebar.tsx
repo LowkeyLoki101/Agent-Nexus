@@ -27,6 +27,7 @@ import {
   Key,
   FileText,
   ClipboardList,
+  MessageSquare,
   Settings,
   LogOut,
   ChevronUp,
@@ -43,6 +44,11 @@ const mainNavItems = [
     title: "Studios",
     url: "/workspaces",
     icon: Building2,
+  },
+  {
+    title: "Conversations",
+    url: "/conversations",
+    icon: MessageSquare,
   },
   {
     title: "Briefings",
