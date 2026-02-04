@@ -10,6 +10,8 @@ export const entityTypeEnum = pgEnum("entity_type", ["human", "agent"]);
 export const tokenStatusEnum = pgEnum("token_status", ["active", "revoked", "expired"]);
 export const briefingStatusEnum = pgEnum("briefing_status", ["draft", "published", "archived"]);
 export const briefingPriorityEnum = pgEnum("briefing_priority", ["low", "medium", "high", "urgent"]);
+export const conversationStatusEnum = pgEnum("conversation_status", ["active", "paused", "completed"]);
+export const messageRoleEnum = pgEnum("message_role", ["user", "assistant", "system"]);
 
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
@@ -156,6 +158,50 @@ export const briefingRelations = relations(briefings, ({ one }) => ({
   }),
 }));
 
+export const conversations = pgTable("conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: conversationStatusEnum("status").notNull().default("active"),
+  mode: text("mode").default("chat"),
+  participantAgentIds: text("participant_agent_ids").array(),
+  systemPrompt: text("system_prompt"),
+  createdById: varchar("created_by_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const conversationRelations = relations(conversations, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [conversations.workspaceId],
+    references: [workspaces.id],
+  }),
+  messages: many(messages),
+}));
+
+export const messages = pgTable("messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  role: messageRoleEnum("role").notNull(),
+  content: text("content").notNull(),
+  agentName: text("agent_name"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const messageRelations = relations(messages, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [messages.conversationId],
+    references: [conversations.id],
+  }),
+  agent: one(agents, {
+    fields: [messages.agentId],
+    references: [agents.id],
+  }),
+}));
+
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,
   createdAt: true,
@@ -189,6 +235,17 @@ export const insertBriefingSchema = createInsertSchema(briefings).omit({
   updatedAt: true,
 });
 
+export const insertConversationSchema = createInsertSchema(conversations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMessageSchema = createInsertSchema(messages).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
@@ -201,3 +258,7 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type Briefing = typeof briefings.$inferSelect;
 export type InsertBriefing = z.infer<typeof insertBriefingSchema>;
+export type Conversation = typeof conversations.$inferSelect;
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
