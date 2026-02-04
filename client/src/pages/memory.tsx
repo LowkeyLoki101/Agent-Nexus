@@ -78,20 +78,20 @@ export default function Memory() {
     content: "",
   });
 
-  const { data: workspaces, isLoading: loadingWorkspaces } = useQuery<Workspace[]>({
+  const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
   });
 
   const firstWorkspace = workspaces?.[0];
 
   const { data: memories, isLoading: loadingMemories } = useQuery<MemoryEntry[]>({
-    queryKey: ["/api/workspaces", firstWorkspace?.slug, "memory", selectedTier !== "all" ? selectedTier : undefined],
-    enabled: !!firstWorkspace?.slug,
+    queryKey: ["/api/memory", selectedTier !== "all" ? selectedTier : undefined],
   });
 
   const searchMutation = useMutation({
     mutationFn: async (query: string): Promise<{ entries: MemoryEntry[]; summary?: string }> => {
-      const res = await apiRequest("POST", `/api/workspaces/${firstWorkspace?.slug}/memory/search`, {
+      if (!firstWorkspace) throw new Error("No workspace");
+      const res = await apiRequest("POST", `/api/workspaces/${firstWorkspace.slug}/memory/search`, {
         query,
         summarize: true,
       });
@@ -104,10 +104,11 @@ export default function Memory() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof newEntry) => {
-      return apiRequest("POST", `/api/workspaces/${firstWorkspace?.slug}/memory`, data);
+      if (!firstWorkspace) throw new Error("No workspace");
+      return apiRequest("POST", `/api/workspaces/${firstWorkspace.slug}/memory`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspaces", firstWorkspace?.slug, "memory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/memory"] });
       toast({ title: "Memory created" });
       setNewEntryOpen(false);
       setNewEntry({ type: "fact", tier: "warm", title: "", content: "" });
@@ -122,7 +123,7 @@ export default function Memory() {
       await apiRequest("DELETE", `/api/memory/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspaces", firstWorkspace?.slug, "memory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/memory"] });
       toast({ title: "Memory deleted" });
     },
   });
@@ -132,7 +133,7 @@ export default function Memory() {
       return apiRequest("PATCH", `/api/memory/${id}`, { tier: "hot" });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspaces", firstWorkspace?.slug, "memory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/memory"] });
       toast({ title: "Memory promoted to hot tier" });
     },
   });
@@ -142,7 +143,7 @@ export default function Memory() {
       return apiRequest("PATCH", `/api/memory/${id}`, { tier: "cold" });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspaces", firstWorkspace?.slug, "memory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/memory"] });
       toast({ title: "Memory archived to cold tier" });
     },
   });
@@ -153,7 +154,7 @@ export default function Memory() {
       return res.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspaces", firstWorkspace?.slug, "memory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/memory"] });
       toast({ 
         title: "Maintenance complete",
         description: `Archived: ${data.archived}, Promoted: ${data.promoted}`
@@ -171,7 +172,7 @@ export default function Memory() {
     selectedTier === "all" || m.tier === selectedTier
   );
 
-  if (loadingWorkspaces || loadingMemories) {
+  if (loadingMemories) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />

@@ -931,6 +931,32 @@ export async function registerRoutes(
     }
   });
 
+  // Get all gifts across all workspaces user has access to
+  app.get("/api/gifts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      
+      const allGifts: any[] = [];
+      for (const workspace of workspaces) {
+        const gifts = await storage.getGiftsByWorkspace(workspace.id);
+        allGifts.push(...gifts);
+      }
+      
+      // Sort by createdAt descending
+      allGifts.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      
+      res.json(allGifts);
+    } catch (error) {
+      console.error("Error fetching all gifts:", error);
+      res.status(500).json({ message: "Failed to fetch gifts" });
+    }
+  });
+
   app.get("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -1015,6 +1041,33 @@ export async function registerRoutes(
   });
 
   // ============ MEMORY ============
+
+  // Get all memory entries across all workspaces user has access to
+  app.get("/api/memory", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { tier } = req.query;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      
+      const allEntries: any[] = [];
+      for (const workspace of workspaces) {
+        const entries = await storage.getMemoryEntriesByWorkspace(workspace.id, tier as string | undefined);
+        allEntries.push(...entries);
+      }
+      
+      // Sort by createdAt descending
+      allEntries.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      
+      res.json(allEntries);
+    } catch (error) {
+      console.error("Error fetching all memory:", error);
+      res.status(500).json({ message: "Failed to fetch memory" });
+    }
+  });
 
   app.get("/api/workspaces/:slug/memory", isAuthenticated, async (req: any, res) => {
     try {
