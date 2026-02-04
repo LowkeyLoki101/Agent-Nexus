@@ -28,6 +28,8 @@ import {
   FileText,
   ClipboardList,
   MessageSquare,
+  Gift,
+  Brain,
   Settings,
   LogOut,
   ChevronUp,
@@ -54,6 +56,16 @@ const mainNavItems = [
     title: "Briefings",
     url: "/briefings",
     icon: ClipboardList,
+  },
+  {
+    title: "Gifts",
+    url: "/gifts",
+    icon: Gift,
+  },
+  {
+    title: "Memory",
+    url: "/memory",
+    icon: Brain,
   },
   {
     title: "Agents",
