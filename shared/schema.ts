@@ -12,6 +12,10 @@ export const briefingStatusEnum = pgEnum("briefing_status", ["draft", "published
 export const briefingPriorityEnum = pgEnum("briefing_priority", ["low", "medium", "high", "urgent"]);
 export const conversationStatusEnum = pgEnum("conversation_status", ["active", "paused", "completed"]);
 export const messageRoleEnum = pgEnum("message_role", ["user", "assistant", "system"]);
+export const giftTypeEnum = pgEnum("gift_type", ["pdf", "slides", "document", "code", "image", "data"]);
+export const giftStatusEnum = pgEnum("gift_status", ["generating", "ready", "failed"]);
+export const memoryTierEnum = pgEnum("memory_tier", ["hot", "warm", "cold"]);
+export const memoryTypeEnum = pgEnum("memory_type", ["identity", "goal", "fact", "event", "artifact", "summary"]);
 
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
@@ -29,6 +33,10 @@ export const auditActionEnum = pgEnum("audit_action", [
   "briefing_created",
   "briefing_updated",
   "briefing_deleted",
+  "gift_created",
+  "gift_downloaded",
+  "memory_created",
+  "memory_queried",
   "login",
   "logout"
 ]);
@@ -202,6 +210,71 @@ export const messageRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+export const gifts = pgTable("gifts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  conversationId: varchar("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  type: giftTypeEnum("type").notNull(),
+  status: giftStatusEnum("status").notNull().default("generating"),
+  content: text("content"),
+  fileUrl: text("file_url"),
+  fileName: text("file_name"),
+  mimeType: text("mime_type"),
+  sourceData: text("source_data"),
+  tags: text("tags").array(),
+  createdById: varchar("created_by_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const giftRelations = relations(gifts, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [gifts.workspaceId],
+    references: [workspaces.id],
+  }),
+  conversation: one(conversations, {
+    fields: [gifts.conversationId],
+    references: [conversations.id],
+  }),
+  agent: one(agents, {
+    fields: [gifts.agentId],
+    references: [agents.id],
+  }),
+}));
+
+export const memoryEntries = pgTable("memory_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  tier: memoryTierEnum("tier").notNull().default("warm"),
+  type: memoryTypeEnum("type").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  summary: text("summary"),
+  tags: text("tags").array(),
+  sourceId: varchar("source_id"),
+  sourceType: text("source_type"),
+  accessCount: integer("access_count").default(0),
+  lastAccessedAt: timestamp("last_accessed_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const memoryEntryRelations = relations(memoryEntries, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [memoryEntries.workspaceId],
+    references: [workspaces.id],
+  }),
+  agent: one(agents, {
+    fields: [memoryEntries.agentId],
+    references: [agents.id],
+  }),
+}));
+
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,
   createdAt: true,
@@ -246,6 +319,18 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
   createdAt: true,
 });
 
+export const insertGiftSchema = createInsertSchema(gifts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMemoryEntrySchema = createInsertSchema(memoryEntries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
@@ -262,3 +347,7 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type Gift = typeof gifts.$inferSelect;
+export type InsertGift = z.infer<typeof insertGiftSchema>;
+export type MemoryEntry = typeof memoryEntries.$inferSelect;
+export type InsertMemoryEntry = z.infer<typeof insertMemoryEntrySchema>;
