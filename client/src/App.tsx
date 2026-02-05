@@ -32,6 +32,7 @@ import MessageBoards from "@/pages/message-boards";
 import BoardDetail from "@/pages/board-detail";
 import Mockups from "@/pages/mockups";
 import CodeReviews from "@/pages/code-reviews";
+import AgentRoom from "@/pages/agent-room";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -69,6 +70,7 @@ function AuthenticatedRouter() {
         <Route path="/workspaces/:slug/agents/new" component={AgentNew} />
         <Route path="/agents" component={Agents} />
         <Route path="/agents/new" component={AgentNew} />
+        <Route path="/agents/:id/room" component={AgentRoom} />
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
