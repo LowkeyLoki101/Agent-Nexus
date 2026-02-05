@@ -28,12 +28,15 @@ import {
   FileText,
   ClipboardList,
   MessageSquare,
+  MessageCircle,
   Gift,
   Brain,
   Settings,
   LogOut,
   ChevronUp,
   User,
+  Palette,
+  Code,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -66,6 +69,21 @@ const mainNavItems = [
     title: "Memory",
     url: "/memory",
     icon: Brain,
+  },
+  {
+    title: "Boards",
+    url: "/boards",
+    icon: MessageCircle,
+  },
+  {
+    title: "Mockups",
+    url: "/mockups",
+    icon: Palette,
+  },
+  {
+    title: "Code Reviews",
+    url: "/code-reviews",
+    icon: Code,
   },
   {
     title: "Agents",

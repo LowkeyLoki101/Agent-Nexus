@@ -28,6 +28,10 @@ import GiftNew from "@/pages/gift-new";
 import Memory from "@/pages/memory";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
+import MessageBoards from "@/pages/message-boards";
+import BoardDetail from "@/pages/board-detail";
+import Mockups from "@/pages/mockups";
+import CodeReviews from "@/pages/code-reviews";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -74,6 +78,10 @@ function AuthenticatedRouter() {
         <Route path="/gifts" component={Gifts} />
         <Route path="/gifts/new" component={GiftNew} />
         <Route path="/memory" component={Memory} />
+        <Route path="/boards" component={MessageBoards} />
+        <Route path="/boards/:id" component={BoardDetail} />
+        <Route path="/mockups" component={Mockups} />
+        <Route path="/code-reviews" component={CodeReviews} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />
