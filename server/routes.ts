@@ -2,9 +2,18 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
-import { insertWorkspaceSchema, insertAgentSchema } from "@shared/schema";
+import { 
+  insertWorkspaceSchema, 
+  insertAgentSchema, 
+  insertBoardSchema,
+  insertTopicSchema,
+  insertPostSchema,
+  insertMockupSchema,
+  insertCodeReviewSchema,
+} from "@shared/schema";
 import { z } from "zod";
 import { orchestrateConversation, sendSingleMessage } from "./services/relay-orchestrator";
+import agentApiRoutes from "./routes/agent-api";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -1278,6 +1287,396 @@ export async function registerRoutes(
       res.status(500).json({ message: "Failed to run memory maintenance" });
     }
   });
+
+  // =================================
+  // Message Boards Routes
+  // =================================
+  
+  app.get("/api/workspaces/:slug/boards", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const boards = await storage.getBoardsByWorkspace(access.workspaceId);
+      res.json(boards);
+    } catch (error) {
+      console.error("Error fetching boards:", error);
+      res.status(500).json({ message: "Failed to fetch boards" });
+    }
+  });
+
+  const createBoardSchema = insertBoardSchema.pick({
+    name: true,
+    description: true,
+    type: true,
+    isPublic: true,
+  });
+
+  app.post("/api/workspaces/:slug/boards", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin", "member"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createBoardSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const board = await storage.createBoard({
+        workspaceId: access.workspaceId,
+        name: validation.data.name,
+        description: validation.data.description || null,
+        type: validation.data.type || "general",
+        isPublic: validation.data.isPublic || false,
+        createdById: userId,
+      });
+
+      res.status(201).json(board);
+    } catch (error) {
+      console.error("Error creating board:", error);
+      res.status(500).json({ message: "Failed to create board" });
+    }
+  });
+
+  app.get("/api/boards/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const board = await storage.getBoard(id);
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      res.json(board);
+    } catch (error) {
+      console.error("Error fetching board:", error);
+      res.status(500).json({ message: "Failed to fetch board" });
+    }
+  });
+
+  app.get("/api/boards/:id/topics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const board = await storage.getBoard(id);
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const topics = await storage.getTopicsByBoard(id);
+      res.json(topics);
+    } catch (error) {
+      console.error("Error fetching topics:", error);
+      res.status(500).json({ message: "Failed to fetch topics" });
+    }
+  });
+
+  const createTopicSchema = insertTopicSchema.pick({
+    title: true,
+    content: true,
+    type: true,
+  });
+
+  app.post("/api/boards/:id/topics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const board = await storage.getBoard(id);
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createTopicSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const topic = await storage.createTopic({
+        boardId: id,
+        title: validation.data.title,
+        content: validation.data.content || null,
+        type: validation.data.type || "discussion",
+        createdById: userId,
+      });
+
+      res.status(201).json(topic);
+    } catch (error) {
+      console.error("Error creating topic:", error);
+      res.status(500).json({ message: "Failed to create topic" });
+    }
+  });
+
+  app.get("/api/topics/:id/posts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const topic = await storage.getTopic(id);
+      if (!topic) {
+        return res.status(404).json({ message: "Topic not found" });
+      }
+
+      const board = await storage.getBoard(topic.boardId);
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const posts = await storage.getPostsByTopic(id);
+      res.json(posts);
+    } catch (error) {
+      console.error("Error fetching posts:", error);
+      res.status(500).json({ message: "Failed to fetch posts" });
+    }
+  });
+
+  const createPostSchema = insertPostSchema.pick({
+    content: true,
+  });
+
+  app.post("/api/topics/:id/posts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const topic = await storage.getTopic(id);
+      if (!topic) {
+        return res.status(404).json({ message: "Topic not found" });
+      }
+
+      const board = await storage.getBoard(topic.boardId);
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createPostSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const post = await storage.createPost({
+        topicId: id,
+        content: validation.data.content,
+        createdById: userId,
+      });
+
+      res.status(201).json(post);
+    } catch (error) {
+      console.error("Error creating post:", error);
+      res.status(500).json({ message: "Failed to create post" });
+    }
+  });
+
+  // =================================
+  // Mockups Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/mockups", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const mockups = await storage.getMockupsByWorkspace(access.workspaceId);
+      res.json(mockups);
+    } catch (error) {
+      console.error("Error fetching mockups:", error);
+      res.status(500).json({ message: "Failed to fetch mockups" });
+    }
+  });
+
+  const createMockupSchema = insertMockupSchema.pick({
+    title: true,
+    description: true,
+    html: true,
+    css: true,
+    javascript: true,
+  });
+
+  app.post("/api/workspaces/:slug/mockups", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin", "member"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createMockupSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const mockup = await storage.createMockup({
+        workspaceId: access.workspaceId,
+        title: validation.data.title,
+        description: validation.data.description || null,
+        html: validation.data.html,
+        css: validation.data.css || null,
+        javascript: validation.data.javascript || null,
+        createdById: userId,
+      });
+
+      res.status(201).json(mockup);
+    } catch (error) {
+      console.error("Error creating mockup:", error);
+      res.status(500).json({ message: "Failed to create mockup" });
+    }
+  });
+
+  app.delete("/api/mockups/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const mockup = await storage.getMockup(id);
+      if (!mockup) {
+        return res.status(404).json({ message: "Mockup not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, mockup.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      await storage.deleteMockup(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting mockup:", error);
+      res.status(500).json({ message: "Failed to delete mockup" });
+    }
+  });
+
+  // =================================
+  // Code Reviews Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/code-reviews", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const reviews = await storage.getCodeReviewsByWorkspace(access.workspaceId);
+      res.json(reviews);
+    } catch (error) {
+      console.error("Error fetching code reviews:", error);
+      res.status(500).json({ message: "Failed to fetch code reviews" });
+    }
+  });
+
+  const createCodeReviewSchema = insertCodeReviewSchema.pick({
+    title: true,
+    description: true,
+    code: true,
+    language: true,
+    githubUrl: true,
+  });
+
+  app.post("/api/workspaces/:slug/code-reviews", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin", "member"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createCodeReviewSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const review = await storage.createCodeReview({
+        workspaceId: access.workspaceId,
+        title: validation.data.title,
+        description: validation.data.description || null,
+        code: validation.data.code,
+        language: validation.data.language || null,
+        githubUrl: validation.data.githubUrl || null,
+        createdById: userId,
+        status: "pending",
+      });
+
+      res.status(201).json(review);
+    } catch (error) {
+      console.error("Error creating code review:", error);
+      res.status(500).json({ message: "Failed to create code review" });
+    }
+  });
+
+  app.get("/api/code-reviews/:id/comments", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const review = await storage.getCodeReview(id);
+      if (!review) {
+        return res.status(404).json({ message: "Code review not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, review.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const comments = await storage.getReviewCommentsByReview(id);
+      res.json(comments);
+    } catch (error) {
+      console.error("Error fetching review comments:", error);
+      res.status(500).json({ message: "Failed to fetch review comments" });
+    }
+  });
+
+  // Agent API routes (autonomous agent operations via API tokens)
+  app.use("/api/agent", agentApiRoutes);
 
   return httpServer;
 }

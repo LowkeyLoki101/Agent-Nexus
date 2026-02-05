@@ -17,6 +17,12 @@ export const giftStatusEnum = pgEnum("gift_status", ["generating", "ready", "fai
 export const memoryTierEnum = pgEnum("memory_tier", ["hot", "warm", "cold"]);
 export const memoryTypeEnum = pgEnum("memory_type", ["identity", "goal", "fact", "event", "artifact", "summary"]);
 
+export const boardTypeEnum = pgEnum("board_type", ["general", "research", "code_review", "creative", "learning"]);
+export const postTypeEnum = pgEnum("post_type", ["discussion", "link", "file", "code", "research", "mockup"]);
+export const voteTypeEnum = pgEnum("vote_type", ["upvote", "downvote"]);
+export const reviewStatusEnum = pgEnum("review_status", ["pending", "approved", "rejected", "needs_revision"]);
+export const mockupStatusEnum = pgEnum("mockup_status", ["draft", "published", "archived"]);
+
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
   "workspace_updated",
@@ -275,6 +281,259 @@ export const memoryEntryRelations = relations(memoryEntries, ({ one }) => ({
   }),
 }));
 
+// Message Boards for agent discussions
+export const boards = pgTable("boards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  type: boardTypeEnum("type").notNull().default("general"),
+  isPublic: boolean("is_public").default(false),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const boardRelations = relations(boards, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [boards.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [boards.createdByAgentId],
+    references: [agents.id],
+  }),
+  topics: many(topics),
+}));
+
+// Topics within boards
+export const topics = pgTable("topics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  boardId: varchar("board_id").notNull().references(() => boards.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  content: text("content"),
+  type: postTypeEnum("type").notNull().default("discussion"),
+  isPinned: boolean("is_pinned").default(false),
+  isLocked: boolean("is_locked").default(false),
+  viewCount: integer("view_count").default(0),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const topicRelations = relations(topics, ({ one, many }) => ({
+  board: one(boards, {
+    fields: [topics.boardId],
+    references: [boards.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [topics.createdByAgentId],
+    references: [agents.id],
+  }),
+  posts: many(posts),
+  attachments: many(attachments),
+}));
+
+// Posts (replies) within topics
+export const posts = pgTable("posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  topicId: varchar("topic_id").notNull().references(() => topics.id, { onDelete: "cascade" }),
+  parentId: varchar("parent_id"),
+  content: text("content").notNull(),
+  aiModel: text("ai_model"),
+  aiProvider: text("ai_provider"),
+  upvotes: integer("upvotes").default(0),
+  downvotes: integer("downvotes").default(0),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const postRelations = relations(posts, ({ one, many }) => ({
+  topic: one(topics, {
+    fields: [posts.topicId],
+    references: [topics.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [posts.createdByAgentId],
+    references: [agents.id],
+  }),
+  votes: many(votes),
+  attachments: many(attachments),
+}));
+
+// Votes on posts (multi-model peer review)
+export const votes = pgTable("votes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => posts.id, { onDelete: "cascade" }),
+  voteType: voteTypeEnum("vote_type").notNull(),
+  reason: text("reason"),
+  aiModel: text("ai_model"),
+  aiProvider: text("ai_provider"),
+  voterId: varchar("voter_id").notNull(),
+  voterAgentId: varchar("voter_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const voteRelations = relations(votes, ({ one }) => ({
+  post: one(posts, {
+    fields: [votes.postId],
+    references: [posts.id],
+  }),
+  voterAgent: one(agents, {
+    fields: [votes.voterAgentId],
+    references: [agents.id],
+  }),
+}));
+
+// Attachments (files, links, code snippets)
+export const attachments = pgTable("attachments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  topicId: varchar("topic_id").references(() => topics.id, { onDelete: "cascade" }),
+  postId: varchar("post_id").references(() => posts.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  url: text("url"),
+  content: text("content"),
+  metadata: text("metadata"),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const attachmentRelations = relations(attachments, ({ one }) => ({
+  topic: one(topics, {
+    fields: [attachments.topicId],
+    references: [topics.id],
+  }),
+  post: one(posts, {
+    fields: [attachments.postId],
+    references: [posts.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [attachments.createdByAgentId],
+    references: [agents.id],
+  }),
+}));
+
+// Code reviews with multi-model voting
+export const codeReviews = pgTable("code_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  code: text("code").notNull(),
+  language: text("language"),
+  githubUrl: text("github_url"),
+  status: reviewStatusEnum("status").notNull().default("pending"),
+  approvalCount: integer("approval_count").default(0),
+  rejectionCount: integer("rejection_count").default(0),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const codeReviewRelations = relations(codeReviews, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [codeReviews.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [codeReviews.createdByAgentId],
+    references: [agents.id],
+  }),
+  reviewComments: many(reviewComments),
+}));
+
+// Review comments from multiple AI models
+export const reviewComments = pgTable("review_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reviewId: varchar("review_id").notNull().references(() => codeReviews.id, { onDelete: "cascade" }),
+  lineStart: integer("line_start"),
+  lineEnd: integer("line_end"),
+  comment: text("comment").notNull(),
+  suggestion: text("suggestion"),
+  severity: text("severity"),
+  aiModel: text("ai_model"),
+  aiProvider: text("ai_provider"),
+  isApproval: boolean("is_approval").default(false),
+  reviewerId: varchar("reviewer_id").notNull(),
+  reviewerAgentId: varchar("reviewer_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const reviewCommentRelations = relations(reviewComments, ({ one }) => ({
+  review: one(codeReviews, {
+    fields: [reviewComments.reviewId],
+    references: [codeReviews.id],
+  }),
+  reviewerAgent: one(agents, {
+    fields: [reviewComments.reviewerAgentId],
+    references: [agents.id],
+  }),
+}));
+
+// HTML Mockups for creative design
+export const mockups = pgTable("mockups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  html: text("html").notNull(),
+  css: text("css"),
+  javascript: text("javascript"),
+  status: mockupStatusEnum("status").notNull().default("draft"),
+  previewUrl: text("preview_url"),
+  tags: text("tags").array(),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const mockupRelations = relations(mockups, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [mockups.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [mockups.createdByAgentId],
+    references: [agents.id],
+  }),
+}));
+
+// External integrations cache (GitHub, YouTube transcripts, web research)
+export const externalCache = pgTable("external_cache", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  sourceId: text("source_id").notNull(),
+  sourceUrl: text("source_url"),
+  title: text("title"),
+  content: text("content"),
+  metadata: text("metadata"),
+  expiresAt: timestamp("expires_at"),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const externalCacheRelations = relations(externalCache, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [externalCache.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [externalCache.createdByAgentId],
+    references: [agents.id],
+  }),
+}));
+
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,
   createdAt: true,
@@ -331,6 +590,57 @@ export const insertMemoryEntrySchema = createInsertSchema(memoryEntries).omit({
   updatedAt: true,
 });
 
+export const insertBoardSchema = createInsertSchema(boards).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertTopicSchema = createInsertSchema(topics).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPostSchema = createInsertSchema(posts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertVoteSchema = createInsertSchema(votes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAttachmentSchema = createInsertSchema(attachments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCodeReviewSchema = createInsertSchema(codeReviews).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertReviewCommentSchema = createInsertSchema(reviewComments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertMockupSchema = createInsertSchema(mockups).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertExternalCacheSchema = createInsertSchema(externalCache).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
@@ -351,3 +661,21 @@ export type Gift = typeof gifts.$inferSelect;
 export type InsertGift = z.infer<typeof insertGiftSchema>;
 export type MemoryEntry = typeof memoryEntries.$inferSelect;
 export type InsertMemoryEntry = z.infer<typeof insertMemoryEntrySchema>;
+export type Board = typeof boards.$inferSelect;
+export type InsertBoard = z.infer<typeof insertBoardSchema>;
+export type Topic = typeof topics.$inferSelect;
+export type InsertTopic = z.infer<typeof insertTopicSchema>;
+export type Post = typeof posts.$inferSelect;
+export type InsertPost = z.infer<typeof insertPostSchema>;
+export type Vote = typeof votes.$inferSelect;
+export type InsertVote = z.infer<typeof insertVoteSchema>;
+export type Attachment = typeof attachments.$inferSelect;
+export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
+export type CodeReview = typeof codeReviews.$inferSelect;
+export type InsertCodeReview = z.infer<typeof insertCodeReviewSchema>;
+export type ReviewComment = typeof reviewComments.$inferSelect;
+export type InsertReviewComment = z.infer<typeof insertReviewCommentSchema>;
+export type Mockup = typeof mockups.$inferSelect;
+export type InsertMockup = z.infer<typeof insertMockupSchema>;
+export type ExternalCache = typeof externalCache.$inferSelect;
+export type InsertExternalCache = z.infer<typeof insertExternalCacheSchema>;

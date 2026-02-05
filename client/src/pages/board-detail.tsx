@@ -1,0 +1,320 @@
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useParams, Link } from "wouter";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Plus, MessageSquare, Eye, Pin, Lock, ThumbsUp, ThumbsDown, User, Bot } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import type { Board, Topic, Post, Workspace } from "@shared/schema";
+import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+export default function BoardDetail() {
+  const { id } = useParams();
+  const { toast } = useToast();
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+  const [newTopicOpen, setNewTopicOpen] = useState(false);
+  const [newTopic, setNewTopic] = useState({
+    title: "",
+    content: "",
+    type: "discussion" as const,
+  });
+  const [newPost, setNewPost] = useState("");
+
+  const { data: workspaces } = useQuery<Workspace[]>({
+    queryKey: ["/api/workspaces"],
+  });
+  const firstWorkspace = workspaces?.[0];
+
+  const { data: board, isLoading: loadingBoard } = useQuery<Board>({
+    queryKey: ["/api/boards", id],
+    enabled: !!id,
+  });
+
+  const { data: topics, isLoading: loadingTopics } = useQuery<Topic[]>({
+    queryKey: ["/api/boards", id, "topics"],
+    enabled: !!id,
+  });
+
+  const { data: posts, isLoading: loadingPosts } = useQuery<Post[]>({
+    queryKey: ["/api/topics", selectedTopic, "posts"],
+    enabled: !!selectedTopic,
+  });
+
+  const createTopicMutation = useMutation({
+    mutationFn: async (data: typeof newTopic) => {
+      return apiRequest("POST", `/api/boards/${id}/topics`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/boards", id, "topics"] });
+      toast({ title: "Topic created" });
+      setNewTopicOpen(false);
+      setNewTopic({ title: "", content: "", type: "discussion" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create topic", variant: "destructive" });
+    },
+  });
+
+  const createPostMutation = useMutation({
+    mutationFn: async (content: string) => {
+      return apiRequest("POST", `/api/topics/${selectedTopic}/posts`, { content });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/topics", selectedTopic, "posts"] });
+      toast({ title: "Reply posted" });
+      setNewPost("");
+    },
+    onError: () => {
+      toast({ title: "Failed to post reply", variant: "destructive" });
+    },
+  });
+
+  if (loadingBoard) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (!board) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold">Board not found</h1>
+        <Link href="/boards">
+          <Button variant="outline">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Boards
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
+  const currentTopic = topics?.find(t => t.id === selectedTopic);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <Link href="/boards">
+          <Button variant="ghost" size="icon" data-testid="button-back-boards">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold" data-testid="text-board-name">{board.name}</h1>
+          <p className="text-muted-foreground">{board.description}</p>
+        </div>
+        <Dialog open={newTopicOpen} onOpenChange={setNewTopicOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-new-topic">
+              <Plus className="mr-2 h-4 w-4" />
+              New Topic
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create Topic</DialogTitle>
+              <DialogDescription>Start a new discussion in this board</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Input
+                placeholder="Topic title"
+                value={newTopic.title}
+                onChange={(e) => setNewTopic({ ...newTopic, title: e.target.value })}
+                data-testid="input-topic-title"
+              />
+              <Textarea
+                placeholder="Topic content (optional)"
+                value={newTopic.content}
+                onChange={(e) => setNewTopic({ ...newTopic, content: e.target.value })}
+                data-testid="input-topic-content"
+              />
+              <Select
+                value={newTopic.type}
+                onValueChange={(value: any) => setNewTopic({ ...newTopic, type: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Topic type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="discussion">Discussion</SelectItem>
+                  <SelectItem value="link">Link</SelectItem>
+                  <SelectItem value="file">File</SelectItem>
+                  <SelectItem value="code">Code</SelectItem>
+                  <SelectItem value="research">Research</SelectItem>
+                  <SelectItem value="mockup">Mockup</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={() => createTopicMutation.mutate(newTopic)}
+                disabled={!newTopic.title || createTopicMutation.isPending}
+                data-testid="button-submit-topic"
+              >
+                Create Topic
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-1 space-y-4">
+          <h2 className="font-semibold">Topics</h2>
+          {loadingTopics ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-20" />
+              ))}
+            </div>
+          ) : !topics || topics.length === 0 ? (
+            <Card className="p-6 text-center text-muted-foreground">
+              <MessageSquare className="h-8 w-8 mx-auto mb-2" />
+              <p>No topics yet</p>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {topics.map((topic) => (
+                <Card
+                  key={topic.id}
+                  className={`cursor-pointer hover-elevate ${selectedTopic === topic.id ? "ring-2 ring-primary" : ""}`}
+                  onClick={() => setSelectedTopic(topic.id)}
+                  data-testid={`card-topic-${topic.id}`}
+                >
+                  <CardHeader className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-sm font-medium line-clamp-2">
+                        {topic.isPinned && <Pin className="h-3 w-3 inline mr-1" />}
+                        {topic.isLocked && <Lock className="h-3 w-3 inline mr-1" />}
+                        {topic.title}
+                      </CardTitle>
+                      <Badge variant="outline" className="shrink-0">
+                        {topic.type}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Eye className="h-3 w-3" />
+                      {topic.viewCount || 0}
+                      <span>•</span>
+                      {new Date(topic.createdAt!).toLocaleDateString()}
+                    </div>
+                  </CardHeader>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="lg:col-span-2">
+          {!selectedTopic ? (
+            <Card className="p-12 text-center text-muted-foreground">
+              <MessageSquare className="h-12 w-12 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Select a Topic</h3>
+              <p>Choose a topic from the list to view the discussion</p>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>{currentTopic?.title}</CardTitle>
+                <CardDescription>
+                  {currentTopic?.content || "No description"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingPosts ? (
+                  <div className="space-y-2">
+                    {[1, 2].map((i) => (
+                      <Skeleton key={i} className="h-24" />
+                    ))}
+                  </div>
+                ) : !posts || posts.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    <p>No replies yet. Be the first to respond!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {posts.map((post) => (
+                      <div key={post.id} className="border rounded-lg p-4" data-testid={`post-${post.id}`}>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            {post.createdByAgentId ? (
+                              <Bot className="h-4 w-4 text-primary" />
+                            ) : (
+                              <User className="h-4 w-4" />
+                            )}
+                            <span className="text-sm font-medium">
+                              {post.createdByAgentId ? "Agent" : "Human"}
+                            </span>
+                            {post.aiModel && (
+                              <Badge variant="secondary" className="text-xs">
+                                {post.aiModel}
+                              </Badge>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(post.createdAt!).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{post.content}</p>
+                        <div className="flex items-center gap-4 mt-3 pt-3 border-t">
+                          <Button variant="ghost" size="sm">
+                            <ThumbsUp className="h-4 w-4 mr-1" />
+                            {post.upvotes || 0}
+                          </Button>
+                          <Button variant="ghost" size="sm">
+                            <ThumbsDown className="h-4 w-4 mr-1" />
+                            {post.downvotes || 0}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="pt-4 border-t">
+                  <Textarea
+                    placeholder="Write a reply..."
+                    value={newPost}
+                    onChange={(e) => setNewPost(e.target.value)}
+                    className="mb-2"
+                    data-testid="input-new-post"
+                  />
+                  <Button
+                    onClick={() => createPostMutation.mutate(newPost)}
+                    disabled={!newPost || createPostMutation.isPending}
+                    data-testid="button-submit-post"
+                  >
+                    Post Reply
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
