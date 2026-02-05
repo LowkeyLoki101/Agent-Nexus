@@ -16,7 +16,12 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowLeft, Send, Bot, User, Zap, Loader2, MessageSquare } from "lucide-react";
+import { ArrowLeft, Send, Bot, User, Zap, Loader2, MessageSquare, AlertCircle } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Conversation, Message, Agent } from "@shared/schema";
 
 export default function ConversationDetail() {
@@ -268,64 +273,139 @@ export default function ConversationDetail() {
         </CardContent>
 
         <div className="border-t p-4 shrink-0">
+          {/* Relay mode hint */}
+          {conversation.mode === "relay" && (!messages || messages.length === 0) && (
+            <div className="flex items-start gap-3 mb-4 p-3 bg-primary/10 rounded-lg border border-primary/20">
+              <Zap className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-medium text-foreground">This is a relay conversation</p>
+                <p className="text-muted-foreground">
+                  Type a topic and click <strong>Start Relay</strong> to have all agents discuss it automatically.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2">
-            <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
-              <SelectTrigger className="w-[180px]" data-testid="select-agent">
-                <SelectValue placeholder="Select agent" />
-              </SelectTrigger>
-              <SelectContent>
-                {participantAgents?.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    <div className="flex items-center gap-2">
-                      <Bot className="h-4 w-4" />
-                      {agent.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {conversation.mode === "relay" ? (
+              <>
+                <Input
+                  placeholder="Enter a topic for agents to discuss..."
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleOrchestrate();
+                    }
+                  }}
+                  className="flex-1"
+                  data-testid="input-message"
+                />
 
-            <Input
-              placeholder="Type your message..."
-              value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              className="flex-1"
-              data-testid="input-message"
-            />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleOrchestrate}
+                      disabled={!messageInput.trim() || orchestrateMutation.isPending}
+                      className="gap-2"
+                      data-testid="button-orchestrate"
+                    >
+                      {orchestrateMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Zap className="h-4 w-4" />
+                      )}
+                      Start Relay
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>All agents will take turns discussing this topic</p>
+                  </TooltipContent>
+                </Tooltip>
 
-            <Button
-              onClick={handleSend}
-              disabled={!messageInput.trim() || !selectedAgentId || sendMutation.isPending}
-              data-testid="button-send"
-            >
-              {sendMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-            </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                        <SelectTrigger className="w-[140px]" data-testid="select-agent">
+                          <SelectValue placeholder="Ask one" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {participantAgents?.map((agent) => (
+                            <SelectItem key={agent.id} value={agent.id}>
+                              <div className="flex items-center gap-2">
+                                <Bot className="h-4 w-4" />
+                                {agent.name}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Or send to just one agent</p>
+                  </TooltipContent>
+                </Tooltip>
 
-            {conversation.mode === "relay" && (
-              <Button
-                variant="secondary"
-                onClick={handleOrchestrate}
-                disabled={!messageInput.trim() || orchestrateMutation.isPending}
-                className="gap-2"
-                data-testid="button-orchestrate"
-              >
-                {orchestrateMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Zap className="h-4 w-4" />
-                )}
-                Auto-Relay
-              </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleSend}
+                  disabled={!messageInput.trim() || !selectedAgentId || sendMutation.isPending}
+                  data-testid="button-send"
+                >
+                  {sendMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                  <SelectTrigger className="w-[180px]" data-testid="select-agent">
+                    <SelectValue placeholder="Select agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {participantAgents?.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-4 w-4" />
+                          {agent.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Input
+                  placeholder="Type your message..."
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  className="flex-1"
+                  data-testid="input-message"
+                />
+
+                <Button
+                  onClick={handleSend}
+                  disabled={!messageInput.trim() || !selectedAgentId || sendMutation.isPending}
+                  data-testid="button-send"
+                >
+                  {sendMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </>
             )}
           </div>
         </div>

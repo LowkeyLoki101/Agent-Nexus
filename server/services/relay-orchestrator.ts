@@ -88,18 +88,26 @@ async function callAnthropic(
   messages: { role: "user" | "assistant"; content: string }[],
   temperature = 0.7
 ): Promise<string> {
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2048,
-    system: systemPrompt,
-    messages: messages.map(m => ({
-      role: m.role,
-      content: m.content,
-    })),
-  });
-  
-  const textBlock = response.content.find(block => block.type === "text");
-  return textBlock ? (textBlock as { type: "text"; text: string }).text : "";
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      })),
+    });
+    
+    const textBlock = response.content.find(block => block.type === "text");
+    return textBlock ? (textBlock as { type: "text"; text: string }).text : "";
+  } catch (error: any) {
+    console.error("Anthropic API error:", error.message);
+    if (error.message?.includes("credit balance")) {
+      throw new Error("Anthropic API credits depleted. Please add credits to your Anthropic account.");
+    }
+    throw new Error(`Anthropic API error: ${error.message || "Unknown error"}`);
+  }
 }
 
 export async function generateAgentResponse(
@@ -205,6 +213,7 @@ export async function orchestrateConversation(
   
   const maxTurns = config.maxTurns || 4;
   const newMessages: Message[] = [];
+  const errors: string[] = [];
   
   const userMessage = await storage.createMessage({
     conversationId,
@@ -216,8 +225,22 @@ export async function orchestrateConversation(
   
   for (let turn = 0; turn < maxTurns; turn++) {
     for (const agent of validAgents) {
-      const message = await runConversationTurn(conversationId, agent.id);
-      newMessages.push(message);
+      try {
+        const message = await runConversationTurn(conversationId, agent.id);
+        newMessages.push(message);
+      } catch (error: any) {
+        console.error(`Error from agent ${agent.name}:`, error.message);
+        // Store error as a system message so user can see what happened
+        const errorMessage = await storage.createMessage({
+          conversationId,
+          role: "assistant",
+          content: `[${agent.name} could not respond: ${error.message}]`,
+          agentId: agent.id,
+          agentName: agent.name,
+        });
+        newMessages.push(errorMessage);
+        errors.push(`${agent.name}: ${error.message}`);
+      }
     }
   }
   
