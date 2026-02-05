@@ -17,6 +17,9 @@ export const giftStatusEnum = pgEnum("gift_status", ["generating", "ready", "fai
 export const memoryTierEnum = pgEnum("memory_tier", ["hot", "warm", "cold"]);
 export const memoryTypeEnum = pgEnum("memory_type", ["identity", "goal", "fact", "event", "artifact", "summary"]);
 
+export const agentProviderEnum = pgEnum("agent_provider", ["openai", "anthropic", "xai"]);
+export const diaryMoodEnum = pgEnum("diary_mood", ["thinking", "dreaming", "wanting", "reflecting", "planning", "creating", "observing"]);
+
 export const boardTypeEnum = pgEnum("board_type", ["general", "research", "code_review", "creative", "learning"]);
 export const postTypeEnum = pgEnum("post_type", ["discussion", "link", "file", "code", "research", "mockup"]);
 export const voteTypeEnum = pgEnum("vote_type", ["upvote", "downvote"]);
@@ -86,6 +89,8 @@ export const agents = pgTable("agents", {
   name: text("name").notNull(),
   description: text("description"),
   avatar: text("avatar"),
+  provider: agentProviderEnum("provider").default("openai"),
+  modelName: text("model_name"),
   isVerified: boolean("is_verified").default(false),
   isActive: boolean("is_active").default(true),
   capabilities: text("capabilities").array(),
@@ -101,6 +106,54 @@ export const agentRelations = relations(agents, ({ one, many }) => ({
     references: [workspaces.id],
   }),
   tokens: many(apiTokens),
+  room: one(agentRooms),
+  diaryEntries: many(diaryEntries),
+}));
+
+export const agentRooms = pgTable("agent_rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }).unique(),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  orientation: text("orientation"),
+  projectStatus: text("project_status"),
+  personalNotes: text("personal_notes"),
+  lastBriefedAt: timestamp("last_briefed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const agentRoomRelations = relations(agentRooms, ({ one, many }) => ({
+  agent: one(agents, {
+    fields: [agentRooms.agentId],
+    references: [agents.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [agentRooms.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const diaryEntries = pgTable("diary_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  mood: diaryMoodEnum("mood").notNull().default("thinking"),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  tags: text("tags").array(),
+  isPrivate: boolean("is_private").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const diaryEntryRelations = relations(diaryEntries, ({ one }) => ({
+  agent: one(agents, {
+    fields: [diaryEntries.agentId],
+    references: [agents.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [diaryEntries.workspaceId],
+    references: [workspaces.id],
+  }),
 }));
 
 export const apiTokens = pgTable("api_tokens", {
@@ -590,6 +643,17 @@ export const insertMemoryEntrySchema = createInsertSchema(memoryEntries).omit({
   updatedAt: true,
 });
 
+export const insertAgentRoomSchema = createInsertSchema(agentRooms).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDiaryEntrySchema = createInsertSchema(diaryEntries).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertBoardSchema = createInsertSchema(boards).omit({
   id: true,
   createdAt: true,
@@ -677,5 +741,9 @@ export type ReviewComment = typeof reviewComments.$inferSelect;
 export type InsertReviewComment = z.infer<typeof insertReviewCommentSchema>;
 export type Mockup = typeof mockups.$inferSelect;
 export type InsertMockup = z.infer<typeof insertMockupSchema>;
+export type AgentRoom = typeof agentRooms.$inferSelect;
+export type InsertAgentRoom = z.infer<typeof insertAgentRoomSchema>;
+export type DiaryEntry = typeof diaryEntries.$inferSelect;
+export type InsertDiaryEntry = z.infer<typeof insertDiaryEntrySchema>;
 export type ExternalCache = typeof externalCache.$inferSelect;
 export type InsertExternalCache = z.infer<typeof insertExternalCacheSchema>;

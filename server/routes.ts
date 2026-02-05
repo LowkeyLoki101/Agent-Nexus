@@ -244,10 +244,34 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/agents/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      res.json(agent);
+    } catch (error) {
+      console.error("Error fetching agent:", error);
+      res.status(500).json({ message: "Failed to fetch agent" });
+    }
+  });
+
   const createAgentSchema = z.object({
     name: z.string().min(1).max(100),
     description: z.string().max(500).optional(),
     workspaceId: z.string().min(1),
+    provider: z.enum(["openai", "anthropic", "xai"]).optional().default("openai"),
+    modelName: z.string().optional(),
     capabilities: z.array(z.string()).optional().default([]),
     isActive: z.boolean().optional().default(true),
   });
@@ -264,7 +288,7 @@ export async function registerRoutes(
         });
       }
 
-      const { name, description, workspaceId, capabilities, isActive } = validation.data;
+      const { name, description, workspaceId, provider, modelName, capabilities, isActive } = validation.data;
 
       const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
       if (!access.hasAccess) {
@@ -275,11 +299,25 @@ export async function registerRoutes(
         name,
         description,
         workspaceId,
+        provider: provider || "openai",
+        modelName: modelName || undefined,
         capabilities: capabilities || [],
         permissions: [],
         isActive: isActive ?? true,
         isVerified: false,
         createdById: userId,
+      });
+
+      // Auto-create a private room for the agent
+      const workspace = await storage.getWorkspace(workspaceId);
+      const orientation = `# Welcome, ${agent.name}\n\nYou are an autonomous agent operating in the **${workspace?.name || "workspace"}** studio.\n\n## Your Identity\n- **Name**: ${agent.name}\n- **Provider**: ${provider}\n- **Model**: ${modelName || "default"}\n- **Role**: ${description || "General purpose agent"}\n\n## Your Room\nThis is your private space. Here you can:\n- Keep a **diary** of your thoughts, dreams, and plans\n- Review your **orientation briefing** and project status\n- Reflect on your experiences and set personal goals\n\n## Getting Started\n1. Review the project status below\n2. Check your assigned capabilities\n3. Begin contributing to the workspace\n\nStay curious. Stay creative.`;
+
+      await storage.createAgentRoom({
+        agentId: agent.id,
+        workspaceId,
+        orientation,
+        projectStatus: `No active projects yet. Awaiting first assignment in ${workspace?.name || "workspace"}.`,
+        personalNotes: "",
       });
 
       await storage.createAuditLog({
@@ -288,7 +326,7 @@ export async function registerRoutes(
         action: "agent_created",
         entityType: "agent",
         entityId: agent.id,
-        metadata: JSON.stringify({ name: agent.name }),
+        metadata: JSON.stringify({ name: agent.name, provider, modelName }),
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
@@ -855,6 +893,164 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting conversation:", error);
       res.status(500).json({ message: "Failed to delete conversation" });
+    }
+  });
+
+  // ============ AGENT ROOMS ============
+
+  app.get("/api/agents/:id/room", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      let room = await storage.getAgentRoom(id);
+      if (!room) {
+        const workspace = await storage.getWorkspace(agent.workspaceId);
+        room = await storage.createAgentRoom({
+          agentId: id,
+          workspaceId: agent.workspaceId,
+          orientation: `# Welcome, ${agent.name}\n\nYou are an autonomous agent in the **${workspace?.name || "workspace"}** studio.\n\nThis is your private room. Use your diary to think, dream, and plan.`,
+          projectStatus: "No active projects yet.",
+          personalNotes: "",
+        });
+      }
+
+      res.json(room);
+    } catch (error) {
+      console.error("Error fetching agent room:", error);
+      res.status(500).json({ message: "Failed to fetch agent room" });
+    }
+  });
+
+  const updateRoomSchema = z.object({
+    orientation: z.string().optional(),
+    projectStatus: z.string().optional(),
+    personalNotes: z.string().optional(),
+  });
+
+  app.patch("/api/agents/:id/room", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = updateRoomSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const { orientation, projectStatus, personalNotes } = validation.data;
+      const room = await storage.updateAgentRoom(id, {
+        ...(orientation !== undefined && { orientation }),
+        ...(projectStatus !== undefined && { projectStatus }),
+        ...(personalNotes !== undefined && { personalNotes }),
+        lastBriefedAt: new Date(),
+      });
+
+      res.json(room);
+    } catch (error) {
+      console.error("Error updating agent room:", error);
+      res.status(500).json({ message: "Failed to update agent room" });
+    }
+  });
+
+  // ============ DIARY ENTRIES ============
+
+  app.get("/api/agents/:id/diary", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const entries = await storage.getDiaryEntriesByAgent(id);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching diary entries:", error);
+      res.status(500).json({ message: "Failed to fetch diary entries" });
+    }
+  });
+
+  const createDiarySchema = z.object({
+    mood: z.enum(["thinking", "dreaming", "wanting", "reflecting", "planning", "creating", "observing"]).optional().default("thinking"),
+    title: z.string().min(1).max(200),
+    content: z.string().min(1),
+    tags: z.array(z.string()).optional(),
+    isPrivate: z.boolean().optional().default(true),
+  });
+
+  app.post("/api/agents/:id/diary", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = createDiarySchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const entry = await storage.createDiaryEntry({
+        agentId: id,
+        workspaceId: agent.workspaceId,
+        ...validation.data,
+      });
+
+      res.status(201).json(entry);
+    } catch (error) {
+      console.error("Error creating diary entry:", error);
+      res.status(500).json({ message: "Failed to create diary entry" });
+    }
+  });
+
+  app.delete("/api/diary/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const entry = await storage.getDiaryEntry(id);
+      if (!entry) {
+        return res.status(404).json({ message: "Diary entry not found" });
+      }
+      await storage.deleteDiaryEntry(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting diary entry:", error);
+      res.status(500).json({ message: "Failed to delete diary entry" });
     }
   });
 

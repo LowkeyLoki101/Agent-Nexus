@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { ArrowLeft, Bot, X } from "lucide-react";
+import { ArrowLeft, Bot, X, Cpu } from "lucide-react";
 import { Link } from "wouter";
 import type { Workspace } from "@shared/schema";
 
@@ -30,6 +30,17 @@ const CAPABILITY_OPTIONS = [
   "analyze",
   "communicate",
   "manage_tokens",
+  "conversation",
+  "creative_writing",
+  "code_assistance",
+  "analysis",
+  "content_generation",
+];
+
+const PROVIDER_OPTIONS = [
+  { value: "openai", label: "OpenAI (ChatGPT)", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"] },
+  { value: "anthropic", label: "Anthropic (Claude)", models: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"] },
+  { value: "xai", label: "xAI (Grok)", models: ["grok-2-1212", "grok-beta"] },
 ];
 
 export default function AgentNew() {
@@ -39,6 +50,8 @@ export default function AgentNew() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
+  const [provider, setProvider] = useState("openai");
+  const [modelName, setModelName] = useState("gpt-4o");
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [newCapability, setNewCapability] = useState("");
@@ -52,6 +65,8 @@ export default function AgentNew() {
       name: string; 
       description: string; 
       workspaceId: string; 
+      provider: string;
+      modelName: string;
       capabilities: string[];
       isActive: boolean;
     }) => {
@@ -59,9 +74,10 @@ export default function AgentNew() {
     },
     onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents/recent"] });
       toast({
         title: "Agent registered",
-        description: `${name} has been registered successfully.`,
+        description: `${name} has been registered and a room has been created.`,
       });
       setLocation("/agents");
     },
@@ -85,6 +101,16 @@ export default function AgentNew() {
     setCapabilities(capabilities.filter((c) => c !== capability));
   };
 
+  const handleProviderChange = (newProvider: string) => {
+    setProvider(newProvider);
+    const providerConfig = PROVIDER_OPTIONS.find(p => p.value === newProvider);
+    if (providerConfig) {
+      setModelName(providerConfig.models[0]);
+    }
+  };
+
+  const currentProviderModels = PROVIDER_OPTIONS.find(p => p.value === provider)?.models || [];
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !workspaceId) {
@@ -95,7 +121,7 @@ export default function AgentNew() {
       });
       return;
     }
-    createMutation.mutate({ name, description, workspaceId, capabilities, isActive });
+    createMutation.mutate({ name, description, workspaceId, provider, modelName, capabilities, isActive });
   };
 
   return (
@@ -111,7 +137,7 @@ export default function AgentNew() {
             Register Agent
           </h1>
           <p className="text-muted-foreground">
-            Create a new autonomous agent
+            Create a new autonomous agent and assign it a private room
           </p>
         </div>
       </div>
@@ -125,7 +151,7 @@ export default function AgentNew() {
             <div>
               <CardTitle>Agent Details</CardTitle>
               <CardDescription>
-                Configure your agent's identity and capabilities
+                Configure your agent's identity, AI provider, and capabilities
               </CardDescription>
             </div>
           </div>
@@ -133,10 +159,10 @@ export default function AgentNew() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="workspace">Workspace</Label>
+              <Label htmlFor="workspace">Studio</Label>
               <Select value={workspaceId} onValueChange={setWorkspaceId}>
                 <SelectTrigger data-testid="select-workspace">
-                  <SelectValue placeholder="Select a workspace" />
+                  <SelectValue placeholder="Select a studio" />
                 </SelectTrigger>
                 <SelectContent>
                   {workspaces?.map((ws) => (
@@ -148,22 +174,62 @@ export default function AgentNew() {
               </Select>
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="provider">AI Provider</Label>
+                <Select value={provider} onValueChange={handleProviderChange}>
+                  <SelectTrigger data-testid="select-provider">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROVIDER_OPTIONS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>
+                        <div className="flex items-center gap-2">
+                          <Cpu className="h-4 w-4" />
+                          {p.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="model">Model</Label>
+                <Select value={modelName} onValueChange={setModelName}>
+                  <SelectTrigger data-testid="select-model">
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {currentProviderModels.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="name">Agent Name</Label>
               <Input
                 id="name"
-                placeholder="Research Agent"
+                placeholder="e.g., Research Agent, Creative Writer, Code Reviewer"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 data-testid="input-agent-name"
               />
+              <p className="text-xs text-muted-foreground">
+                You can create multiple agents with the same provider (e.g., two ChatGPT agents with different roles)
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Textarea
                 id="description"
-                placeholder="Describe what this agent does..."
+                placeholder="Describe what this agent does and its role in the team..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
@@ -207,7 +273,7 @@ export default function AgentNew() {
               <div className="space-y-0.5">
                 <Label htmlFor="active">Active Status</Label>
                 <p className="text-sm text-muted-foreground">
-                  Allow this agent to operate in the workspace
+                  Activate this agent and assign it a private room
                 </p>
               </div>
               <Switch

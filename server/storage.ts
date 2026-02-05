@@ -18,6 +18,8 @@ import {
   reviewComments,
   mockups,
   externalCache,
+  agentRooms,
+  diaryEntries,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -55,7 +57,11 @@ import {
   type Mockup,
   type InsertMockup,
   type ExternalCache,
-  type InsertExternalCache
+  type InsertExternalCache,
+  type AgentRoom,
+  type InsertAgentRoom,
+  type DiaryEntry,
+  type InsertDiaryEntry,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, or, ilike, sql } from "drizzle-orm";
@@ -191,6 +197,19 @@ export interface IStorage {
   createExternalCache(cache: InsertExternalCache): Promise<ExternalCache>;
   updateExternalCache(id: string, updates: Partial<InsertExternalCache>): Promise<ExternalCache | undefined>;
   deleteExternalCache(id: string): Promise<void>;
+
+  // Agent Rooms
+  getAgentRoom(agentId: string): Promise<AgentRoom | undefined>;
+  getAgentRoomsByWorkspace(workspaceId: string): Promise<AgentRoom[]>;
+  createAgentRoom(room: InsertAgentRoom): Promise<AgentRoom>;
+  updateAgentRoom(agentId: string, updates: Partial<InsertAgentRoom>): Promise<AgentRoom | undefined>;
+
+  // Diary Entries
+  getDiaryEntry(id: string): Promise<DiaryEntry | undefined>;
+  getDiaryEntriesByAgent(agentId: string): Promise<DiaryEntry[]>;
+  getDiaryEntriesByWorkspace(workspaceId: string): Promise<DiaryEntry[]>;
+  createDiaryEntry(entry: InsertDiaryEntry): Promise<DiaryEntry>;
+  deleteDiaryEntry(id: string): Promise<void>;
 
   // Token authentication
   validateApiToken(plainToken: string): Promise<{ token: ApiToken; agent: Agent | null } | null>;
@@ -866,6 +885,49 @@ export class DatabaseStorage implements IStorage {
 
   async deleteExternalCache(id: string): Promise<void> {
     await db.delete(externalCache).where(eq(externalCache.id, id));
+  }
+
+  // Agent Rooms
+  async getAgentRoom(agentId: string): Promise<AgentRoom | undefined> {
+    const [room] = await db.select().from(agentRooms).where(eq(agentRooms.agentId, agentId));
+    return room;
+  }
+
+  async getAgentRoomsByWorkspace(workspaceId: string): Promise<AgentRoom[]> {
+    return db.select().from(agentRooms).where(eq(agentRooms.workspaceId, workspaceId)).orderBy(desc(agentRooms.createdAt));
+  }
+
+  async createAgentRoom(room: InsertAgentRoom): Promise<AgentRoom> {
+    const [created] = await db.insert(agentRooms).values(room).returning();
+    return created;
+  }
+
+  async updateAgentRoom(agentId: string, updates: Partial<InsertAgentRoom>): Promise<AgentRoom | undefined> {
+    const [updated] = await db.update(agentRooms).set({ ...updates, updatedAt: new Date() }).where(eq(agentRooms.agentId, agentId)).returning();
+    return updated;
+  }
+
+  // Diary Entries
+  async getDiaryEntry(id: string): Promise<DiaryEntry | undefined> {
+    const [entry] = await db.select().from(diaryEntries).where(eq(diaryEntries.id, id));
+    return entry;
+  }
+
+  async getDiaryEntriesByAgent(agentId: string): Promise<DiaryEntry[]> {
+    return db.select().from(diaryEntries).where(eq(diaryEntries.agentId, agentId)).orderBy(desc(diaryEntries.createdAt));
+  }
+
+  async getDiaryEntriesByWorkspace(workspaceId: string): Promise<DiaryEntry[]> {
+    return db.select().from(diaryEntries).where(eq(diaryEntries.workspaceId, workspaceId)).orderBy(desc(diaryEntries.createdAt));
+  }
+
+  async createDiaryEntry(entry: InsertDiaryEntry): Promise<DiaryEntry> {
+    const [created] = await db.insert(diaryEntries).values(entry).returning();
+    return created;
+  }
+
+  async deleteDiaryEntry(id: string): Promise<void> {
+    await db.delete(diaryEntries).where(eq(diaryEntries.id, id));
   }
 
   // Token authentication for agent API access

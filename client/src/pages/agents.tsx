@@ -11,7 +11,10 @@ import {
   Search,
   Shield,
   Activity,
-  MoreHorizontal
+  MoreHorizontal,
+  DoorOpen,
+  Cpu,
+  Key,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -102,7 +105,13 @@ export default function Agents() {
                     </Avatar>
                     <div>
                       <CardTitle className="text-base">{agent.name}</CardTitle>
-                      <div className="flex items-center gap-2 mt-1">
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {agent.provider && (
+                          <Badge variant="outline" className="text-xs gap-1">
+                            <Cpu className="h-3 w-3" />
+                            {agent.provider === "openai" ? "OpenAI" : agent.provider === "anthropic" ? "Claude" : agent.provider === "xai" ? "Grok" : agent.provider}
+                          </Badge>
+                        )}
                         {agent.isVerified && (
                           <Badge variant="outline" className="text-xs gap-1">
                             <Shield className="h-3 w-3" /> Verified
@@ -122,9 +131,18 @@ export default function Agents() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>View Details</DropdownMenuItem>
-                      <DropdownMenuItem>Manage Tokens</DropdownMenuItem>
-                      <DropdownMenuItem>Edit</DropdownMenuItem>
+                      <Link href={`/agents/${agent.id}/room`}>
+                        <DropdownMenuItem data-testid={`menu-room-${agent.id}`}>
+                          <DoorOpen className="h-4 w-4 mr-2" />
+                          Agent Room
+                        </DropdownMenuItem>
+                      </Link>
+                      <Link href="/tokens">
+                        <DropdownMenuItem>
+                          <Key className="h-4 w-4 mr-2" />
+                          Manage Tokens
+                        </DropdownMenuItem>
+                      </Link>
                       <DropdownMenuItem className="text-destructive">Deactivate</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

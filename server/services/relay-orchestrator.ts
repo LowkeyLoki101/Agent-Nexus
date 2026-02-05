@@ -13,6 +13,11 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+const xai = new OpenAI({
+  baseURL: "https://api.x.ai/v1",
+  apiKey: process.env.XAI_API_KEY || "",
+});
+
 export interface RelayConfig {
   maxTurns?: number;
   temperature?: number;
@@ -53,7 +58,10 @@ function buildContextMessages(context: ConversationContext, currentAgentId: stri
   return history;
 }
 
-function getAgentProvider(agent: Agent): "openai" | "anthropic" {
+function getAgentProvider(agent: Agent): "openai" | "anthropic" | "xai" {
+  if (agent.provider) {
+    return agent.provider;
+  }
   const name = agent.name.toLowerCase();
   const description = agent.description?.toLowerCase() || "";
   const capabilities = agent.capabilities?.join(" ").toLowerCase() || "";
@@ -62,25 +70,69 @@ function getAgentProvider(agent: Agent): "openai" | "anthropic" {
   if (allText.includes("claude") || allText.includes("anthropic")) {
     return "anthropic";
   }
+  if (allText.includes("grok") || allText.includes("xai")) {
+    return "xai";
+  }
   return "openai";
+}
+
+function getModelForAgent(agent: Agent): string {
+  if (agent.modelName) return agent.modelName;
+  const provider = getAgentProvider(agent);
+  switch (provider) {
+    case "anthropic": return "claude-sonnet-4-20250514";
+    case "xai": return "grok-2-1212";
+    default: return "gpt-4o";
+  }
 }
 
 async function callOpenAI(
   systemPrompt: string,
   messages: { role: "user" | "assistant"; content: string }[],
-  temperature = 0.7
+  temperature = 0.7,
+  model = "gpt-4o"
 ): Promise<string> {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...messages,
-    ],
-    temperature,
-    max_tokens: 2048,
-  });
-  
-  return response.choices[0]?.message?.content || "";
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+      temperature,
+      max_tokens: 2048,
+    });
+    return response.choices[0]?.message?.content || "";
+  } catch (error: any) {
+    console.error("OpenAI API error:", error.message);
+    throw new Error(`OpenAI API error: ${error.message || "Unknown error"}`);
+  }
+}
+
+async function callXAI(
+  systemPrompt: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+  temperature = 0.7,
+  model = "grok-2-1212"
+): Promise<string> {
+  try {
+    if (!process.env.XAI_API_KEY) {
+      throw new Error("XAI_API_KEY not configured. Please add your xAI API key.");
+    }
+    const response = await xai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+      temperature,
+      max_tokens: 2048,
+    });
+    return response.choices[0]?.message?.content || "";
+  } catch (error: any) {
+    console.error("xAI/Grok API error:", error.message);
+    throw new Error(`xAI/Grok API error: ${error.message || "Unknown error"}`);
+  }
 }
 
 async function callAnthropic(
@@ -132,10 +184,15 @@ export async function generateAgentResponse(
   const messages = buildContextMessages(context, agent.id);
   const temperature = config.temperature ?? 0.7;
   
+  const model = getModelForAgent(agent);
+  
   if (provider === "anthropic") {
     return callAnthropic(systemPrompt, messages, temperature);
   }
-  return callOpenAI(systemPrompt, messages, temperature);
+  if (provider === "xai") {
+    return callXAI(systemPrompt, messages, temperature, model);
+  }
+  return callOpenAI(systemPrompt, messages, temperature, model);
 }
 
 export async function runConversationTurn(
