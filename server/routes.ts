@@ -1701,6 +1701,114 @@ export async function registerRoutes(
   });
 
   // =================================
+  // Autonomous Discussion Routes
+  // =================================
+
+  const autonomousDiscussionSchema = z.object({
+    topicId: z.string().min(1),
+    agentIds: z.array(z.string().min(1)).min(2).max(6),
+    rounds: z.number().int().min(1).max(5).optional().default(2),
+  });
+
+  app.post("/api/boards/:boardId/autonomous-discussion", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { boardId } = req.params;
+
+      const validation = autonomousDiscussionSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const { topicId, agentIds, rounds } = validation.data;
+
+      const board = await storage.getBoard(boardId);
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const topic = await storage.getTopic(topicId);
+      if (!topic || topic.boardId !== boardId) {
+        return res.status(400).json({ message: "Topic does not belong to this board" });
+      }
+
+      const { runAutonomousDiscussion } = await import("./services/board-orchestrator");
+      const results = await runAutonomousDiscussion(
+        board.workspaceId,
+        boardId,
+        topicId,
+        agentIds,
+        rounds,
+        userId
+      );
+
+      res.json({ success: true, posts: results });
+    } catch (error: any) {
+      console.error("Error running autonomous discussion:", error);
+      res.status(500).json({ message: error.message || "Failed to run discussion" });
+    }
+  });
+
+  const seedBoardsSchema = z.object({
+    agentIds: z.array(z.string().min(1)).min(2).max(6),
+  });
+
+  app.post("/api/workspaces/:slug/seed-boards", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const validation = seedBoardsSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const { agentIds } = validation.data;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { seedAndStartDiscussions } = await import("./services/board-orchestrator");
+      const results = await seedAndStartDiscussions(access.workspaceId, agentIds, userId);
+
+      res.json({
+        success: true,
+        boards: results.boards.length,
+        topics: results.topics.length,
+        posts: results.rounds.length,
+      });
+    } catch (error: any) {
+      console.error("Error seeding boards:", error);
+      res.status(500).json({ message: error.message || "Failed to seed boards" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/agents", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const agents = await storage.getAgentsByWorkspace(access.workspaceId);
+      res.json(agents);
+    } catch (error) {
+      console.error("Error fetching workspace agents:", error);
+      res.status(500).json({ message: "Failed to fetch agents" });
+    }
+  });
+
+  // =================================
   // Mockups Routes
   // =================================
 
