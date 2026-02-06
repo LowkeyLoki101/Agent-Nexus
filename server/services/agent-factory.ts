@@ -215,14 +215,43 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
 
 async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTask> {
   const taskTypes: Array<"research" | "discuss" | "review" | "reflect" | "create" | "coordinate"> = ["research", "discuss", "review", "reflect", "create", "coordinate"];
-  const caps = agent.capabilities || [];
-  let selectedType: typeof taskTypes[number] = "research";
-  if (caps.includes("create")) selectedType = "create";
-  if (caps.includes("review")) selectedType = "review";
-  if (caps.includes("research")) selectedType = "research";
 
-  const random = Math.random();
-  if (random > 0.7) selectedType = taskTypes[Math.floor(Math.random() * taskTypes.length)];
+  const completedTasks = await storage.getTasksByAgent(agent.id, "completed");
+  const recentTypes = completedTasks.slice(0, 3).map(t => t.type);
+  const discussCount = completedTasks.filter(t => t.type === "discuss").length;
+  const totalCount = completedTasks.length;
+
+  let selectedType: typeof taskTypes[number];
+
+  if (totalCount > 0 && discussCount === 0) {
+    selectedType = "discuss";
+  } else if (totalCount > 2 && discussCount / totalCount < 0.25) {
+    selectedType = "discuss";
+  } else {
+    const weights: Record<string, number> = {
+      research: 25,
+      discuss: 30,
+      create: 15,
+      review: 10,
+      reflect: 10,
+      coordinate: 10,
+    };
+
+    if (recentTypes[0] && weights[recentTypes[0]]) {
+      weights[recentTypes[0]] = Math.max(5, weights[recentTypes[0]] - 15);
+    }
+
+    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+    let roll = Math.random() * totalWeight;
+    selectedType = "discuss";
+    for (const [type, weight] of Object.entries(weights)) {
+      roll -= weight;
+      if (roll <= 0) {
+        selectedType = type as typeof selectedType;
+        break;
+      }
+    }
+  }
 
   const taskTitles: Record<string, string[]> = {
     research: [
@@ -233,6 +262,8 @@ async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTas
     discuss: [
       `Share findings and insights on: ${goal.title}`,
       `Propose next steps for: ${goal.title}`,
+      `Discuss progress and challenges with the team on: ${goal.title}`,
+      `Collaborate on ideas for: ${goal.title}`,
     ],
     review: [
       `Review progress and quality on: ${goal.title}`,
@@ -271,23 +302,58 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
   try {
     if (task.type === "discuss") {
       const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
-      const board = boards[0];
-      if (board) {
-        const topics = await storage.getTopicsByBoard(board.id);
-        const relevantTopic = topics.find(t =>
-          t.title.toLowerCase().includes(task.title.split(":")[0]?.toLowerCase().trim() || "")
-        ) || topics[Math.floor(Math.random() * topics.length)];
+      if (boards.length > 0) {
+        const allTopics: Array<{ topic: any; boardName: string }> = [];
+        for (const board of boards) {
+          const topics = await storage.getTopicsByBoard(board.id);
+          for (const topic of topics) {
+            allTopics.push({ topic, boardName: board.name });
+          }
+        }
 
-        if (relevantTopic) {
+        if (allTopics.length > 0) {
+          const taskKeywords = task.title.toLowerCase().split(/[\s:,]+/).filter(w => w.length > 3);
+          let bestMatch = allTopics[0];
+          let bestScore = 0;
+
+          for (const entry of allTopics) {
+            const topicTitle = entry.topic.title.toLowerCase();
+            let score = 0;
+            for (const keyword of taskKeywords) {
+              if (topicTitle.includes(keyword)) score++;
+            }
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = entry;
+            }
+          }
+
+          if (bestScore === 0) {
+            bestMatch = allTopics[Math.floor(Math.random() * allTopics.length)];
+          }
+
           const post = await storage.createPost({
-            topicId: relevantTopic.id,
+            topicId: bestMatch.topic.id,
             content: output,
             createdById: "system",
             createdByAgentId: agent.id,
           });
+          console.log(`[Factory] ${agent.name} posted to board topic: "${bestMatch.topic.title}" in "${bestMatch.boardName}"`);
           return post.id;
         }
       }
+
+      console.log(`[Factory] No boards/topics found for ${agent.name} discuss task, saving as memory instead`);
+      const entry = await storage.createMemoryEntry({
+        workspaceId: WORKSPACE_ID,
+        agentId: agent.id,
+        content: output,
+        tier: "warm",
+        type: "artifact",
+        title: task.title,
+        tags: ["discuss", "factory", "autonomous"],
+      });
+      return entry.id;
     }
 
     if (task.type === "reflect") {
