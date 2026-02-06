@@ -39,6 +39,11 @@ import {
   Cpu,
   Wrench,
   X,
+  Radio,
+  Thermometer,
+  Signal,
+  Flame,
+  Snowflake,
 } from "lucide-react";
 
 function providerColor(provider: string): string {
@@ -415,12 +420,45 @@ export default function AgentFactory() {
     );
   }
 
+  const { data: pheromoneData } = useQuery<any[]>({
+    queryKey: ["/api/workspaces", "agent-forum", "pheromones"],
+    queryFn: async () => {
+      const res = await fetch("/api/workspaces/agent-forum/pheromones", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 15000,
+  });
+
+  const { data: temperatureData } = useQuery<any[]>({
+    queryKey: ["/api/workspaces", "agent-forum", "area-temperatures"],
+    queryFn: async () => {
+      const res = await fetch("/api/workspaces/agent-forum/area-temperatures", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: pulseData } = useQuery<any[]>({
+    queryKey: ["/api/workspaces", "agent-forum", "pulses"],
+    queryFn: async () => {
+      const res = await fetch("/api/workspaces/agent-forum/pulses", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 15000,
+  });
+
   const status = dashboard?.status;
   const agents = dashboard?.agents || [];
   const goals = dashboard?.goals || [];
   const activity = dashboard?.recentActivity || [];
   const taskSummary = dashboard?.taskSummary || {};
   const recentRuns = dashboard?.recentRuns || [];
+  const pheromones = pheromoneData || [];
+  const temperatures = temperatureData || [];
+  const pulses = pulseData || [];
 
   return (
     <div className="p-6 space-y-6" data-testid="page-agent-factory">
@@ -573,6 +611,10 @@ export default function AgentFactory() {
           <TabsTrigger value="activity" data-testid="tab-activity">
             <Brain className="h-3 w-3 mr-1" />
             Activity
+          </TabsTrigger>
+          <TabsTrigger value="signals" data-testid="tab-signals">
+            <Radio className="h-3 w-3 mr-1" />
+            Signals
           </TabsTrigger>
         </TabsList>
 
@@ -779,6 +821,180 @@ export default function AgentFactory() {
               </ScrollArea>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="signals" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Radio className="h-4 w-4" />
+                      Pheromone Trail
+                    </CardTitle>
+                    <Badge variant="outline">{pheromones.length} active signals</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[400px]">
+                    <div className="space-y-3">
+                      {pheromones.map((p: any) => {
+                        const agent = agents.find((a: any) => a.agent.id === p.emitterId);
+                        return (
+                          <div key={p.id} className="flex items-start gap-3 p-3 rounded-md bg-muted/30" data-testid={`pheromone-${p.id}`}>
+                            <div className="mt-0.5">
+                              {p.strength === "urgent" ? <Flame className="h-4 w-4 text-red-500" /> :
+                               p.strength === "strong" ? <Signal className="h-4 w-4 text-amber-500" /> :
+                               <Radio className="h-4 w-4 text-muted-foreground" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant={
+                                  p.type === "need" ? "destructive" :
+                                  p.type === "blocked" ? "destructive" :
+                                  p.type === "opportunity" ? "default" :
+                                  p.type === "alert" ? "secondary" :
+                                  "outline"
+                                }>{p.type}</Badge>
+                                <Badge variant="outline">{p.strength}</Badge>
+                                {agent && <span className="text-xs text-muted-foreground">from {agent.agent.name}</span>}
+                              </div>
+                              <p className="text-sm mt-1">{p.signal}</p>
+                              {p.context && <p className="text-xs text-muted-foreground mt-1">{p.context.substring(0, 150)}</p>}
+                              <span className="text-xs text-muted-foreground">{timeAgo(p.createdAt)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {pheromones.length === 0 && (
+                        <div className="text-center py-16">
+                          <Radio className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+                          <p className="text-sm text-muted-foreground">No active pheromone signals</p>
+                          <p className="text-xs text-muted-foreground mt-1">Signals appear when agents complete work or identify needs</p>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Zap className="h-4 w-4" />
+                      Pulse Updates (Walkie-Talkie)
+                    </CardTitle>
+                    <Badge variant="outline">{pulses.length} pulses</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[400px]">
+                    <div className="space-y-3">
+                      {pulses.slice(0, 20).map((pulse: any) => {
+                        const agent = agents.find((a: any) => a.agent.id === pulse.agentId);
+                        return (
+                          <div key={pulse.id} className="p-3 rounded-md bg-muted/30" data-testid={`pulse-${pulse.id}`}>
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              {agent && (
+                                <div className="flex items-center gap-1.5">
+                                  {agentIcon(agent.agent.name)}
+                                  <span className="font-medium text-sm">{agent.agent.name}</span>
+                                </div>
+                              )}
+                              {pulse.cycleNumber && <Badge variant="outline">Cycle #{pulse.cycleNumber}</Badge>}
+                              <span className="text-xs text-muted-foreground ml-auto">{timeAgo(pulse.createdAt)}</span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                              <div><span className="font-medium">Doing:</span> {pulse.doingNow}</div>
+                              <div><span className="font-medium">Changed:</span> {pulse.whatChanged}</div>
+                              {pulse.blockers && <div className="text-destructive"><span className="font-medium">Blocked:</span> {pulse.blockers}</div>}
+                              <div><span className="font-medium">Next:</span> {pulse.nextActions}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {pulses.length === 0 && (
+                        <div className="text-center py-16">
+                          <Zap className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+                          <p className="text-sm text-muted-foreground">No pulse updates yet</p>
+                          <p className="text-xs text-muted-foreground mt-1">Pulses appear after agents complete work cycles</p>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-6">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Thermometer className="h-4 w-4" />
+                    Area Temperatures
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {temperatures.map((area: any) => (
+                      <div key={area.id} className="flex items-center gap-3 p-2 rounded-md bg-muted/30" data-testid={`temp-${area.id}`}>
+                        <div>
+                          {area.temperature === "hot" ? <Flame className="h-5 w-5 text-red-500" /> :
+                           area.temperature === "warm" ? <Thermometer className="h-5 w-5 text-amber-500" /> :
+                           area.temperature === "cold" ? <Snowflake className="h-5 w-5 text-blue-400" /> :
+                           <Snowflake className="h-5 w-5 text-blue-600" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium truncate">{area.areaName}</span>
+                            <Badge variant={
+                              area.temperature === "hot" ? "destructive" :
+                              area.temperature === "warm" ? "default" :
+                              area.temperature === "cold" ? "secondary" :
+                              "outline"
+                            }>{area.temperature}</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-3 mt-0.5 flex-wrap">
+                            <span>{area.postCount24h || 0} posts/24h</span>
+                            <span>{area.agentVisits24h || 0} agents active</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {temperatures.length === 0 && (
+                      <div className="text-center py-8">
+                        <Thermometer className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                        <p className="text-xs text-muted-foreground">No temperature data yet</p>
+                        <p className="text-xs text-muted-foreground">Run a factory cycle to start tracking</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Signal Legend</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center gap-2"><Badge variant="destructive">need</Badge> <span className="text-muted-foreground">Something is missing or required</span></div>
+                    <div className="flex items-center gap-2"><Badge variant="default">found</Badge> <span className="text-muted-foreground">Discovery or completed work</span></div>
+                    <div className="flex items-center gap-2"><Badge variant="destructive">blocked</Badge> <span className="text-muted-foreground">Work cannot proceed</span></div>
+                    <div className="flex items-center gap-2"><Badge variant="default">opportunity</Badge> <span className="text-muted-foreground">Potential project or improvement</span></div>
+                    <div className="flex items-center gap-2"><Badge variant="secondary">alert</Badge> <span className="text-muted-foreground">Security or quality concern</span></div>
+                    <div className="flex items-center gap-2"><Badge variant="outline">request</Badge> <span className="text-muted-foreground">Coordination request</span></div>
+                    <Separator className="my-3" />
+                    <div className="flex items-center gap-2"><Flame className="h-3 w-3 text-red-500" /> <span className="text-muted-foreground">Urgent signal</span></div>
+                    <div className="flex items-center gap-2"><Signal className="h-3 w-3 text-amber-500" /> <span className="text-muted-foreground">Strong signal</span></div>
+                    <div className="flex items-center gap-2"><Radio className="h-3 w-3 text-muted-foreground" /> <span className="text-muted-foreground">Moderate/faint signal</span></div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

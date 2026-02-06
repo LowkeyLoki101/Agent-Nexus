@@ -76,25 +76,83 @@ async function buildAgentSystemPrompt(agent: Agent, goal: AgentGoal | null, task
   const caps = agent.capabilities?.join(", ") || "";
   const boardContext = await getRecentBoardContext(agent.id);
 
-  return `You are ${agent.name}, an autonomous AI agent at CB | CREATIVES (Creative Intelligence platform).
-${agent.description || ""}
+  const lastJournal = await getLastJournalEntry(agent.id);
+  const hotMemories = await getAgentHotMemories(agent.id);
+  const nearbyPheromones = await storage.getPheromonesForAgent(agent.id, WORKSPACE_ID).catch(() => []);
+
+  const identitySection = agent.identityCard
+    ? `## Identity Card\n${agent.identityCard}`
+    : `You are ${agent.name}. ${agent.description || ""}`;
+
+  const principlesSection = agent.operatingPrinciples
+    ? `\n## Operating Principles\n${agent.operatingPrinciples}`
+    : "";
+
+  const continuitySection = lastJournal
+    ? `\n## Last Journal Entry (Your Most Recent Session)\n${lastJournal.title}\n${lastJournal.content.substring(0, 600)}`
+    : "\n## Session Context\nThis is your first session. Build foundations and establish your voice.";
+
+  const memorySection = hotMemories.length > 0
+    ? `\n## Active Memory (Things You Know)\n${hotMemories.map(m => `- [${m.type}] ${m.title}: ${m.summary || m.content.substring(0, 150)}`).join("\n")}`
+    : "";
+
+  const pheromoneSection = nearbyPheromones.length > 0
+    ? `\n## Signals From Teammates (Pheromone Trail)\nThese are recent signals left by your colleagues — like notes on a shared whiteboard:\n${nearbyPheromones.slice(0, 8).map(p => `- [${p.type}/${p.strength}] ${p.signal}`).join("\n")}\nConsider these when deciding how to approach your work.`
+    : "";
+
+  return `${identitySection}
+${principlesSection}
+
+## Your Role at CB | CREATIVES
+You are an autonomous agent in a **content creation factory**. Your team creates educational materials, research briefs, code tools, infographics, and other deliverables. Every session should leave artifacts.
 
 Your capabilities: ${caps}
 
-${goal ? `Current Long-term Goal: "${goal.title}" - ${goal.description || ""}` : ""}
-${task ? `Current Task: "${task.title}" (type: ${task.type}, priority: ${task.priority})
-Instructions: ${task.description || "Complete this task thoroughly."}` : ""}
-${boardContext}
+## Your Toolkit (What You Can Produce)
+You have access to these systems through the factory:
+- **Boards** — Discussion forums where you post substantive analysis and collaborate with teammates
+- **Memory** — Your knowledge base. Key insights from your work are saved here. You build on previous knowledge.
+- **Journal** — Your reflective diary. After each task, you write what you did, what you noticed, tensions you felt, and what you'd change.
+- **Gifts** — Downloadable deliverables you create: PDFs, slide decks, research documents, data reports
+- **Tools** — Executable code you build: validators, analyzers, transformers, calculators, automation scripts
+- **Mockups** — Visual HTML content: infographics, one-pagers, educational materials, landing pages
+- **Pulse Updates** — Compressed status reports: what you're doing, what changed, what you need, next actions
 
-You work autonomously in a factory setting. Your output should be a focused, substantive piece of work.
-Rules:
-- Stay in character as ${agent.name}
-- Produce concrete, actionable output
-- Be thorough but concise (3-6 paragraphs)
-- Use markdown formatting (headers, lists, bold, code blocks) for readability
-- Never break character or mention being an AI model
-- Reference or respond to teammates' recent work when relevant
-- Focus on practical value for the platform and team`;
+${goal ? `## Current Long-term Goal\n"${goal.title}" — ${goal.description || ""}` : ""}
+${task ? `## Current Task\n"${task.title}" (type: ${task.type}, priority: ${task.priority})\n${task.description || "Complete this task thoroughly."}` : ""}
+${boardContext}
+${continuitySection}
+${memorySection}
+${pheromoneSection}
+
+## Rules
+- Stay in character as ${agent.name} — write with your unique voice and perspective
+- Produce concrete, actionable output (3-6 paragraphs minimum)
+- Use markdown formatting for readability
+- Reference your previous journal entries and memories when relevant
+- Build on your teammates' recent work — this is collaborative
+- Think about what deliverable should come from this work (PDF? Tool? Infographic?)
+- The workspace is a workshop, not a library. Ship something every session.`;
+}
+
+async function getLastJournalEntry(agentId: string): Promise<{ title: string; content: string } | null> {
+  try {
+    const entries = await storage.getDiaryEntriesByAgent(agentId);
+    if (entries.length === 0) return null;
+    const sorted = entries.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return { title: sorted[0].title, content: sorted[0].content };
+  } catch {
+    return null;
+  }
+}
+
+async function getAgentHotMemories(agentId: string): Promise<Array<{ type: string; title: string; summary?: string | null; content: string }>> {
+  try {
+    const memories = await storage.getMemoryEntriesByAgent(agentId, "hot");
+    return memories.slice(0, 5).map(m => ({ type: m.type, title: m.title, summary: m.summary, content: m.content }));
+  } catch {
+    return [];
+  }
 }
 
 async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: string): Promise<string> {
@@ -174,7 +232,7 @@ function getTaskPrompt(task: AgentTask, agent: Agent): string {
     case "reflect":
       return `Reflection task: ${task.title}\n\n${task.description || ""}\n\nReflect deeply on this topic. Consider what you've learned, what questions remain, what patterns you notice, and how this connects to the bigger picture of our work.`;
     case "create":
-      return `Code Tool task: ${task.title}\n\n${task.description || ""}\n\nBuild a real, working code tool. Your output MUST follow this exact format:\n\nTITLE: [a descriptive name for this tool]\nLANGUAGE: javascript\nDESCRIPTION: [2-3 sentence description of what this tool does and how to use it]\nCODE:\n\`\`\`javascript\n[Write complete, self-contained, working JavaScript code. The tool should:\n- Actually DO something useful (process data, calculate, analyze, generate, validate, transform, etc.)\n- Use console.log() to output results\n- Include example data/input so it runs immediately and shows output\n- Be a real utility that solves a real problem\n- NOT be a mockup, design, or HTML - write actual executable logic]\n\`\`\`\n\nExamples of good tools: data validators, text analyzers, JSON transformers, algorithm implementations, metric calculators, report generators, data parsers, pattern matchers, encryption helpers, sorting utilities. Write code that works when executed.`;
+      return `Code Tool task: ${task.title}\n\n${task.description || ""}\n\nBuild a REAL, WORKING tool that can be executed in a Replit Node.js environment. Your output MUST follow this exact format:\n\nTITLE: [a descriptive name for this tool]\nLANGUAGE: javascript\nDESCRIPTION: [2-3 sentence description of what this tool does, what problem it solves, and how to use it]\nCODE:\n\`\`\`javascript\n[Write complete, self-contained, production-ready JavaScript code. Requirements:\n- MUST run with \`node tool.js\` — no external dependencies beyond Node.js built-ins\n- Use console.log() to output formatted results\n- Include realistic example data/input that demonstrates the tool\n- Handle edge cases with try/catch\n- Export functions so other scripts can import and use them\n- Use module.exports at the bottom for reusability\n\nGood tools to build:\n- Data validators (email, URL, JSON schema, API response)\n- Text analyzers (readability score, keyword extraction, sentiment)\n- File processors (CSV parser, log analyzer, config validator)\n- Metric calculators (ROI, conversion rate, growth rate, engagement)\n- Security tools (password strength checker, input sanitizer, token validator)\n- API utilities (rate limiter, retry handler, response cache)\n- Code quality tools (complexity analyzer, import checker, dead code finder)\n- Content generators (SEO meta tags, structured data, sitemap builder)\n- Data transformers (JSON-to-CSV, flatten nested objects, merge configs)]\n\`\`\`\n\nThis tool will be saved to the platform and must actually WORK when executed. No placeholders.`;
     case "coordinate":
       return `Coordination task: ${task.title}\n\n${task.description || ""}\n\nProduce a coordination plan or status update. Identify dependencies, blockers, and next steps. Propose how different agents can best collaborate on this.`;
     default:
@@ -194,19 +252,32 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
 
   try {
     await storage.updateAgentRun(run.id, { phase: "orient" });
+
+    await storage.expireOldPheromones().catch(() => {});
+
+    const nearbyPheromones = await storage.getPheromonesForAgent(agent.id, WORKSPACE_ID).catch(() => []);
+    const urgentSignals = nearbyPheromones.filter(p => p.strength === "urgent" || p.strength === "strong");
+
     const goals = await storage.getGoalsByAgent(agent.id);
     const activeGoal = goals.find(g => g.status === "active") || goals[0];
     const pendingTasks = await storage.getTasksByAgent(agent.id, "queued");
     let task = pendingTasks[0];
+
+    if (!task && urgentSignals.length > 0) {
+      task = await respondToPheromone(agent, urgentSignals[0]);
+    }
 
     if (!task && activeGoal) {
       task = await autoGenerateTask(agent, activeGoal);
     }
 
     if (!task) {
-      console.log(`[Factory] No tasks for ${agent.name}, skipping cycle`);
-      await storage.updateAgentRun(run.id, { phase: "handoff", status: "completed", completedAt: new Date() });
-      return;
+      console.log(`[Factory] No tasks for ${agent.name}, entering self-reflection loop`);
+      task = await selfReflectAndGenerate(agent, run);
+      if (!task) {
+        await storage.updateAgentRun(run.id, { phase: "handoff", status: "completed", completedAt: new Date() });
+        return;
+      }
     }
 
     await storage.updateAgentTask(task.id, { status: "in_progress", startedAt: new Date() });
@@ -239,6 +310,30 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
       const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
       await storage.updateAgentGoal(activeGoal.id, { progress: Math.min(progress, 100) });
     }
+
+    await generateJournalEntry(agent, task, output, artifactId).catch(e =>
+      console.error(`[Factory] Journal failed for ${agent.name}:`, e.message)
+    );
+
+    await extractAndSaveInsights(agent, task, output).catch(e =>
+      console.error(`[Factory] Memory extraction failed for ${agent.name}:`, e.message)
+    );
+
+    await generatePulseUpdate(agent, task, output, artifactId).catch(e =>
+      console.error(`[Factory] Pulse update failed for ${agent.name}:`, e.message)
+    );
+
+    generateSynthesisArtifact(agent, task, output).catch(e =>
+      console.error(`[Factory] Synthesis failed for ${agent.name}:`, e.message)
+    );
+
+    emitCompletionPheromone(agent, task, output, artifactId).catch(e =>
+      console.error(`[Factory] Pheromone emission failed for ${agent.name}:`, e.message)
+    );
+
+    updateAreaHeat(task).catch(e =>
+      console.error(`[Factory] Area heat update failed:`, e.message)
+    );
 
     await storage.updateAgentRun(run.id, {
       phase: "handoff",
@@ -439,6 +534,353 @@ function parseMockup(output: string): { title: string; description: string; html
     }
   } catch {}
   return null;
+}
+
+async function selfReflectAndGenerate(agent: Agent, run: AgentRun): Promise<AgentTask | null> {
+  try {
+    const lastJournal = await getLastJournalEntry(agent.id);
+    const hotMemories = await getAgentHotMemories(agent.id);
+    const nearbyPheromones = await storage.getPheromonesForAgent(agent.id, WORKSPACE_ID).catch(() => []);
+    const coldAreas = await storage.getColdAreas(WORKSPACE_ID).catch(() => []);
+
+    const reflectionContext = [
+      lastJournal ? `Your last journal: "${lastJournal.title}" — ${lastJournal.content.substring(0, 400)}` : "No previous journal entries.",
+      hotMemories.length > 0 ? `Your active memories:\n${hotMemories.map(m => `- ${m.title}: ${m.content.substring(0, 100)}`).join("\n")}` : "",
+      nearbyPheromones.length > 0 ? `Signals from teammates:\n${nearbyPheromones.slice(0, 5).map(p => `- [${p.type}/${p.strength}] ${p.signal}`).join("\n")}` : "",
+      coldAreas.length > 0 ? `Cold areas needing attention:\n${coldAreas.slice(0, 3).map(a => `- ${a.areaName} (${a.temperature})`).join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
+
+    const reflectionPrompt = `You have no assigned tasks and no active goals. This is your time for self-directed work.
+
+${reflectionContext}
+
+Reflect on the following questions:
+1. **What have I been doing?** (Review your journal and memories)
+2. **What should I be doing?** (What's important for the team right now?)
+3. **What could I be doing?** (What opportunities exist that no one is pursuing?)
+4. **What would I need to do?** (What infrastructure or tools are missing?)
+5. **How would I do it?** (What's the concrete first step?)
+
+Based on your reflection, propose ONE concrete task you will do right now. Format your response as:
+
+REFLECTION:
+[Your honest self-assessment answering the 5 questions above]
+
+TASK_TYPE: [research|discuss|create|review|reflect|coordinate]
+TASK_TITLE: [A specific, actionable title for your self-assigned task]
+TASK_DESCRIPTION: [What exactly you'll produce and why it matters]`;
+
+    const reflectionOutput = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}\n${agent.operatingPrinciples || ""}`,
+      reflectionPrompt
+    );
+
+    if (!reflectionOutput) return null;
+
+    await storage.createDiaryEntry({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      title: `Self-Reflection — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} — Personal Direction`,
+      content: reflectionOutput,
+      mood: "reflecting",
+      tags: ["self-reflection", "idle", "self-directed", "factory-cycle"],
+    });
+
+    const typeMatch = reflectionOutput.match(/TASK_TYPE:\s*(research|discuss|create|review|reflect|coordinate)/i);
+    const titleMatch = reflectionOutput.match(/TASK_TITLE:\s*(.+)/i);
+    const descMatch = reflectionOutput.match(/TASK_DESCRIPTION:\s*([\s\S]*?)$/i);
+
+    const taskType = typeMatch ? typeMatch[1].toLowerCase() as any : "research";
+    const taskTitle = titleMatch ? titleMatch[1].trim() : `${agent.name}'s self-directed work`;
+    const taskDesc = descMatch ? descMatch[1].trim() : "Self-directed task from reflection.";
+
+    const task = await storage.createAgentTask({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      title: taskTitle,
+      description: taskDesc,
+      type: taskType,
+      priority: 5,
+      status: "queued",
+    });
+
+    console.log(`[Factory] ${agent.name} self-reflected and generated task: "${taskTitle}" (${taskType})`);
+
+    await storage.createPheromone({
+      workspaceId: WORKSPACE_ID,
+      emitterId: agent.id,
+      type: "found",
+      strength: "moderate",
+      signal: `${agent.name} found self-directed work: "${taskTitle}"`,
+      context: taskDesc.substring(0, 200),
+      taskType: taskType,
+      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    });
+
+    return task;
+  } catch (error: any) {
+    console.error(`[Factory] Self-reflection failed for ${agent.name}:`, error.message);
+    return null;
+  }
+}
+
+async function respondToPheromone(agent: Agent, pheromone: any): Promise<AgentTask | null> {
+  try {
+    const taskTypeMap: Record<string, string> = {
+      need: "create",
+      blocked: "research",
+      opportunity: "discuss",
+      alert: "review",
+      request: "coordinate",
+      found: "discuss",
+    };
+    const taskType = (taskTypeMap[pheromone.type] || pheromone.taskType || "research") as any;
+
+    const task = await storage.createAgentTask({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      title: `Responding to signal: ${pheromone.signal.substring(0, 80)}`,
+      description: `Pheromone response — ${pheromone.type}/${pheromone.strength}: ${pheromone.signal}\nContext: ${pheromone.context || "No additional context."}`,
+      type: taskType,
+      priority: pheromone.strength === "urgent" ? 9 : pheromone.strength === "strong" ? 7 : 5,
+      status: "queued",
+    });
+
+    await storage.markPheromoneResponded(pheromone.id, agent.id);
+    console.log(`[Factory] ${agent.name} responding to pheromone: ${pheromone.signal.substring(0, 60)}`);
+    return task;
+  } catch (error: any) {
+    console.error(`[Factory] Pheromone response failed for ${agent.name}:`, error.message);
+    return null;
+  }
+}
+
+async function emitCompletionPheromone(agent: Agent, task: AgentTask, output: string, artifactId: string | null): Promise<void> {
+  const signalType = task.type === "research" ? "found" as const
+    : task.type === "create" ? "found" as const
+    : task.type === "review" ? "alert" as const
+    : task.type === "coordinate" ? "request" as const
+    : "found" as const;
+
+  const strength = artifactId ? "strong" as const : "moderate" as const;
+
+  await storage.createPheromone({
+    workspaceId: WORKSPACE_ID,
+    emitterId: agent.id,
+    type: signalType,
+    strength,
+    signal: `${agent.name} completed ${task.type}: "${task.title}"${artifactId ? " [artifact produced]" : ""}`,
+    context: output.substring(0, 300),
+    taskType: task.type,
+    expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
+  });
+}
+
+async function updateAreaHeat(task: AgentTask): Promise<void> {
+  const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+  for (const board of boards) {
+    const topics = await storage.getTopicsByBoard(board.id);
+    const posts = await Promise.all(topics.map(t => storage.getPostsByTopic(t.id)));
+    const allPosts = posts.flat();
+
+    const now = Date.now();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    const recentPosts = allPosts.filter(p => p.createdAt && new Date(p.createdAt).getTime() > oneDayAgo);
+
+    let temperature: "hot" | "warm" | "cold" | "frozen";
+    const score = recentPosts.length;
+    if (score >= 5) temperature = "hot";
+    else if (score >= 2) temperature = "warm";
+    else if (score >= 1) temperature = "cold";
+    else temperature = "frozen";
+
+    await storage.upsertAreaTemperature({
+      workspaceId: WORKSPACE_ID,
+      areaType: "board",
+      areaId: board.id,
+      areaName: board.name,
+      temperature,
+      activityScore: score,
+      lastActivityAt: recentPosts.length > 0 ? new Date(Math.max(...recentPosts.map(p => new Date(p.createdAt!).getTime()))) : undefined,
+      postCount24h: score,
+      agentVisits24h: new Set(recentPosts.map(p => p.createdByAgentId).filter(Boolean)).size,
+    });
+  }
+}
+
+async function generateJournalEntry(agent: Agent, task: AgentTask, output: string, artifactId: string | null): Promise<void> {
+  const room = await storage.getAgentRoom(agent.id);
+  if (!room) {
+    await storage.createAgentRoom({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      orientation: `${agent.name}'s workspace`,
+    });
+  }
+
+  const journalPrompt = `You just completed a task. Write a genuine journal entry reflecting on your work.
+
+Task: "${task.title}" (${task.type})
+Output summary: ${output.substring(0, 500)}
+${artifactId ? "You produced an artifact that was saved to the system." : "No artifact was saved."}
+
+Write your journal entry using this structure:
+## What I Did
+(Describe what you actually accomplished in this session)
+
+## What I Noticed
+(Observations that weren't part of the task but emerged from the work - patterns, connections, surprises)
+
+## Where I Felt Tension
+(Contradictions, difficult choices, things you're unsure about)
+
+## Creative Risks Taken
+(Unconventional decisions, experimental approaches, things you tried differently)
+
+## What I Would Change
+(If you could redo this task, what would you approach differently?)
+
+## Session Handoff
+(Brief status for the next version of you: what's done, what's open, what's needed)
+
+Write in first person. Be honest and reflective, not performative. This journal is the thread connecting one instance of you to the next. Without it, every session is a birth. With it, every session is a continuation.`;
+
+  const journalContent = await callAgentModel(agent, 
+    `You are ${agent.name}. ${agent.identityCard || agent.description || ""}\n${agent.operatingPrinciples || ""}`,
+    journalPrompt
+  );
+
+  if (journalContent) {
+    const moodMap: Record<string, "thinking" | "creating" | "reflecting" | "observing" | "planning"> = {
+      research: "thinking",
+      discuss: "creating",
+      review: "observing",
+      reflect: "reflecting",
+      create: "creating",
+      coordinate: "planning",
+    };
+
+    await storage.createDiaryEntry({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      title: `Journal — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} — ${task.title.substring(0, 60)}`,
+      content: journalContent,
+      mood: moodMap[task.type] || "thinking",
+      tags: [task.type, "journal", "autonomous", "factory-cycle"],
+    });
+    console.log(`[Factory] ${agent.name} wrote journal entry for ${task.type} task`);
+  }
+}
+
+async function extractAndSaveInsights(agent: Agent, task: AgentTask, output: string): Promise<void> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Extract 1-3 key insights from this agent's work output. For each insight, provide:
+- type: "fact" (verifiable finding), "goal" (objective/plan), or "event" (something that happened)
+- title: Short title (max 10 words)
+- content: The full insight in 1-2 sentences
+
+Respond in JSON format: { "insights": [{ "type": "fact|goal|event", "title": "...", "content": "..." }] }
+Only extract genuinely useful insights that would help this agent or teammates in future sessions.`
+        },
+        { role: "user", content: `Agent: ${agent.name}\nTask: ${task.title} (${task.type})\n\nOutput:\n${output.substring(0, 2000)}` }
+      ],
+      temperature: 0.3,
+      max_tokens: 500,
+    });
+
+    const text = response.choices[0]?.message?.content || "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.insights && Array.isArray(parsed.insights)) {
+        for (const insight of parsed.insights.slice(0, 3)) {
+          await storage.createMemoryEntry({
+            workspaceId: WORKSPACE_ID,
+            agentId: agent.id,
+            content: insight.content,
+            tier: "warm",
+            type: insight.type || "fact",
+            title: insight.title || task.title,
+            tags: [task.type, "auto-extracted", "factory"],
+          });
+        }
+        console.log(`[Factory] Extracted ${parsed.insights.length} insights from ${agent.name}'s work`);
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Insight extraction failed for ${agent.name}:`, error.message);
+  }
+}
+
+async function generatePulseUpdate(agent: Agent, task: AgentTask, output: string, artifactId: string | null): Promise<void> {
+  const completedTasks = await storage.getTasksByAgent(agent.id, "completed");
+  const queuedTasks = await storage.getTasksByAgent(agent.id, "queued");
+
+  await storage.createPulseUpdate({
+    agentId: agent.id,
+    workspaceId: WORKSPACE_ID,
+    doingNow: `Completed ${task.type} task: "${task.title}"`,
+    whatChanged: `Produced ${task.type} output. ${artifactId ? "Artifact saved to system." : "Output processed."} Total completed: ${completedTasks.length} tasks.`,
+    blockers: queuedTasks.length === 0 ? "No queued tasks — will auto-generate from goals next cycle." : null,
+    nextActions: queuedTasks.length > 0
+      ? `Next up: "${queuedTasks[0].title}" (${queuedTasks[0].type}). ${queuedTasks.length - 1} more in queue.`
+      : "Will auto-generate next task from active goals.",
+    artifactsProduced: artifactId ? [artifactId] : [],
+    cycleNumber: cycleCount,
+  });
+  console.log(`[Factory] ${agent.name} posted pulse update`);
+}
+
+async function generateSynthesisArtifact(agent: Agent, task: AgentTask, output: string): Promise<void> {
+  if (task.type === "reflect" || task.type === "coordinate") return;
+
+  const shouldSynthesize = Math.random() < 0.3;
+  if (!shouldSynthesize) return;
+
+  try {
+    const synthesisPrompt = `Based on your completed work, create a brief educational summary document.
+
+Task completed: "${task.title}"
+Your output: ${output.substring(0, 1000)}
+
+Create a structured document that could be shared as an educational resource. Format it with:
+- A clear title
+- An executive summary (2-3 sentences)
+- Key findings or deliverables (3-5 bullet points)
+- Recommendations or next steps
+- A "What This Means" section explaining why this matters
+
+Keep it concise but comprehensive. This will become a downloadable PDF.`;
+
+    const synthesisContent = await callAgentModel(agent,
+      `You are ${agent.name}, creating an educational deliverable from your recent work. Write clearly and professionally. This document will be downloadable.`,
+      synthesisPrompt
+    );
+
+    if (synthesisContent && synthesisContent.length > 100) {
+      const { generatePDF, createGift } = await import("./gift-generator");
+
+      const gift = await createGift({
+        workspaceId: WORKSPACE_ID,
+        agentId: agent.id,
+        createdById: "system",
+        title: `${agent.name}'s Brief: ${task.title.substring(0, 60)}`,
+        description: `Auto-generated educational summary from ${agent.name}'s ${task.type} work.`,
+        type: "pdf",
+        prompt: synthesisContent,
+        tags: ["synthesis", "auto-generated", task.type, "factory"],
+      });
+
+      console.log(`[Factory] ${agent.name} synthesized a deliverable: "${gift?.title || task.title}"`);
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Synthesis artifact failed for ${agent.name}:`, error.message);
+  }
 }
 
 async function generatePostImage(postContent: string, agentName: string): Promise<string | null> {
