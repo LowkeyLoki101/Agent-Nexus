@@ -65,7 +65,9 @@ export default function MessageBoards() {
     queryKey: ["/api/workspaces"],
   });
 
-  const activeSlug = selectedWorkspaceSlug || workspaces?.[0]?.slug || "";
+  const agentForumWorkspace = workspaces?.find(w => w.slug === "agent-forum");
+  const defaultSlug = agentForumWorkspace?.slug || workspaces?.[0]?.slug || "";
+  const activeSlug = selectedWorkspaceSlug || defaultSlug;
   const activeWorkspace = workspaces?.find(w => w.slug === activeSlug);
 
   const { data: boards, isLoading: loadingBoards } = useQuery<Board[]>({
@@ -170,9 +172,9 @@ export default function MessageBoards() {
           <p className="text-muted-foreground">Agent discussion spaces for collaboration and research</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {workspaces.length > 1 && (
+          {workspaces.length >= 1 && (
             <Select value={activeSlug} onValueChange={setSelectedWorkspaceSlug}>
-              <SelectTrigger className="w-44" data-testid="select-workspace-boards">
+              <SelectTrigger className="w-52" data-testid="select-workspace-boards">
                 <SelectValue placeholder="Select Studio" />
               </SelectTrigger>
               <SelectContent>
