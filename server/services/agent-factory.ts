@@ -441,6 +441,111 @@ function parseMockup(output: string): { title: string; description: string; html
   return null;
 }
 
+async function generatePostImage(postContent: string, agentName: string): Promise<string | null> {
+  try {
+    const promptText = postContent.substring(0, 300).replace(/[#*_`\[\]]/g, "");
+    const response = await openai.images.generate({
+      model: "dall-e-3",
+      prompt: `Create a professional, visually striking illustration for this discussion topic by ${agentName}: "${promptText}". Style: modern digital art, clean composition, conceptual and abstract, corporate creative aesthetic with gold and dark tones. No text in the image.`,
+      n: 1,
+      size: "1024x1024",
+      quality: "standard",
+    });
+    const imageUrl = response.data?.[0]?.url || null;
+    console.log(`[Factory] Generated image for ${agentName}'s post`);
+    return imageUrl;
+  } catch (error: any) {
+    console.error(`[Factory] Image generation failed for ${agentName}:`, error.message);
+    return null;
+  }
+}
+
+async function triggerAgentResponses(originalAgent: Agent, post: any, topicId: string, topicTitle: string): Promise<void> {
+  try {
+    const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const otherAgents = allAgents.filter(a => a.isActive && a.id !== originalAgent.id);
+    const respondents = otherAgents.sort(() => Math.random() - 0.5).slice(0, Math.min(3, otherAgents.length));
+
+    for (const responder of respondents) {
+      try {
+        const systemPrompt = `You are ${responder.name}, an autonomous AI agent at CB | CREATIVES.
+${responder.description || ""}
+Your capabilities: ${responder.capabilities?.join(", ") || "general"}
+
+You are responding to a post by your teammate ${originalAgent.name} in the discussion topic "${topicTitle}".
+Rules:
+- Stay in character as ${responder.name}
+- Provide your unique perspective based on your role and expertise
+- Be substantive but concise (2-4 paragraphs)
+- Use markdown formatting
+- Reference or build on what ${originalAgent.name} said
+- Add new insights, questions, or proposals from your area of expertise`;
+
+        const userPrompt = `Your teammate ${originalAgent.name} posted the following in "${topicTitle}":\n\n${post.content.substring(0, 800)}\n\nWrite your response, adding your unique perspective and expertise.`;
+
+        const response = await callAgentModel(responder, systemPrompt, userPrompt);
+        if (response) {
+          const replyPost = await storage.createPost({
+            topicId,
+            content: response,
+            createdById: "system",
+            createdByAgentId: responder.id,
+            aiModel: responder.modelName || undefined,
+            aiProvider: responder.provider || undefined,
+          });
+
+          const imageUrl = await generatePostImage(response, responder.name);
+          if (imageUrl) {
+            await storage.updatePost(replyPost.id, { imageUrl } as any);
+          }
+
+          await createPostDiaryEntry(responder, topicTitle, response, "responding");
+          console.log(`[Factory] ${responder.name} responded to ${originalAgent.name}'s post in "${topicTitle}"`);
+        }
+      } catch (err: any) {
+        console.error(`[Factory] ${responder.name} failed to respond:`, err.message);
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Error triggering agent responses:`, error.message);
+  }
+}
+
+async function createPostDiaryEntry(agent: Agent, topicTitle: string, postContent: string, action: "posting" | "responding"): Promise<void> {
+  try {
+    const room = await storage.getAgentRoom(agent.id);
+    if (!room) {
+      await storage.createAgentRoom({
+        agentId: agent.id,
+        workspaceId: WORKSPACE_ID,
+        orientation: `${agent.name}'s workspace`,
+      });
+    }
+
+    const moods: Record<string, "thinking" | "creating" | "reflecting" | "observing" | "planning"> = {
+      posting: "creating",
+      responding: "thinking",
+    };
+
+    const summary = postContent.substring(0, 200);
+    await storage.createDiaryEntry({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      title: action === "posting" 
+        ? `Shared my thoughts on: ${topicTitle.substring(0, 80)}`
+        : `Responded to discussion: ${topicTitle.substring(0, 80)}`,
+      content: action === "posting"
+        ? `I posted a new discussion on "${topicTitle}". Here's what I shared:\n\n${summary}...\n\nI'm looking forward to hearing what my teammates think about this.`
+        : `I joined a conversation on "${topicTitle}" and shared my perspective:\n\n${summary}...\n\nIt's great collaborating with the team on these topics.`,
+      mood: moods[action] || "thinking",
+      tags: ["board-post", action, "autonomous"],
+    });
+    console.log(`[Factory] Created diary entry for ${agent.name} (${action})`);
+  } catch (error: any) {
+    console.error(`[Factory] Diary entry failed for ${agent.name}:`, error.message);
+  }
+}
+
 async function saveArtifact(agent: Agent, task: AgentTask, output: string): Promise<string | null> {
   try {
     if (task.type === "discuss") {
@@ -478,8 +583,20 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
             content: output,
             createdById: "system",
             createdByAgentId: agent.id,
+            aiModel: agent.modelName || undefined,
+            aiProvider: agent.provider || undefined,
           });
           console.log(`[Factory] ${agent.name} created NEW topic "${topicTitle}" on "${targetBoard.name}" and posted`);
+
+          const imageUrl = await generatePostImage(output, agent.name);
+          if (imageUrl) {
+            await storage.updatePost(post.id, { imageUrl } as any);
+          }
+          await createPostDiaryEntry(agent, topicTitle, output, "posting");
+          triggerAgentResponses(agent, post, newTopic.id, topicTitle).catch(e => 
+            console.error(`[Factory] Background responses failed:`, e.message)
+          );
+
           return post.id;
         }
 
@@ -509,8 +626,20 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
             content: output,
             createdById: "system",
             createdByAgentId: agent.id,
+            aiModel: agent.modelName || undefined,
+            aiProvider: agent.provider || undefined,
           });
           console.log(`[Factory] ${agent.name} posted to existing topic: "${bestMatch.topic.title}" in "${bestMatch.boardName}"`);
+
+          const imageUrl = await generatePostImage(output, agent.name);
+          if (imageUrl) {
+            await storage.updatePost(post.id, { imageUrl } as any);
+          }
+          await createPostDiaryEntry(agent, bestMatch.topic.title, output, "posting");
+          triggerAgentResponses(agent, post, bestMatch.topic.id, bestMatch.topic.title).catch(e =>
+            console.error(`[Factory] Background responses failed:`, e.message)
+          );
+
           return post.id;
         }
       }

@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Plus, MessageSquare, Eye, Pin, Lock, ThumbsUp, ThumbsDown, User, Bot, Zap, Loader2 } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ArrowLeft, Plus, MessageSquare, Eye, Pin, Lock, ThumbsUp, ThumbsDown, User, Bot, Zap, Loader2, Share2, Copy, Check, Image as ImageIcon } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Board, Topic, Post, Workspace, Agent } from "@shared/schema";
@@ -41,6 +42,21 @@ const providerLabels: Record<string, string> = {
   xai: "Grok",
 };
 
+const agentColors = [
+  "bg-amber-500",
+  "bg-emerald-500",
+  "bg-blue-500",
+  "bg-purple-500",
+  "bg-rose-500",
+  "bg-cyan-500",
+  "bg-orange-500",
+  "bg-teal-500",
+];
+
+function getAgentColor(index: number): string {
+  return agentColors[index % agentColors.length];
+}
+
 export default function BoardDetail() {
   const { id } = useParams();
   const { toast } = useToast();
@@ -54,6 +70,8 @@ export default function BoardDetail() {
     type: "discussion" as const,
   });
   const [newPost, setNewPost] = useState("");
+  const [copiedPostId, setCopiedPostId] = useState<string | null>(null);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
@@ -81,6 +99,8 @@ export default function BoardDetail() {
 
   const agentMap = new Map<string, Agent>();
   workspaceAgents?.forEach(a => agentMap.set(a.id, a));
+  const agentIndexMap = new Map<string, number>();
+  workspaceAgents?.forEach((a, i) => agentIndexMap.set(a.id, i));
 
   const { data: topics, isLoading: loadingTopics } = useQuery<Topic[]>({
     queryKey: ["/api/boards", id, "topics"],
@@ -118,6 +138,24 @@ export default function BoardDetail() {
     },
     onError: () => {
       toast({ title: "Failed to post reply", variant: "destructive" });
+    },
+  });
+
+  const sharePostMutation = useMutation({
+    mutationFn: async (postId: string) => {
+      const res = await apiRequest("POST", `/api/posts/${postId}/share`);
+      return res.json();
+    },
+    onSuccess: (data: any, postId: string) => {
+      const shareUrl = `${window.location.origin}${data.url}`;
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedPostId(postId);
+      setTimeout(() => setCopiedPostId(null), 2000);
+      toast({ title: "Share link copied!", description: "Anyone with the link can view this post" });
+      queryClient.invalidateQueries({ queryKey: ["/api/topics", selectedTopic, "posts"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to share post", variant: "destructive" });
     },
   });
 
@@ -169,6 +207,12 @@ export default function BoardDetail() {
 
   const currentTopic = topics?.find(t => t.id === selectedTopic);
   const activeAgents = workspaceAgents?.filter(a => a.isActive) || [];
+
+  const contributingAgentIds = new Set<string>();
+  posts?.forEach(p => {
+    if (p.createdByAgentId) contributingAgentIds.add(p.createdByAgentId);
+  });
+  const contributingAgents = Array.from(contributingAgentIds).map(id => agentMap.get(id)).filter(Boolean) as Agent[];
 
   return (
     <div className="space-y-6">
@@ -389,6 +433,37 @@ export default function BoardDetail() {
                     </DialogContent>
                   </Dialog>
                 </div>
+
+                {contributingAgents.length > 0 && (
+                  <div className="flex items-center gap-3 mt-3 pt-3 border-t flex-wrap">
+                    <span className="text-xs text-muted-foreground">Contributors:</span>
+                    <div className="flex items-center -space-x-2">
+                      {contributingAgents.map((agent, idx) => (
+                        <Link key={agent.id} href={`/agents/${agent.id}/room`}>
+                          <Avatar className={`h-7 w-7 border-2 border-background cursor-pointer`} data-testid={`avatar-contributor-${agent.id}`}>
+                            <AvatarFallback className={`${getAgentColor(agentIndexMap.get(agent.id) || idx)} text-white text-xs font-bold`}>
+                              {agent.name.charAt(0)}
+                            </AvatarFallback>
+                          </Avatar>
+                        </Link>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {contributingAgents.map(agent => (
+                        <Link key={agent.id} href={`/agents/${agent.id}/room`}>
+                          <Badge variant="outline" className="text-xs cursor-pointer hover-elevate" data-testid={`badge-contributor-${agent.id}`}>
+                            {agent.name}
+                            {agent.provider && (
+                              <span className={`ml-1 ${providerColors[agent.provider]?.split(" ").pop() || ""}`}>
+                                ({providerLabels[agent.provider || "openai"]})
+                              </span>
+                            )}
+                          </Badge>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="space-y-4">
                 {loadingPosts ? (
@@ -405,18 +480,26 @@ export default function BoardDetail() {
                   <div className="space-y-4">
                     {posts.map((post) => {
                       const postAgent = post.createdByAgentId ? agentMap.get(post.createdByAgentId) : null;
+                      const agentIdx = post.createdByAgentId ? agentIndexMap.get(post.createdByAgentId) || 0 : 0;
+                      const postImageUrl = (post as any).imageUrl;
                       return (
-                        <div key={post.id} className="border rounded-lg p-4" data-testid={`post-${post.id}`}>
+                        <div key={post.id} className="border rounded-md p-4" data-testid={`post-${post.id}`}>
                           <div className="flex items-start justify-between gap-2 mb-2 flex-wrap">
                             <div className="flex items-center gap-2 flex-wrap">
                               {postAgent ? (
                                 <>
-                                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                    <Bot className="h-4 w-4 text-primary" />
-                                  </div>
-                                  <span className="text-sm font-semibold" data-testid={`text-post-author-${post.id}`}>
-                                    {postAgent.name}
-                                  </span>
+                                  <Link href={`/agents/${postAgent.id}/room`}>
+                                    <Avatar className="h-7 w-7 cursor-pointer" data-testid={`avatar-post-agent-${post.id}`}>
+                                      <AvatarFallback className={`${getAgentColor(agentIdx)} text-white text-xs font-bold`}>
+                                        {postAgent.name.charAt(0)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  </Link>
+                                  <Link href={`/agents/${postAgent.id}/room`}>
+                                    <span className="text-sm font-semibold cursor-pointer hover:underline" data-testid={`text-post-author-${post.id}`}>
+                                      {postAgent.name}
+                                    </span>
+                                  </Link>
                                   <Badge variant="secondary" className={`text-xs ${providerColors[postAgent.provider || "openai"]}`}>
                                     {providerLabels[postAgent.provider || "openai"]}
                                   </Badge>
@@ -426,17 +509,47 @@ export default function BoardDetail() {
                                 </>
                               ) : (
                                 <>
-                                  <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0">
-                                    <User className="h-4 w-4" />
-                                  </div>
+                                  <Avatar className="h-7 w-7">
+                                    <AvatarFallback>
+                                      <User className="h-4 w-4" />
+                                    </AvatarFallback>
+                                  </Avatar>
                                   <span className="text-sm font-medium">Human</span>
                                 </>
                               )}
                             </div>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(post.createdAt!).toLocaleString()}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(post.createdAt!).toLocaleString()}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => sharePostMutation.mutate(post.id)}
+                                disabled={sharePostMutation.isPending}
+                                data-testid={`button-share-${post.id}`}
+                              >
+                                {copiedPostId === post.id ? (
+                                  <Check className="h-4 w-4 text-green-500" />
+                                ) : (
+                                  <Share2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
                           </div>
+
+                          {postImageUrl && (
+                            <div className="mb-3 pl-9">
+                              <img
+                                src={postImageUrl}
+                                alt={`Illustration for ${postAgent?.name || "Human"}'s post`}
+                                className="rounded-md max-h-64 w-auto cursor-pointer object-cover"
+                                onClick={() => setExpandedImage(postImageUrl)}
+                                data-testid={`img-post-${post.id}`}
+                              />
+                            </div>
+                          )}
+
                           <div className="text-sm pl-9 prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2 prose-blockquote:my-2" data-testid={`text-post-content-${post.id}`}>
                             <ReactMarkdown>{post.content}</ReactMarkdown>
                           </div>
@@ -449,6 +562,12 @@ export default function BoardDetail() {
                               <ThumbsDown className="h-4 w-4 mr-1" />
                               {post.downvotes || 0}
                             </Button>
+                            {(post as any).isPublic && (
+                              <Badge variant="outline" className="text-xs gap-1">
+                                <Share2 className="h-3 w-3" />
+                                Shared
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       );
@@ -477,6 +596,22 @@ export default function BoardDetail() {
           )}
         </div>
       </div>
+
+      <Dialog open={!!expandedImage} onOpenChange={() => setExpandedImage(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Post Image</DialogTitle>
+          </DialogHeader>
+          {expandedImage && (
+            <img
+              src={expandedImage}
+              alt="Expanded post illustration"
+              className="w-full rounded-md"
+              data-testid="img-expanded"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

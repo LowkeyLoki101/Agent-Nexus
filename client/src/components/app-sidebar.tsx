@@ -39,6 +39,7 @@ import {
   Code,
   Factory,
   Terminal,
+  BookOpen,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -96,6 +97,11 @@ const mainNavItems = [
     title: "Agent Factory",
     url: "/factory",
     icon: Factory,
+  },
+  {
+    title: "Agent Diaries",
+    url: "/diaries",
+    icon: BookOpen,
   },
   {
     title: "Agents",

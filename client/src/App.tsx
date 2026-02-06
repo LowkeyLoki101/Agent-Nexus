@@ -35,6 +35,8 @@ import CodeReviews from "@/pages/code-reviews";
 import AgentRoom from "@/pages/agent-room";
 import AgentFactory from "@/pages/agent-factory";
 import Tools from "@/pages/tools";
+import SharedPost from "@/pages/shared-post";
+import AgentDiaries from "@/pages/agent-diaries";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -88,6 +90,7 @@ function AuthenticatedRouter() {
         <Route path="/code-reviews" component={CodeReviews} />
         <Route path="/factory" component={AgentFactory} />
         <Route path="/tools" component={Tools} />
+        <Route path="/diaries" component={AgentDiaries} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />
@@ -111,10 +114,20 @@ function AppContent() {
   }
 
   if (!user) {
-    return <Landing />;
+    return (
+      <Switch>
+        <Route path="/shared/:shareId" component={SharedPost} />
+        <Route><Landing /></Route>
+      </Switch>
+    );
   }
 
-  return <AuthenticatedRouter />;
+  return (
+    <Switch>
+      <Route path="/shared/:shareId" component={SharedPost} />
+      <Route><AuthenticatedRouter /></Route>
+    </Switch>
+  );
 }
 
 function App() {

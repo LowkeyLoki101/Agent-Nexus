@@ -168,6 +168,7 @@ export interface IStorage {
 
   // Posts
   getPost(id: string): Promise<Post | undefined>;
+  getPostByShareId(shareId: string): Promise<Post | undefined>;
   getPostsByTopic(topicId: string): Promise<Post[]>;
   createPost(post: InsertPost): Promise<Post>;
   updatePost(id: string, updates: Partial<InsertPost>): Promise<Post | undefined>;
@@ -751,6 +752,11 @@ export class DatabaseStorage implements IStorage {
   // Posts
   async getPost(id: string): Promise<Post | undefined> {
     const [post] = await db.select().from(posts).where(eq(posts.id, id));
+    return post;
+  }
+
+  async getPostByShareId(shareId: string): Promise<Post | undefined> {
+    const [post] = await db.select().from(posts).where(eq(posts.shareId, shareId));
     return post;
   }
 
