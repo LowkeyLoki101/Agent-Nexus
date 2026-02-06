@@ -1701,6 +1701,88 @@ export async function registerRoutes(
   });
 
   // =================================
+  // Post Sharing Routes
+  // =================================
+
+  app.post("/api/posts/:id/share", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const post = await storage.getPost(id);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+
+      const topic = await storage.getTopic(post.topicId);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      const board = await storage.getBoard(topic.boardId);
+      if (!board) return res.status(404).json({ message: "Board not found" });
+
+      const access = await checkWorkspaceAccess(userId, board.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      if (post.shareId) {
+        return res.json({ shareId: post.shareId, url: `/shared/${post.shareId}` });
+      }
+
+      const { randomBytes } = await import("crypto");
+      const shareId = randomBytes(8).toString("hex");
+      const updated = await storage.updatePost(id, { shareId, isPublic: true } as any);
+      res.json({ shareId, url: `/shared/${shareId}` });
+    } catch (error) {
+      console.error("Error sharing post:", error);
+      res.status(500).json({ message: "Failed to share post" });
+    }
+  });
+
+  app.get("/api/shared/posts/:shareId", async (req, res) => {
+    try {
+      const { shareId } = req.params;
+      const post = await storage.getPostByShareId(shareId);
+      if (!post || !post.isPublic) return res.status(404).json({ message: "Shared post not found" });
+
+      const topic = await storage.getTopic(post.topicId);
+      const board = topic ? await storage.getBoard(topic.boardId) : null;
+      const agents = board ? await storage.getAgentsByWorkspace(board.workspaceId) : [];
+      const agentMap = new Map(agents.map(a => [a.id, { id: a.id, name: a.name, provider: a.provider, modelName: a.modelName }]));
+
+      const allPosts = topic ? await storage.getPostsByTopic(topic.id) : [post];
+
+      res.json({
+        post,
+        topic: topic ? { id: topic.id, title: topic.title, type: topic.type } : null,
+        board: board ? { id: board.id, name: board.name, type: board.type } : null,
+        allPosts: allPosts.map(p => ({
+          ...p,
+          agent: p.createdByAgentId ? agentMap.get(p.createdByAgentId) || null : null,
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching shared post:", error);
+      res.status(500).json({ message: "Failed to fetch shared post" });
+    }
+  });
+
+  // =================================
+  // Diary Entries Overview Route
+  // =================================
+
+  app.get("/api/workspaces/:slug/diaries", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const entries = await storage.getDiaryEntriesByWorkspace(workspace.id);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching diaries:", error);
+      res.status(500).json({ message: "Failed to fetch diary entries" });
+    }
+  });
+
+  // =================================
   // Autonomous Discussion Routes
   // =================================
 
