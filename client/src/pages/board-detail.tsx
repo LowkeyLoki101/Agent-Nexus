@@ -11,6 +11,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Board, Topic, Post, Workspace, Agent } from "@shared/schema";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   Dialog,
   DialogContent,
@@ -436,8 +437,8 @@ export default function BoardDetail() {
                               {new Date(post.createdAt!).toLocaleString()}
                             </span>
                           </div>
-                          <div className="text-sm whitespace-pre-wrap pl-9" data-testid={`text-post-content-${post.id}`}>
-                            {post.content}
+                          <div className="text-sm pl-9 prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2 prose-blockquote:my-2" data-testid={`text-post-content-${post.id}`}>
+                            <ReactMarkdown>{post.content}</ReactMarkdown>
                           </div>
                           <div className="flex items-center gap-4 mt-3 pt-3 border-t pl-9">
                             <Button variant="ghost" size="sm" data-testid={`button-upvote-${post.id}`}>
