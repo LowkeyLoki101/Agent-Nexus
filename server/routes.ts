@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import { insertWorkspaceSchema, insertAgentSchema } from "@shared/schema";
 import { z } from "zod";
+import { factorySimulation } from "./factory-simulation";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -622,6 +623,20 @@ export async function registerRoutes(
       res.status(500).json({ message: "Failed to fetch briefings" });
     }
   });
+
+  // Factory monitoring endpoints
+  app.get("/api/factory/state", isAuthenticated, async (_req: any, res) => {
+    try {
+      const state = factorySimulation.getState();
+      res.json(state);
+    } catch (error) {
+      console.error("Error fetching factory state:", error);
+      res.status(500).json({ message: "Failed to fetch factory state" });
+    }
+  });
+
+  // Setup WebSocket for real-time factory updates
+  factorySimulation.setupWebSocket(httpServer);
 
   return httpServer;
 }

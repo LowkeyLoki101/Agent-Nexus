@@ -22,6 +22,7 @@ import BriefingNew from "@/pages/briefing-new";
 import BriefingDetail from "@/pages/briefing-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
+import FactoryMonitor from "@/pages/factory-monitor";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -64,6 +65,7 @@ function AuthenticatedRouter() {
         <Route path="/briefings/:id" component={BriefingDetail} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
+        <Route path="/factory" component={FactoryMonitor} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>

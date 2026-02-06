@@ -31,6 +31,7 @@ import {
   LogOut,
   ChevronUp,
   User,
+  Eye,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -48,6 +49,11 @@ const mainNavItems = [
     title: "Briefings",
     url: "/briefings",
     icon: ClipboardList,
+  },
+  {
+    title: "Factory Floor",
+    url: "/factory",
+    icon: Eye,
   },
   {
     title: "Agents",
