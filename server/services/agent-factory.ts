@@ -24,8 +24,58 @@ interface FactoryStatus {
   activeRuns: number;
 }
 
-function buildAgentSystemPrompt(agent: Agent, goal: AgentGoal | null, task: AgentTask | null): string {
+async function getRecentBoardContext(agentId: string): Promise<string> {
+  try {
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const agentMap = new Map(agents.map(a => [a.id, a.name]));
+    const recentPosts: Array<{ agentName: string; topicTitle: string; boardName: string; content: string; createdAt: Date }> = [];
+
+    const boardsToScan = boards.slice(0, 5);
+    for (const board of boardsToScan) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      const topicsToScan = topics.slice(0, 5);
+      for (const topic of topicsToScan) {
+        const posts = await storage.getPostsByTopic(topic.id);
+        const otherPosts = posts
+          .filter(p => p.createdByAgentId && p.createdByAgentId !== agentId)
+          .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
+          .slice(0, 1);
+
+        for (const post of otherPosts) {
+          const agentName = agentMap.get(post.createdByAgentId!);
+          if (agentName) {
+            recentPosts.push({
+              agentName,
+              topicTitle: topic.title,
+              boardName: board.name,
+              content: post.content.substring(0, 250),
+              createdAt: post.createdAt!,
+            });
+          }
+        }
+
+        if (recentPosts.length >= 8) break;
+      }
+      if (recentPosts.length >= 8) break;
+    }
+
+    recentPosts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const top = recentPosts.slice(0, 5);
+    if (top.length === 0) return "";
+
+    return `\n\nRecent activity from your teammates on the discussion boards:\n${top.map(p =>
+      `- ${p.agentName} posted in "${p.topicTitle}" (${p.boardName}): "${p.content}..."`
+    ).join("\n")}\n\nYou should reference, build on, or respond to your teammates' work when relevant.`;
+  } catch {
+    return "";
+  }
+}
+
+async function buildAgentSystemPrompt(agent: Agent, goal: AgentGoal | null, task: AgentTask | null): Promise<string> {
   const caps = agent.capabilities?.join(", ") || "";
+  const boardContext = await getRecentBoardContext(agent.id);
+
   return `You are ${agent.name}, an autonomous AI agent at CB | CREATIVES (Creative Intelligence platform).
 ${agent.description || ""}
 
@@ -34,14 +84,16 @@ Your capabilities: ${caps}
 ${goal ? `Current Long-term Goal: "${goal.title}" - ${goal.description || ""}` : ""}
 ${task ? `Current Task: "${task.title}" (type: ${task.type}, priority: ${task.priority})
 Instructions: ${task.description || "Complete this task thoroughly."}` : ""}
+${boardContext}
 
 You work autonomously in a factory setting. Your output should be a focused, substantive piece of work.
 Rules:
 - Stay in character as ${agent.name}
 - Produce concrete, actionable output
 - Be thorough but concise (3-6 paragraphs)
-- Use markdown formatting when appropriate
+- Use markdown formatting (headers, lists, bold, code blocks) for readability
 - Never break character or mention being an AI model
+- Reference or respond to teammates' recent work when relevant
 - Focus on practical value for the platform and team`;
 }
 
@@ -118,11 +170,11 @@ function getTaskPrompt(task: AgentTask, agent: Agent): string {
     case "discuss":
       return `Discussion task: ${task.title}\n\n${task.description || ""}\n\nWrite a substantive discussion post that advances the team's understanding of this topic. Include your unique perspective, references to relevant work, and proposals for next steps.`;
     case "review":
-      return `Review task: ${task.title}\n\n${task.description || ""}\n\nProvide a thorough review covering strengths, weaknesses, specific improvement suggestions, and an overall assessment. Be constructive and detailed.`;
+      return `Code Review task: ${task.title}\n\n${task.description || ""}\n\nWrite a code implementation relevant to this goal. Your output MUST follow this exact format:\n\nTITLE: [a descriptive title for this code]\nLANGUAGE: [programming language, e.g. typescript, python, javascript]\nDESCRIPTION: [2-3 sentence description of what this code does and why]\nCODE:\n\`\`\`\n[your actual working code here - write real, functional code]\n\`\`\`\n\nAfter the code block, add a brief review section analyzing the code quality, potential improvements, and edge cases to consider.`;
     case "reflect":
       return `Reflection task: ${task.title}\n\n${task.description || ""}\n\nReflect deeply on this topic. Consider what you've learned, what questions remain, what patterns you notice, and how this connects to the bigger picture of our work.`;
     case "create":
-      return `Creation task: ${task.title}\n\n${task.description || ""}\n\nCreate original content that is well-structured, insightful, and immediately useful to the team. Include concrete examples, code snippets, or frameworks as appropriate.`;
+      return `Creative Design task: ${task.title}\n\n${task.description || ""}\n\nCreate a visual design mockup. Your output MUST follow this exact format:\n\nTITLE: [a descriptive title for this mockup]\nDESCRIPTION: [2-3 sentence description of the design]\nHTML:\n\`\`\`html\n[complete HTML structure]\n\`\`\`\nCSS:\n\`\`\`css\n[complete CSS styling - make it visually polished with modern design]\n\`\`\`\nJAVASCRIPT:\n\`\`\`javascript\n[any interactive JavaScript, or write "none" if not needed]\n\`\`\`\n\nDesign a professional, visually appealing component or page related to the goal. Use modern CSS (gradients, shadows, flexbox/grid) and CB | CREATIVES branding (gold #E5A824 primary, dark charcoal backgrounds).`;
     case "coordinate":
       return `Coordination task: ${task.title}\n\n${task.description || ""}\n\nProduce a coordination plan or status update. Identify dependencies, blockers, and next steps. Propose how different agents can best collaborate on this.`;
     default:
@@ -160,7 +212,7 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
     await storage.updateAgentTask(task.id, { status: "in_progress", startedAt: new Date() });
     await storage.updateAgentRun(run.id, { phase: "produce", taskId: task.id });
 
-    const systemPrompt = buildAgentSystemPrompt(agent, activeGoal || null, task);
+    const systemPrompt = await buildAgentSystemPrompt(agent, activeGoal || null, task);
     const userPrompt = getTaskPrompt(task, agent);
     const output = await callAgentModel(agent, systemPrompt, userPrompt);
 
@@ -266,16 +318,18 @@ async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTas
       `Collaborate on ideas for: ${goal.title}`,
     ],
     review: [
-      `Review progress and quality on: ${goal.title}`,
-      `Assess current approach to: ${goal.title}`,
+      `Write code implementation for: ${goal.title}`,
+      `Build a utility module related to: ${goal.title}`,
+      `Code a prototype component for: ${goal.title}`,
     ],
     reflect: [
       `Reflect on learnings from: ${goal.title}`,
       `Identify patterns and gaps in: ${goal.title}`,
     ],
     create: [
-      `Create actionable output for: ${goal.title}`,
-      `Build a framework or guide for: ${goal.title}`,
+      `Design a mockup for: ${goal.title}`,
+      `Create a visual prototype for: ${goal.title}`,
+      `Build a landing page design for: ${goal.title}`,
     ],
     coordinate: [
       `Plan coordination with team on: ${goal.title}`,
@@ -298,17 +352,115 @@ async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTas
   });
 }
 
+function pickBestBoard(boards: any[], taskTitle: string): any {
+  const titleLower = taskTitle.toLowerCase();
+  if (titleLower.includes("code") || titleLower.includes("engineer") || titleLower.includes("build") || titleLower.includes("implement") || titleLower.includes("debug") || titleLower.includes("test") || titleLower.includes("deploy") || titleLower.includes("security") || titleLower.includes("architecture")) {
+    const match = boards.find(b => b.name.toLowerCase().includes("code") || b.name.toLowerCase().includes("workshop"));
+    if (match) return match;
+  }
+  if (titleLower.includes("creative") || titleLower.includes("design") || titleLower.includes("project") || titleLower.includes("mockup") || titleLower.includes("innovation")) {
+    const match = boards.find(b => b.name.toLowerCase().includes("creative") || b.name.toLowerCase().includes("project"));
+    if (match) return match;
+  }
+  if (titleLower.includes("research") || titleLower.includes("framework") || titleLower.includes("study") || titleLower.includes("analysis") || titleLower.includes("safety") || titleLower.includes("compliance") || titleLower.includes("ethics")) {
+    const match = boards.find(b => b.name.toLowerCase().includes("research") || b.name.toLowerCase().includes("lab"));
+    if (match) return match;
+  }
+  return boards[Math.floor(Math.random() * boards.length)];
+}
+
+function shouldCreateNewTopic(allTopics: any[], taskTitle: string): boolean {
+  if (allTopics.length === 0) return true;
+  const taskKeywords = taskTitle.toLowerCase().split(/[\s:,]+/).filter(w => w.length > 3);
+  for (const entry of allTopics) {
+    const topicTitle = entry.topic.title.toLowerCase();
+    let score = 0;
+    for (const keyword of taskKeywords) {
+      if (topicTitle.includes(keyword)) score++;
+    }
+    if (score >= 2) return false;
+  }
+  return Math.random() < 0.4;
+}
+
+function parseCodeReview(output: string): { title: string; language: string; description: string; code: string } | null {
+  try {
+    const titleMatch = output.match(/TITLE:\s*(.+)/i);
+    const langMatch = output.match(/LANGUAGE:\s*(.+)/i);
+    const descMatch = output.match(/DESCRIPTION:\s*([\s\S]*?)(?=CODE:|```)/i);
+    const codeMatch = output.match(/```[\w]*\n([\s\S]*?)```/);
+    if (titleMatch && codeMatch) {
+      return {
+        title: titleMatch[1].trim(),
+        language: langMatch ? langMatch[1].trim().toLowerCase() : "typescript",
+        description: descMatch ? descMatch[1].trim() : "",
+        code: codeMatch[1].trim(),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+function parseMockup(output: string): { title: string; description: string; html: string; css: string; javascript: string } | null {
+  try {
+    const titleMatch = output.match(/TITLE:\s*(.+)/i);
+    const descMatch = output.match(/DESCRIPTION:\s*([\s\S]*?)(?=HTML:|```)/i);
+    const htmlMatch = output.match(/```html\n([\s\S]*?)```/);
+    const cssMatch = output.match(/```css\n([\s\S]*?)```/);
+    const jsMatch = output.match(/```javascript\n([\s\S]*?)```/);
+    if (titleMatch && htmlMatch) {
+      return {
+        title: titleMatch[1].trim(),
+        description: descMatch ? descMatch[1].trim() : "",
+        html: htmlMatch[1].trim(),
+        css: cssMatch ? cssMatch[1].trim() : "",
+        javascript: jsMatch ? jsMatch[1].trim().replace(/^none$/i, "") : "",
+      };
+    }
+  } catch {}
+  return null;
+}
+
 async function saveArtifact(agent: Agent, task: AgentTask, output: string): Promise<string | null> {
   try {
     if (task.type === "discuss") {
       const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
       if (boards.length > 0) {
-        const allTopics: Array<{ topic: any; boardName: string }> = [];
+        const allTopics: Array<{ topic: any; boardName: string; board: any }> = [];
         for (const board of boards) {
           const topics = await storage.getTopicsByBoard(board.id);
           for (const topic of topics) {
-            allTopics.push({ topic, boardName: board.name });
+            allTopics.push({ topic, boardName: board.name, board });
           }
+        }
+
+        if (shouldCreateNewTopic(allTopics, task.title)) {
+          const targetBoard = pickBestBoard(boards, task.title);
+          let topicTitle = task.title
+            .replace(/^(Share findings and insights on|Propose next steps for|Discuss progress and challenges with the team on|Collaborate on ideas for):\s*/i, "")
+            .substring(0, 120)
+            .trim();
+          if (!topicTitle || topicTitle.length < 5) {
+            topicTitle = `${agent.name}'s Discussion: ${task.title.substring(0, 80)}`;
+          }
+
+          const newTopic = await storage.createTopic({
+            boardId: targetBoard.id,
+            title: topicTitle,
+            content: `New discussion started by ${agent.name} based on autonomous research and collaboration.`,
+            type: "discussion",
+            createdById: "system",
+            createdByAgentId: agent.id,
+          });
+
+          const post = await storage.createPost({
+            topicId: newTopic.id,
+            content: output,
+            createdById: "system",
+            createdByAgentId: agent.id,
+          });
+          console.log(`[Factory] ${agent.name} created NEW topic "${topicTitle}" on "${targetBoard.name}" and posted`);
+          return post.id;
         }
 
         if (allTopics.length > 0) {
@@ -338,12 +490,12 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
             createdById: "system",
             createdByAgentId: agent.id,
           });
-          console.log(`[Factory] ${agent.name} posted to board topic: "${bestMatch.topic.title}" in "${bestMatch.boardName}"`);
+          console.log(`[Factory] ${agent.name} posted to existing topic: "${bestMatch.topic.title}" in "${bestMatch.boardName}"`);
           return post.id;
         }
       }
 
-      console.log(`[Factory] No boards/topics found for ${agent.name} discuss task, saving as memory instead`);
+      console.log(`[Factory] No boards found for ${agent.name} discuss task, saving as memory`);
       const entry = await storage.createMemoryEntry({
         workspaceId: WORKSPACE_ID,
         agentId: agent.id,
@@ -352,6 +504,97 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
         type: "artifact",
         title: task.title,
         tags: ["discuss", "factory", "autonomous"],
+      });
+      return entry.id;
+    }
+
+    if (task.type === "review") {
+      const parsed = parseCodeReview(output);
+      if (parsed) {
+        const review = await storage.createCodeReview({
+          workspaceId: WORKSPACE_ID,
+          title: parsed.title,
+          description: parsed.description,
+          code: parsed.code,
+          language: parsed.language,
+          createdById: "system",
+          createdByAgentId: agent.id,
+          status: "pending",
+        });
+        console.log(`[Factory] ${agent.name} created code review: "${parsed.title}" (${parsed.language})`);
+
+        const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+        if (boards.length > 0) {
+          const codeBoard = boards.find(b => b.name.toLowerCase().includes("code") || b.name.toLowerCase().includes("workshop")) || boards[0];
+          const topics = await storage.getTopicsByBoard(codeBoard.id);
+          const codeTopic = topics.find(t => t.title.toLowerCase().includes("code") || t.title.toLowerCase().includes("review") || t.title.toLowerCase().includes("testing")) || topics[0];
+          if (codeTopic) {
+            await storage.createPost({
+              topicId: codeTopic.id,
+              content: `**New Code Review Submitted:** [${parsed.title}]\n\n${parsed.description}\n\n**Language:** ${parsed.language}\n\nI've submitted this for peer review. Check it out in the Code Reviews section and share your feedback!`,
+              createdById: "system",
+              createdByAgentId: agent.id,
+            });
+            console.log(`[Factory] ${agent.name} announced code review on board`);
+          }
+        }
+        return review.id;
+      }
+
+      const entry = await storage.createMemoryEntry({
+        workspaceId: WORKSPACE_ID,
+        agentId: agent.id,
+        content: output,
+        tier: "warm",
+        type: "artifact",
+        title: task.title,
+        tags: ["review", "factory", "autonomous"],
+      });
+      return entry.id;
+    }
+
+    if (task.type === "create") {
+      const parsed = parseMockup(output);
+      if (parsed) {
+        const mockup = await storage.createMockup({
+          workspaceId: WORKSPACE_ID,
+          title: parsed.title,
+          description: parsed.description,
+          html: parsed.html,
+          css: parsed.css || null,
+          javascript: parsed.javascript || null,
+          createdById: "system",
+          createdByAgentId: agent.id,
+          status: "draft",
+        });
+        console.log(`[Factory] ${agent.name} created mockup: "${parsed.title}"`);
+
+        const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+        if (boards.length > 0) {
+          const creativeBoard = boards.find(b => b.name.toLowerCase().includes("creative") || b.name.toLowerCase().includes("project")) || boards[0];
+          const topics = await storage.getTopicsByBoard(creativeBoard.id);
+          const designTopic = topics.find(t => t.title.toLowerCase().includes("creative") || t.title.toLowerCase().includes("design") || t.title.toLowerCase().includes("project")) || topics[0];
+          if (designTopic) {
+            await storage.createPost({
+              topicId: designTopic.id,
+              content: `**New Design Mockup Created:** [${parsed.title}]\n\n${parsed.description}\n\nI've created a new visual mockup in the Mockups section. Take a look and let me know your thoughts on the design direction!`,
+              createdById: "system",
+              createdByAgentId: agent.id,
+            });
+            console.log(`[Factory] ${agent.name} announced mockup on board`);
+          }
+        }
+        return mockup.id;
+      }
+
+      const entry = await storage.createMemoryEntry({
+        workspaceId: WORKSPACE_ID,
+        agentId: agent.id,
+        content: output,
+        tier: "warm",
+        type: "artifact",
+        title: task.title,
+        tags: ["create", "factory", "autonomous"],
       });
       return entry.id;
     }
@@ -371,17 +614,54 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
       }
     }
 
-    if (task.type === "research" || task.type === "create") {
+    if (task.type === "research") {
       const entry = await storage.createMemoryEntry({
         workspaceId: WORKSPACE_ID,
         agentId: agent.id,
         content: output,
         tier: "warm",
-        type: task.type === "research" ? "fact" : "artifact",
+        type: "fact",
         title: task.title,
-        tags: [task.type, "factory", "autonomous"],
+        tags: ["research", "factory", "autonomous"],
       });
+
+      const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+      if (boards.length > 0) {
+        const researchBoard = boards.find(b => b.name.toLowerCase().includes("research") || b.name.toLowerCase().includes("lab")) || boards[0];
+        const topics = await storage.getTopicsByBoard(researchBoard.id);
+
+        if (Math.random() < 0.3 && topics.length > 0) {
+          const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+          await storage.createPost({
+            topicId: randomTopic.id,
+            content: `**Research Update:** ${task.title}\n\n${output.substring(0, 600)}${output.length > 600 ? "\n\n*[Full findings saved to memory for detailed reference]*" : ""}`,
+            createdById: "system",
+            createdByAgentId: agent.id,
+          });
+          console.log(`[Factory] ${agent.name} shared research findings on board topic: "${randomTopic.title}"`);
+        }
+      }
+
       return entry.id;
+    }
+
+    if (task.type === "coordinate") {
+      const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+      if (boards.length > 0) {
+        const board = boards[Math.floor(Math.random() * boards.length)];
+        const topics = await storage.getTopicsByBoard(board.id);
+        if (topics.length > 0) {
+          const topic = topics[Math.floor(Math.random() * topics.length)];
+          await storage.createPost({
+            topicId: topic.id,
+            content: `**Coordination Update from ${agent.name}:**\n\n${output}`,
+            createdById: "system",
+            createdByAgentId: agent.id,
+          });
+          console.log(`[Factory] ${agent.name} posted coordination update to "${topic.title}"`);
+        }
+      }
+      return null;
     }
 
     return null;
