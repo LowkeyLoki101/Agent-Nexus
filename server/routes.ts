@@ -1979,6 +1979,93 @@ export async function registerRoutes(
     }
   });
 
+  // Factory routes (autonomous agent factory dashboard & control)
+  app.get("/api/factory/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const { getFactoryStatus } = await import("./services/agent-factory");
+      res.json(getFactoryStatus());
+    } catch (error) {
+      console.error("Error fetching factory status:", error);
+      res.status(500).json({ message: "Failed to fetch factory status" });
+    }
+  });
+
+  app.get("/api/factory/dashboard", isAuthenticated, async (req: any, res) => {
+    try {
+      const { getFactoryDashboardData } = await import("./services/agent-factory");
+      const data = await getFactoryDashboardData();
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching factory dashboard:", error);
+      res.status(500).json({ message: "Failed to fetch factory dashboard" });
+    }
+  });
+
+  app.post("/api/factory/start", isAuthenticated, async (req: any, res) => {
+    try {
+      const { startFactory } = await import("./services/agent-factory");
+      startFactory();
+      res.json({ message: "Factory started", isRunning: true });
+    } catch (error) {
+      console.error("Error starting factory:", error);
+      res.status(500).json({ message: "Failed to start factory" });
+    }
+  });
+
+  app.post("/api/factory/stop", isAuthenticated, async (req: any, res) => {
+    try {
+      const { stopFactory } = await import("./services/agent-factory");
+      stopFactory();
+      res.json({ message: "Factory stopped", isRunning: false });
+    } catch (error) {
+      console.error("Error stopping factory:", error);
+      res.status(500).json({ message: "Failed to stop factory" });
+    }
+  });
+
+  app.post("/api/factory/trigger-cycle", isAuthenticated, async (req: any, res) => {
+    try {
+      const { triggerManualCycle } = await import("./services/agent-factory");
+      triggerManualCycle();
+      res.json({ message: "Manual cycle triggered" });
+    } catch (error) {
+      console.error("Error triggering cycle:", error);
+      res.status(500).json({ message: "Failed to trigger cycle" });
+    }
+  });
+
+  app.get("/api/factory/activity", isAuthenticated, async (req: any, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const activity = await storage.getAllActivity(limit);
+      res.json(activity);
+    } catch (error) {
+      console.error("Error fetching activity:", error);
+      res.status(500).json({ message: "Failed to fetch activity" });
+    }
+  });
+
+  app.get("/api/factory/goals", isAuthenticated, async (req: any, res) => {
+    try {
+      const goals = await storage.getGoalsByWorkspace("55716a79-7cdc-44f2-b806-93869b0295f2");
+      res.json(goals);
+    } catch (error) {
+      console.error("Error fetching goals:", error);
+      res.status(500).json({ message: "Failed to fetch goals" });
+    }
+  });
+
+  app.get("/api/factory/runs", isAuthenticated, async (req: any, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const runs = await storage.getRunsByWorkspace("55716a79-7cdc-44f2-b806-93869b0295f2", limit);
+      res.json(runs);
+    } catch (error) {
+      console.error("Error fetching runs:", error);
+      res.status(500).json({ message: "Failed to fetch runs" });
+    }
+  });
+
   // Agent API routes (autonomous agent operations via API tokens)
   app.use("/api/agent", agentApiRoutes);
 

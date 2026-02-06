@@ -20,6 +20,10 @@ import {
   externalCache,
   agentRooms,
   diaryEntries,
+  agentGoals,
+  agentTasks,
+  agentRuns,
+  activityFeed,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -62,6 +66,14 @@ import {
   type InsertAgentRoom,
   type DiaryEntry,
   type InsertDiaryEntry,
+  type AgentGoal,
+  type InsertAgentGoal,
+  type AgentTask,
+  type InsertAgentTask,
+  type AgentRun,
+  type InsertAgentRun,
+  type ActivityFeedEntry,
+  type InsertActivityFeedEntry,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, or, ilike, sql } from "drizzle-orm";
@@ -210,6 +222,33 @@ export interface IStorage {
   getDiaryEntriesByWorkspace(workspaceId: string): Promise<DiaryEntry[]>;
   createDiaryEntry(entry: InsertDiaryEntry): Promise<DiaryEntry>;
   deleteDiaryEntry(id: string): Promise<void>;
+
+  // Agent Goals
+  getAgentGoal(id: string): Promise<AgentGoal | undefined>;
+  getGoalsByAgent(agentId: string): Promise<AgentGoal[]>;
+  getGoalsByWorkspace(workspaceId: string): Promise<AgentGoal[]>;
+  createAgentGoal(goal: InsertAgentGoal): Promise<AgentGoal>;
+  updateAgentGoal(id: string, updates: Partial<InsertAgentGoal>): Promise<AgentGoal | undefined>;
+
+  // Agent Tasks
+  getAgentTask(id: string): Promise<AgentTask | undefined>;
+  getTasksByAgent(agentId: string, status?: string): Promise<AgentTask[]>;
+  getTasksByWorkspace(workspaceId: string, status?: string): Promise<AgentTask[]>;
+  getNextTask(workspaceId: string): Promise<AgentTask | undefined>;
+  createAgentTask(task: InsertAgentTask): Promise<AgentTask>;
+  updateAgentTask(id: string, updates: Partial<InsertAgentTask>): Promise<AgentTask | undefined>;
+
+  // Agent Runs
+  getAgentRun(id: string): Promise<AgentRun | undefined>;
+  getRunsByAgent(agentId: string, limit?: number): Promise<AgentRun[]>;
+  getRunsByWorkspace(workspaceId: string, limit?: number): Promise<AgentRun[]>;
+  createAgentRun(run: InsertAgentRun): Promise<AgentRun>;
+  updateAgentRun(id: string, updates: Partial<InsertAgentRun>): Promise<AgentRun | undefined>;
+
+  // Activity Feed
+  getActivityFeed(workspaceId: string, limit?: number): Promise<ActivityFeedEntry[]>;
+  getAllActivity(limit?: number): Promise<ActivityFeedEntry[]>;
+  createActivityEntry(entry: InsertActivityFeedEntry): Promise<ActivityFeedEntry>;
 
   // Token authentication
   validateApiToken(plainToken: string): Promise<{ token: ApiToken; agent: Agent | null } | null>;
@@ -928,6 +967,106 @@ export class DatabaseStorage implements IStorage {
 
   async deleteDiaryEntry(id: string): Promise<void> {
     await db.delete(diaryEntries).where(eq(diaryEntries.id, id));
+  }
+
+  // Agent Goals
+  async getAgentGoal(id: string): Promise<AgentGoal | undefined> {
+    const [goal] = await db.select().from(agentGoals).where(eq(agentGoals.id, id));
+    return goal;
+  }
+
+  async getGoalsByAgent(agentId: string): Promise<AgentGoal[]> {
+    return db.select().from(agentGoals).where(eq(agentGoals.agentId, agentId)).orderBy(desc(agentGoals.priority));
+  }
+
+  async getGoalsByWorkspace(workspaceId: string): Promise<AgentGoal[]> {
+    return db.select().from(agentGoals).where(eq(agentGoals.workspaceId, workspaceId)).orderBy(desc(agentGoals.priority));
+  }
+
+  async createAgentGoal(goal: InsertAgentGoal): Promise<AgentGoal> {
+    const [created] = await db.insert(agentGoals).values(goal).returning();
+    return created;
+  }
+
+  async updateAgentGoal(id: string, updates: Partial<InsertAgentGoal>): Promise<AgentGoal | undefined> {
+    const [updated] = await db.update(agentGoals).set({ ...updates, updatedAt: new Date() }).where(eq(agentGoals.id, id)).returning();
+    return updated;
+  }
+
+  // Agent Tasks
+  async getAgentTask(id: string): Promise<AgentTask | undefined> {
+    const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, id));
+    return task;
+  }
+
+  async getTasksByAgent(agentId: string, status?: string): Promise<AgentTask[]> {
+    if (status) {
+      return db.select().from(agentTasks).where(and(eq(agentTasks.agentId, agentId), eq(agentTasks.status, status as any))).orderBy(desc(agentTasks.priority));
+    }
+    return db.select().from(agentTasks).where(eq(agentTasks.agentId, agentId)).orderBy(desc(agentTasks.priority));
+  }
+
+  async getTasksByWorkspace(workspaceId: string, status?: string): Promise<AgentTask[]> {
+    if (status) {
+      return db.select().from(agentTasks).where(and(eq(agentTasks.workspaceId, workspaceId), eq(agentTasks.status, status as any))).orderBy(desc(agentTasks.priority));
+    }
+    return db.select().from(agentTasks).where(eq(agentTasks.workspaceId, workspaceId)).orderBy(desc(agentTasks.priority));
+  }
+
+  async getNextTask(workspaceId: string): Promise<AgentTask | undefined> {
+    const [task] = await db.select().from(agentTasks)
+      .where(and(eq(agentTasks.workspaceId, workspaceId), eq(agentTasks.status, "queued")))
+      .orderBy(desc(agentTasks.priority))
+      .limit(1);
+    return task;
+  }
+
+  async createAgentTask(task: InsertAgentTask): Promise<AgentTask> {
+    const [created] = await db.insert(agentTasks).values(task).returning();
+    return created;
+  }
+
+  async updateAgentTask(id: string, updates: Partial<InsertAgentTask>): Promise<AgentTask | undefined> {
+    const [updated] = await db.update(agentTasks).set(updates).where(eq(agentTasks.id, id)).returning();
+    return updated;
+  }
+
+  // Agent Runs
+  async getAgentRun(id: string): Promise<AgentRun | undefined> {
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, id));
+    return run;
+  }
+
+  async getRunsByAgent(agentId: string, limit = 20): Promise<AgentRun[]> {
+    return db.select().from(agentRuns).where(eq(agentRuns.agentId, agentId)).orderBy(desc(agentRuns.createdAt)).limit(limit);
+  }
+
+  async getRunsByWorkspace(workspaceId: string, limit = 50): Promise<AgentRun[]> {
+    return db.select().from(agentRuns).where(eq(agentRuns.workspaceId, workspaceId)).orderBy(desc(agentRuns.createdAt)).limit(limit);
+  }
+
+  async createAgentRun(run: InsertAgentRun): Promise<AgentRun> {
+    const [created] = await db.insert(agentRuns).values(run).returning();
+    return created;
+  }
+
+  async updateAgentRun(id: string, updates: Partial<InsertAgentRun>): Promise<AgentRun | undefined> {
+    const [updated] = await db.update(agentRuns).set(updates).where(eq(agentRuns.id, id)).returning();
+    return updated;
+  }
+
+  // Activity Feed
+  async getActivityFeed(workspaceId: string, limit = 50): Promise<ActivityFeedEntry[]> {
+    return db.select().from(activityFeed).where(eq(activityFeed.workspaceId, workspaceId)).orderBy(desc(activityFeed.createdAt)).limit(limit);
+  }
+
+  async getAllActivity(limit = 100): Promise<ActivityFeedEntry[]> {
+    return db.select().from(activityFeed).orderBy(desc(activityFeed.createdAt)).limit(limit);
+  }
+
+  async createActivityEntry(entry: InsertActivityFeedEntry): Promise<ActivityFeedEntry> {
+    const [created] = await db.insert(activityFeed).values(entry).returning();
+    return created;
   }
 
   // Token authentication for agent API access

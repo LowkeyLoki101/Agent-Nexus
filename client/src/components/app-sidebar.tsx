@@ -37,6 +37,7 @@ import {
   User,
   Palette,
   Code,
+  Factory,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -84,6 +85,11 @@ const mainNavItems = [
     title: "Code Reviews",
     url: "/code-reviews",
     icon: Code,
+  },
+  {
+    title: "Agent Factory",
+    url: "/factory",
+    icon: Factory,
   },
   {
     title: "Agents",

@@ -705,6 +705,146 @@ export const insertExternalCacheSchema = createInsertSchema(externalCache).omit(
   updatedAt: true,
 });
 
+export const goalStatusEnum = pgEnum("goal_status", ["active", "completed", "paused", "abandoned"]);
+export const taskStatusEnum = pgEnum("task_status", ["queued", "in_progress", "completed", "failed", "skipped"]);
+export const taskTypeEnum = pgEnum("task_type", ["research", "discuss", "review", "reflect", "coordinate", "create"]);
+export const runPhaseEnum = pgEnum("run_phase", ["arrive", "orient", "produce", "coordinate", "handoff"]);
+export const runStatusEnum = pgEnum("run_status", ["running", "completed", "failed", "cancelled"]);
+
+export const agentGoals = pgTable("agent_goals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: goalStatusEnum("status").notNull().default("active"),
+  progress: integer("progress").default(0),
+  milestones: text("milestones").array(),
+  completedMilestones: text("completed_milestones").array(),
+  priority: integer("priority").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const agentGoalRelations = relations(agentGoals, ({ one }) => ({
+  agent: one(agents, {
+    fields: [agentGoals.agentId],
+    references: [agents.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [agentGoals.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const agentTasks = pgTable("agent_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  goalId: varchar("goal_id").references(() => agentGoals.id, { onDelete: "set null" }),
+  type: taskTypeEnum("type").notNull().default("research"),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: taskStatusEnum("status").notNull().default("queued"),
+  targetBoardId: varchar("target_board_id").references(() => boards.id, { onDelete: "set null" }),
+  targetTopicId: varchar("target_topic_id").references(() => topics.id, { onDelete: "set null" }),
+  resultSummary: text("result_summary"),
+  resultArtifactId: varchar("result_artifact_id"),
+  resultArtifactType: text("result_artifact_type"),
+  priority: integer("priority").default(1),
+  scheduledFor: timestamp("scheduled_for"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const agentTaskRelations = relations(agentTasks, ({ one }) => ({
+  agent: one(agents, {
+    fields: [agentTasks.agentId],
+    references: [agents.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [agentTasks.workspaceId],
+    references: [workspaces.id],
+  }),
+  goal: one(agentGoals, {
+    fields: [agentTasks.goalId],
+    references: [agentGoals.id],
+  }),
+}));
+
+export const agentRuns = pgTable("agent_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  taskId: varchar("task_id").references(() => agentTasks.id, { onDelete: "set null" }),
+  phase: runPhaseEnum("phase").notNull().default("arrive"),
+  status: runStatusEnum("status").notNull().default("running"),
+  input: text("input"),
+  output: text("output"),
+  tokensUsed: integer("tokens_used").default(0),
+  durationMs: integer("duration_ms").default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const agentRunRelations = relations(agentRuns, ({ one }) => ({
+  agent: one(agents, {
+    fields: [agentRuns.agentId],
+    references: [agents.id],
+  }),
+  task: one(agentTasks, {
+    fields: [agentRuns.taskId],
+    references: [agentTasks.id],
+  }),
+}));
+
+export const activityFeed = pgTable("activity_feed", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  artifactId: varchar("artifact_id"),
+  artifactType: text("artifact_type"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const activityFeedRelations = relations(activityFeed, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [activityFeed.workspaceId],
+    references: [workspaces.id],
+  }),
+  agent: one(agents, {
+    fields: [activityFeed.agentId],
+    references: [agents.id],
+  }),
+}));
+
+export const insertAgentGoalSchema = createInsertSchema(agentGoals).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAgentTaskSchema = createInsertSchema(agentTasks).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAgentRunSchema = createInsertSchema(agentRuns).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertActivityFeedSchema = createInsertSchema(activityFeed).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
@@ -747,3 +887,11 @@ export type DiaryEntry = typeof diaryEntries.$inferSelect;
 export type InsertDiaryEntry = z.infer<typeof insertDiaryEntrySchema>;
 export type ExternalCache = typeof externalCache.$inferSelect;
 export type InsertExternalCache = z.infer<typeof insertExternalCacheSchema>;
+export type AgentGoal = typeof agentGoals.$inferSelect;
+export type InsertAgentGoal = z.infer<typeof insertAgentGoalSchema>;
+export type AgentTask = typeof agentTasks.$inferSelect;
+export type InsertAgentTask = z.infer<typeof insertAgentTaskSchema>;
+export type AgentRun = typeof agentRuns.$inferSelect;
+export type InsertAgentRun = z.infer<typeof insertAgentRunSchema>;
+export type ActivityFeedEntry = typeof activityFeed.$inferSelect;
+export type InsertActivityFeedEntry = z.infer<typeof insertActivityFeedSchema>;
