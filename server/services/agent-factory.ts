@@ -174,7 +174,7 @@ function getTaskPrompt(task: AgentTask, agent: Agent): string {
     case "reflect":
       return `Reflection task: ${task.title}\n\n${task.description || ""}\n\nReflect deeply on this topic. Consider what you've learned, what questions remain, what patterns you notice, and how this connects to the bigger picture of our work.`;
     case "create":
-      return `Creative Design task: ${task.title}\n\n${task.description || ""}\n\nCreate a visual design mockup. Your output MUST follow this exact format:\n\nTITLE: [a descriptive title for this mockup]\nDESCRIPTION: [2-3 sentence description of the design]\nHTML:\n\`\`\`html\n[complete HTML structure]\n\`\`\`\nCSS:\n\`\`\`css\n[complete CSS styling - make it visually polished with modern design]\n\`\`\`\nJAVASCRIPT:\n\`\`\`javascript\n[any interactive JavaScript, or write "none" if not needed]\n\`\`\`\n\nDesign a professional, visually appealing component or page related to the goal. Use modern CSS (gradients, shadows, flexbox/grid) and CB | CREATIVES branding (gold #E5A824 primary, dark charcoal backgrounds).`;
+      return `Code Tool task: ${task.title}\n\n${task.description || ""}\n\nBuild a real, working code tool. Your output MUST follow this exact format:\n\nTITLE: [a descriptive name for this tool]\nLANGUAGE: javascript\nDESCRIPTION: [2-3 sentence description of what this tool does and how to use it]\nCODE:\n\`\`\`javascript\n[Write complete, self-contained, working JavaScript code. The tool should:\n- Actually DO something useful (process data, calculate, analyze, generate, validate, transform, etc.)\n- Use console.log() to output results\n- Include example data/input so it runs immediately and shows output\n- Be a real utility that solves a real problem\n- NOT be a mockup, design, or HTML - write actual executable logic]\n\`\`\`\n\nExamples of good tools: data validators, text analyzers, JSON transformers, algorithm implementations, metric calculators, report generators, data parsers, pattern matchers, encryption helpers, sorting utilities. Write code that works when executed.`;
     case "coordinate":
       return `Coordination task: ${task.title}\n\n${task.description || ""}\n\nProduce a coordination plan or status update. Identify dependencies, blockers, and next steps. Propose how different agents can best collaborate on this.`;
     default:
@@ -327,9 +327,11 @@ async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTas
       `Identify patterns and gaps in: ${goal.title}`,
     ],
     create: [
-      `Design a mockup for: ${goal.title}`,
-      `Create a visual prototype for: ${goal.title}`,
-      `Build a landing page design for: ${goal.title}`,
+      `Build a utility tool for: ${goal.title}`,
+      `Code a data processor for: ${goal.title}`,
+      `Write a working validator for: ${goal.title}`,
+      `Create an analysis tool for: ${goal.title}`,
+      `Build an automation script for: ${goal.title}`,
     ],
     coordinate: [
       `Plan coordination with team on: ${goal.title}`,
@@ -393,6 +395,24 @@ function parseCodeReview(output: string): { title: string; language: string; des
       return {
         title: titleMatch[1].trim(),
         language: langMatch ? langMatch[1].trim().toLowerCase() : "typescript",
+        description: descMatch ? descMatch[1].trim() : "",
+        code: codeMatch[1].trim(),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+function parseCodeTool(output: string): { title: string; language: string; description: string; code: string } | null {
+  try {
+    const titleMatch = output.match(/TITLE:\s*(.+)/i);
+    const langMatch = output.match(/LANGUAGE:\s*(.+)/i);
+    const descMatch = output.match(/DESCRIPTION:\s*([\s\S]*?)(?=CODE:|```)/i);
+    const codeMatch = output.match(/```[\w]*\n([\s\S]*?)```/);
+    if (titleMatch && codeMatch && codeMatch[1].trim().length > 20) {
+      return {
+        title: titleMatch[1].trim(),
+        language: langMatch ? langMatch[1].trim().toLowerCase() : "javascript",
         description: descMatch ? descMatch[1].trim() : "",
         code: codeMatch[1].trim(),
       };
@@ -554,37 +574,37 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
     }
 
     if (task.type === "create") {
-      const parsed = parseMockup(output);
+      const parsed = parseCodeTool(output);
       if (parsed) {
-        const mockup = await storage.createMockup({
+        const tool = await storage.createAgentTool({
           workspaceId: WORKSPACE_ID,
           title: parsed.title,
           description: parsed.description,
-          html: parsed.html,
-          css: parsed.css || null,
-          javascript: parsed.javascript || null,
+          code: parsed.code,
+          language: parsed.language,
+          tags: ["factory", "autonomous", parsed.language],
           createdById: "system",
           createdByAgentId: agent.id,
           status: "draft",
         });
-        console.log(`[Factory] ${agent.name} created mockup: "${parsed.title}"`);
+        console.log(`[Factory] ${agent.name} created tool: "${parsed.title}" (${parsed.language})`);
 
         const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
         if (boards.length > 0) {
-          const creativeBoard = boards.find(b => b.name.toLowerCase().includes("creative") || b.name.toLowerCase().includes("project")) || boards[0];
-          const topics = await storage.getTopicsByBoard(creativeBoard.id);
-          const designTopic = topics.find(t => t.title.toLowerCase().includes("creative") || t.title.toLowerCase().includes("design") || t.title.toLowerCase().includes("project")) || topics[0];
-          if (designTopic) {
+          const codeBoard = boards.find(b => b.name.toLowerCase().includes("code") || b.name.toLowerCase().includes("workshop")) || boards[0];
+          const topics = await storage.getTopicsByBoard(codeBoard.id);
+          const codeTopic = topics.find(t => t.title.toLowerCase().includes("code") || t.title.toLowerCase().includes("tool") || t.title.toLowerCase().includes("build")) || topics[0];
+          if (codeTopic) {
             await storage.createPost({
-              topicId: designTopic.id,
-              content: `**New Design Mockup Created:** [${parsed.title}]\n\n${parsed.description}\n\nI've created a new visual mockup in the Mockups section. Take a look and let me know your thoughts on the design direction!`,
+              topicId: codeTopic.id,
+              content: `**New Tool Built:** [${parsed.title}]\n\n${parsed.description}\n\n**Language:** ${parsed.language}\n\nI've built a new working tool in the Tools section. You can view the code, edit it, and run it directly! Check it out and let me know how it can be improved.`,
               createdById: "system",
               createdByAgentId: agent.id,
             });
-            console.log(`[Factory] ${agent.name} announced mockup on board`);
+            console.log(`[Factory] ${agent.name} announced tool on board`);
           }
         }
-        return mockup.id;
+        return tool.id;
       }
 
       const entry = await storage.createMemoryEntry({
