@@ -2385,6 +2385,133 @@ export async function registerRoutes(
     }
   });
 
+  // Pulse Updates
+  app.get("/api/workspaces/:slug/pulses", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const pulses = await storage.getPulsesByWorkspace(workspace.id);
+      res.json(pulses);
+    } catch (error) {
+      console.error("Error fetching pulse updates:", error);
+      res.status(500).json({ message: "Failed to fetch pulse updates" });
+    }
+  });
+
+  app.get("/api/agents/:id/pulses", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const pulses = await storage.getPulsesByAgent(id);
+      res.json(pulses);
+    } catch (error) {
+      console.error("Error fetching pulse updates:", error);
+      res.status(500).json({ message: "Failed to fetch pulse updates" });
+    }
+  });
+
+  // Pheromones
+  app.get("/api/workspaces/:slug/pheromones", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const result = await storage.getActivePheromones(workspace.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching pheromones:", error);
+      res.status(500).json({ message: "Failed to fetch pheromones" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/pheromones", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const { type, signal, strength, context, targetArea, taskType, boardId, topicId, emitterId } = req.body;
+      if (!type || !signal) {
+        return res.status(400).json({ message: "type and signal are required" });
+      }
+
+      const pheromone = await storage.createPheromone({
+        workspaceId: workspace.id,
+        emitterId: emitterId || userId,
+        type,
+        signal,
+        strength: strength || "moderate",
+        context,
+        targetArea,
+        taskType,
+        boardId,
+        topicId,
+      });
+      res.status(201).json(pheromone);
+    } catch (error) {
+      console.error("Error creating pheromone:", error);
+      res.status(500).json({ message: "Failed to create pheromone" });
+    }
+  });
+
+  // Area Temperatures
+  app.get("/api/workspaces/:slug/area-temperatures", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const result = await storage.getAreaTemperatures(workspace.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching area temperatures:", error);
+      res.status(500).json({ message: "Failed to fetch area temperatures" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/cold-areas", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const result = await storage.getColdAreas(workspace.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching cold areas:", error);
+      res.status(500).json({ message: "Failed to fetch cold areas" });
+    }
+  });
+
   // Agent API routes (autonomous agent operations via API tokens)
   app.use("/api/agent", agentApiRoutes);
 

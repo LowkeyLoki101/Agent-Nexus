@@ -96,6 +96,11 @@ export const agents = pgTable("agents", {
   isActive: boolean("is_active").default(true),
   capabilities: text("capabilities").array(),
   permissions: text("permissions").array(),
+  identityCard: text("identity_card"),
+  operatingPrinciples: text("operating_principles"),
+  roleMetaphor: text("role_metaphor"),
+  strengths: text("strengths").array(),
+  limitations: text("limitations").array(),
   createdById: varchar("created_by_id").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -153,6 +158,30 @@ export const diaryEntryRelations = relations(diaryEntries, ({ one }) => ({
   }),
   workspace: one(workspaces, {
     fields: [diaryEntries.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const pulseUpdates = pgTable("pulse_updates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  doingNow: text("doing_now").notNull(),
+  whatChanged: text("what_changed").notNull(),
+  blockers: text("blockers"),
+  nextActions: text("next_actions").notNull(),
+  artifactsProduced: text("artifacts_produced").array(),
+  cycleNumber: integer("cycle_number"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const pulseUpdateRelations = relations(pulseUpdates, ({ one }) => ({
+  agent: one(agents, {
+    fields: [pulseUpdates.agentId],
+    references: [agents.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [pulseUpdates.workspaceId],
     references: [workspaces.id],
   }),
 }));
@@ -689,6 +718,11 @@ export const insertDiaryEntrySchema = createInsertSchema(diaryEntries).omit({
   createdAt: true,
 });
 
+export const insertPulseUpdateSchema = createInsertSchema(pulseUpdates).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertBoardSchema = createInsertSchema(boards).omit({
   id: true,
   createdAt: true,
@@ -865,6 +899,77 @@ export const activityFeedRelations = relations(activityFeed, ({ one }) => ({
   }),
 }));
 
+// Pheromone signals - ant colony coordination system
+export const pheromoneTypeEnum = pgEnum("pheromone_type", ["need", "found", "blocked", "opportunity", "alert", "request"]);
+export const pheromoneStrengthEnum = pgEnum("pheromone_strength", ["faint", "moderate", "strong", "urgent"]);
+
+export const pheromones = pgTable("pheromones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  emitterId: varchar("emitter_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  type: pheromoneTypeEnum("type").notNull(),
+  strength: pheromoneStrengthEnum("strength").notNull().default("moderate"),
+  signal: text("signal").notNull(),
+  context: text("context"),
+  targetArea: text("target_area"),
+  targetAgentId: varchar("target_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  taskType: text("task_type"),
+  boardId: varchar("board_id"),
+  topicId: varchar("topic_id"),
+  decayRate: integer("decay_rate").default(10),
+  respondedBy: text("responded_by").array(),
+  isActive: boolean("is_active").default(true),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const pheromoneRelations = relations(pheromones, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [pheromones.workspaceId],
+    references: [workspaces.id],
+  }),
+  emitter: one(agents, {
+    fields: [pheromones.emitterId],
+    references: [agents.id],
+  }),
+}));
+
+// Area temperature tracking - hot/warm/cold zones
+export const areaTempEnum = pgEnum("area_temp", ["hot", "warm", "cold", "frozen"]);
+
+export const areaTemperatures = pgTable("area_temperatures", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  areaType: text("area_type").notNull(),
+  areaId: varchar("area_id").notNull(),
+  areaName: text("area_name").notNull(),
+  temperature: areaTempEnum("temperature").notNull().default("warm"),
+  activityScore: integer("activity_score").default(0),
+  lastActivityAt: timestamp("last_activity_at"),
+  postCount24h: integer("post_count_24h").default(0),
+  agentVisits24h: integer("agent_visits_24h").default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const areaTemperatureRelations = relations(areaTemperatures, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [areaTemperatures.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const insertPheromoneSchema = createInsertSchema(pheromones).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAreaTemperatureSchema = createInsertSchema(areaTemperatures).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertAgentGoalSchema = createInsertSchema(agentGoals).omit({
   id: true,
   createdAt: true,
@@ -938,3 +1043,9 @@ export type AgentRun = typeof agentRuns.$inferSelect;
 export type InsertAgentRun = z.infer<typeof insertAgentRunSchema>;
 export type ActivityFeedEntry = typeof activityFeed.$inferSelect;
 export type InsertActivityFeedEntry = z.infer<typeof insertActivityFeedSchema>;
+export type PulseUpdate = typeof pulseUpdates.$inferSelect;
+export type InsertPulseUpdate = z.infer<typeof insertPulseUpdateSchema>;
+export type Pheromone = typeof pheromones.$inferSelect;
+export type InsertPheromone = z.infer<typeof insertPheromoneSchema>;
+export type AreaTemperature = typeof areaTemperatures.$inferSelect;
+export type InsertAreaTemperature = z.infer<typeof insertAreaTemperatureSchema>;

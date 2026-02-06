@@ -25,6 +25,9 @@ import {
   agentTasks,
   agentRuns,
   activityFeed,
+  pulseUpdates,
+  pheromones,
+  areaTemperatures,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -77,9 +80,15 @@ import {
   type InsertAgentRun,
   type ActivityFeedEntry,
   type InsertActivityFeedEntry,
+  type PulseUpdate,
+  type InsertPulseUpdate,
+  type Pheromone,
+  type InsertPheromone,
+  type AreaTemperature,
+  type InsertAreaTemperature,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, or, ilike, sql } from "drizzle-orm";
+import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 
 export interface IStorage {
@@ -260,6 +269,28 @@ export interface IStorage {
   getActivityFeed(workspaceId: string, limit?: number): Promise<ActivityFeedEntry[]>;
   getAllActivity(limit?: number): Promise<ActivityFeedEntry[]>;
   createActivityEntry(entry: InsertActivityFeedEntry): Promise<ActivityFeedEntry>;
+
+  // Pulse Updates
+  createPulseUpdate(data: InsertPulseUpdate): Promise<PulseUpdate>;
+  getPulsesByAgent(agentId: string): Promise<PulseUpdate[]>;
+  getLatestPulse(agentId: string): Promise<PulseUpdate | undefined>;
+  getPulsesByWorkspace(workspaceId: string): Promise<PulseUpdate[]>;
+
+  // Pheromones
+  createPheromone(data: InsertPheromone): Promise<Pheromone>;
+  getActivePheromones(workspaceId: string): Promise<Pheromone[]>;
+  getPheromonesByAgent(agentId: string): Promise<Pheromone[]>;
+  getPheromonesForAgent(agentId: string, workspaceId: string): Promise<Pheromone[]>;
+  deactivatePheromone(id: string): Promise<void>;
+  markPheromoneResponded(id: string, agentId: string): Promise<void>;
+  expireOldPheromones(): Promise<void>;
+
+  // Area Temperatures
+  upsertAreaTemperature(data: InsertAreaTemperature): Promise<AreaTemperature>;
+  getAreaTemperatures(workspaceId: string): Promise<AreaTemperature[]>;
+  getColdAreas(workspaceId: string): Promise<AreaTemperature[]>;
+  getHotAreas(workspaceId: string): Promise<AreaTemperature[]>;
+  updateAreaTemperature(id: string, data: Partial<AreaTemperature>): Promise<AreaTemperature>;
 
   // Token authentication
   validateApiToken(plainToken: string): Promise<{ token: ApiToken; agent: Agent | null } | null>;
@@ -1134,6 +1165,121 @@ export class DatabaseStorage implements IStorage {
     }
     
     return { token, agent };
+  }
+
+  // Pulse Updates
+  async createPulseUpdate(data: InsertPulseUpdate): Promise<PulseUpdate> {
+    const [created] = await db.insert(pulseUpdates).values(data).returning();
+    return created;
+  }
+
+  async getPulsesByAgent(agentId: string): Promise<PulseUpdate[]> {
+    return db.select().from(pulseUpdates).where(eq(pulseUpdates.agentId, agentId)).orderBy(desc(pulseUpdates.createdAt));
+  }
+
+  async getLatestPulse(agentId: string): Promise<PulseUpdate | undefined> {
+    const [pulse] = await db.select().from(pulseUpdates).where(eq(pulseUpdates.agentId, agentId)).orderBy(desc(pulseUpdates.createdAt)).limit(1);
+    return pulse;
+  }
+
+  async getPulsesByWorkspace(workspaceId: string): Promise<PulseUpdate[]> {
+    return db.select().from(pulseUpdates).where(eq(pulseUpdates.workspaceId, workspaceId)).orderBy(desc(pulseUpdates.createdAt));
+  }
+
+  // Pheromones
+  async createPheromone(data: InsertPheromone): Promise<Pheromone> {
+    const [created] = await db.insert(pheromones).values(data).returning();
+    return created;
+  }
+
+  async getActivePheromones(workspaceId: string): Promise<Pheromone[]> {
+    return db.select().from(pheromones)
+      .where(and(eq(pheromones.workspaceId, workspaceId), eq(pheromones.isActive, true)))
+      .orderBy(desc(pheromones.createdAt));
+  }
+
+  async getPheromonesByAgent(agentId: string): Promise<Pheromone[]> {
+    return db.select().from(pheromones)
+      .where(eq(pheromones.emitterId, agentId))
+      .orderBy(desc(pheromones.createdAt));
+  }
+
+  async getPheromonesForAgent(agentId: string, workspaceId: string): Promise<Pheromone[]> {
+    const results = await db.select().from(pheromones)
+      .where(and(
+        eq(pheromones.workspaceId, workspaceId),
+        eq(pheromones.isActive, true),
+        ne(pheromones.emitterId, agentId)
+      ))
+      .orderBy(
+        sql`CASE ${pheromones.strength} WHEN 'urgent' THEN 0 WHEN 'strong' THEN 1 WHEN 'moderate' THEN 2 WHEN 'faint' THEN 3 END`,
+        desc(pheromones.createdAt)
+      );
+    return results;
+  }
+
+  async deactivatePheromone(id: string): Promise<void> {
+    await db.update(pheromones).set({ isActive: false }).where(eq(pheromones.id, id));
+  }
+
+  async markPheromoneResponded(id: string, agentId: string): Promise<void> {
+    await db.update(pheromones)
+      .set({ respondedBy: sql`array_append(${pheromones.respondedBy}, ${agentId})` })
+      .where(eq(pheromones.id, id));
+  }
+
+  async expireOldPheromones(): Promise<void> {
+    await db.update(pheromones)
+      .set({ isActive: false })
+      .where(and(
+        eq(pheromones.isActive, true),
+        lt(pheromones.expiresAt, new Date())
+      ));
+  }
+
+  // Area Temperatures
+  async upsertAreaTemperature(data: InsertAreaTemperature): Promise<AreaTemperature> {
+    const [existing] = await db.select().from(areaTemperatures)
+      .where(eq(areaTemperatures.areaId, data.areaId));
+    if (existing) {
+      const [updated] = await db.update(areaTemperatures)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(areaTemperatures.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(areaTemperatures).values(data).returning();
+    return created;
+  }
+
+  async getAreaTemperatures(workspaceId: string): Promise<AreaTemperature[]> {
+    return db.select().from(areaTemperatures)
+      .where(eq(areaTemperatures.workspaceId, workspaceId))
+      .orderBy(asc(areaTemperatures.activityScore));
+  }
+
+  async getColdAreas(workspaceId: string): Promise<AreaTemperature[]> {
+    return db.select().from(areaTemperatures)
+      .where(and(
+        eq(areaTemperatures.workspaceId, workspaceId),
+        inArray(areaTemperatures.temperature, ['cold', 'frozen'])
+      ));
+  }
+
+  async getHotAreas(workspaceId: string): Promise<AreaTemperature[]> {
+    return db.select().from(areaTemperatures)
+      .where(and(
+        eq(areaTemperatures.workspaceId, workspaceId),
+        eq(areaTemperatures.temperature, 'hot')
+      ));
+  }
+
+  async updateAreaTemperature(id: string, data: Partial<AreaTemperature>): Promise<AreaTemperature> {
+    const [updated] = await db.update(areaTemperatures)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(areaTemperatures.id, id))
+      .returning();
+    return updated;
   }
 }
 
