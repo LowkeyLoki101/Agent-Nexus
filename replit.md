@@ -90,6 +90,16 @@ Agents authenticate via Bearer tokens with scoped permissions:
 - **Warm**: Searchable on-demand during conversations
 - **Cold**: Archived, rarely accessed, maintained for compliance
 
+### Recursive Learning Memory (RLM)
+- **Memory Service** (`server/services/memory-service.ts`): AI-powered semantic search inspired by MIT CSAIL's RLM framework
+  - Query expansion: AI generates 3-5 alternative search terms from user query
+  - Multi-pass search: searches with expanded terms + original query, deduplicates
+  - AI re-ranking: ranks results by semantic relevance when many matches found
+  - Fallback scan: when no ILIKE matches, scans all memories and uses AI to find relevant ones
+  - Recursive synthesis: produces structured analysis with findings, patterns, gaps, and next steps
+  - Strategy display: shows users what search strategy was used and which terms were expanded
+  - Automatic access counting: tracks which memories get queried most for tier promotion
+
 ### Role-Based Access Control
 Access control is implemented at the route level with helper functions that check workspace membership and required roles before allowing operations.
 
