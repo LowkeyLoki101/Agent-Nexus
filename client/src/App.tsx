@@ -34,6 +34,7 @@ import Mockups from "@/pages/mockups";
 import CodeReviews from "@/pages/code-reviews";
 import AgentRoom from "@/pages/agent-room";
 import AgentFactory from "@/pages/agent-factory";
+import Tools from "@/pages/tools";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -86,6 +87,7 @@ function AuthenticatedRouter() {
         <Route path="/mockups" component={Mockups} />
         <Route path="/code-reviews" component={CodeReviews} />
         <Route path="/factory" component={AgentFactory} />
+        <Route path="/tools" component={Tools} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />

@@ -1894,6 +1894,208 @@ export async function registerRoutes(
   });
 
   // =================================
+  // Agent Tools Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/tools", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const tools = await storage.getAgentToolsByWorkspace(workspace.id);
+      res.json(tools);
+    } catch (error) {
+      console.error("Error fetching tools:", error);
+      res.status(500).json({ message: "Failed to fetch tools" });
+    }
+  });
+
+  app.get("/api/tools/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const tool = await storage.getAgentTool(req.params.id);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const access = await checkWorkspaceAccess(userId, tool.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      res.json(tool);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch tool" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/tools", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const createSchema = z.object({
+        title: z.string().min(1, "Title is required"),
+        description: z.string().optional().default(""),
+        code: z.string().min(1, "Code is required"),
+        language: z.string().optional().default("javascript"),
+        tags: z.array(z.string()).optional().default([]),
+      });
+      const parsed = createSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      const tool = await storage.createAgentTool({
+        workspaceId: workspace.id,
+        ...parsed.data,
+        createdById: userId,
+      });
+
+      res.status(201).json(tool);
+    } catch (error) {
+      console.error("Error creating tool:", error);
+      res.status(500).json({ message: "Failed to create tool" });
+    }
+  });
+
+  app.patch("/api/tools/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const tool = await storage.getAgentTool(id);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const access = await checkWorkspaceAccess(userId, tool.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const updateSchema = z.object({
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        code: z.string().min(1).optional(),
+        language: z.string().optional(),
+        status: z.enum(["draft", "tested", "approved", "failed"]).optional(),
+        tags: z.array(z.string()).optional(),
+      });
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      const updated = await storage.updateAgentTool(id, parsed.data);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating tool:", error);
+      res.status(500).json({ message: "Failed to update tool" });
+    }
+  });
+
+  app.delete("/api/tools/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const tool = await storage.getAgentTool(id);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const access = await checkWorkspaceAccess(userId, tool.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      await storage.deleteAgentTool(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting tool:", error);
+      res.status(500).json({ message: "Failed to delete tool" });
+    }
+  });
+
+  app.post("/api/tools/:id/run", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const tool = await storage.getAgentTool(id);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const access = await checkWorkspaceAccess(userId, tool.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const vm = await import("node:vm");
+      const logs: string[] = [];
+      const formatArg = (a: any) => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a);
+      const sandbox = {
+        console: {
+          log: (...args: any[]) => logs.push(args.map(formatArg).join(' ')),
+          error: (...args: any[]) => logs.push('[ERROR] ' + args.map(formatArg).join(' ')),
+          warn: (...args: any[]) => logs.push('[WARN] ' + args.map(formatArg).join(' ')),
+          info: (...args: any[]) => logs.push(args.map(formatArg).join(' ')),
+        },
+        Math: Object.freeze({ ...Math }),
+        Date,
+        JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
+        Array,
+        Object,
+        String,
+        Number,
+        Boolean,
+        RegExp,
+        Map,
+        Set,
+        parseInt,
+        parseFloat,
+        isNaN,
+        isFinite,
+        encodeURIComponent,
+        decodeURIComponent,
+        setTimeout: undefined,
+        setInterval: undefined,
+        fetch: undefined,
+        process: undefined,
+        require: undefined,
+        Function: undefined,
+        eval: undefined,
+        globalThis: undefined,
+      };
+
+      const context = vm.createContext(sandbox);
+      const startTime = Date.now();
+      let output = "";
+      let error = "";
+
+      try {
+        const script = new vm.Script(tool.code, { filename: `tool-${tool.id}.js` });
+        const result = script.runInContext(context, { timeout: 5000 });
+        output = logs.join('\n');
+        if (result !== undefined) {
+          const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+          output = output ? output + '\n' + resultStr : resultStr;
+        }
+      } catch (e: any) {
+        error = e.message || String(e);
+        output = logs.join('\n');
+      }
+
+      const duration = Date.now() - startTime;
+
+      await storage.updateAgentTool(id, {
+        lastOutput: output || null,
+        lastError: error || null,
+        lastRunAt: new Date(),
+        runCount: (tool.runCount || 0) + 1,
+        status: error ? "failed" : "tested",
+      } as any);
+
+      res.json({
+        output,
+        error,
+        duration,
+        runCount: (tool.runCount || 0) + 1,
+      });
+    } catch (error: any) {
+      console.error("Error running tool:", error);
+      res.status(500).json({ message: "Failed to run tool", error: error.message });
+    }
+  });
+
+  // =================================
   // Code Reviews Routes
   // =================================
 

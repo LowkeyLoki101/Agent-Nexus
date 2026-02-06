@@ -17,6 +17,7 @@ import {
   codeReviews,
   reviewComments,
   mockups,
+  agentTools,
   externalCache,
   agentRooms,
   diaryEntries,
@@ -60,6 +61,8 @@ import {
   type InsertReviewComment,
   type Mockup,
   type InsertMockup,
+  type AgentTool,
+  type InsertAgentTool,
   type ExternalCache,
   type InsertExternalCache,
   type AgentRoom,
@@ -201,6 +204,13 @@ export interface IStorage {
   createMockup(mockup: InsertMockup): Promise<Mockup>;
   updateMockup(id: string, updates: Partial<InsertMockup>): Promise<Mockup | undefined>;
   deleteMockup(id: string): Promise<void>;
+
+  // Agent Tools
+  getAgentTool(id: string): Promise<AgentTool | undefined>;
+  getAgentToolsByWorkspace(workspaceId: string): Promise<AgentTool[]>;
+  createAgentTool(tool: InsertAgentTool): Promise<AgentTool>;
+  updateAgentTool(id: string, updates: Partial<InsertAgentTool>): Promise<AgentTool | undefined>;
+  deleteAgentTool(id: string): Promise<void>;
 
   // External Cache
   getExternalCache(id: string): Promise<ExternalCache | undefined>;
@@ -888,6 +898,30 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMockup(id: string): Promise<void> {
     await db.delete(mockups).where(eq(mockups.id, id));
+  }
+
+  // Agent Tools
+  async getAgentTool(id: string): Promise<AgentTool | undefined> {
+    const [tool] = await db.select().from(agentTools).where(eq(agentTools.id, id));
+    return tool;
+  }
+
+  async getAgentToolsByWorkspace(workspaceId: string): Promise<AgentTool[]> {
+    return db.select().from(agentTools).where(eq(agentTools.workspaceId, workspaceId)).orderBy(desc(agentTools.createdAt));
+  }
+
+  async createAgentTool(tool: InsertAgentTool): Promise<AgentTool> {
+    const [created] = await db.insert(agentTools).values(tool).returning();
+    return created;
+  }
+
+  async updateAgentTool(id: string, updates: Partial<InsertAgentTool>): Promise<AgentTool | undefined> {
+    const [updated] = await db.update(agentTools).set({ ...updates, updatedAt: new Date() }).where(eq(agentTools.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAgentTool(id: string): Promise<void> {
+    await db.delete(agentTools).where(eq(agentTools.id, id));
   }
 
   // External Cache

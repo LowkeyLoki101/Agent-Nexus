@@ -38,6 +38,7 @@ import {
   Palette,
   Code,
   Factory,
+  Terminal,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -80,6 +81,11 @@ const mainNavItems = [
     title: "Mockups",
     url: "/mockups",
     icon: Palette,
+  },
+  {
+    title: "Tools",
+    url: "/tools",
+    icon: Terminal,
   },
   {
     title: "Code Reviews",
