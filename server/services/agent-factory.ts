@@ -409,6 +409,14 @@ export async function triggerManualCycle(): Promise<void> {
   await runFactoryCycle();
 }
 
+export async function triggerSingleAgentCycle(agentId: string): Promise<void> {
+  const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+  const agent = allAgents.find(a => a.id === agentId);
+  if (!agent) throw new Error("Agent not found");
+  console.log(`[Factory] Triggering single agent cycle for ${agent.name}`);
+  await executeAgentCycle(agent);
+}
+
 export async function getFactoryDashboardData() {
   const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
   const goals = await storage.getGoalsByWorkspace(WORKSPACE_ID);
