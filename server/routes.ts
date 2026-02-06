@@ -2034,6 +2034,41 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/factory/trigger-agent/:agentId", isAuthenticated, async (req: any, res) => {
+    try {
+      const { triggerSingleAgentCycle } = await import("./services/agent-factory");
+      await triggerSingleAgentCycle(req.params.agentId);
+      res.json({ message: "Agent cycle triggered", agentId: req.params.agentId });
+    } catch (error: any) {
+      console.error("Error triggering agent cycle:", error);
+      if (error.message === "Agent not found") {
+        res.status(404).json({ message: "Agent not found" });
+      } else {
+        res.status(500).json({ message: "Failed to trigger agent cycle" });
+      }
+    }
+  });
+
+  app.get("/api/factory/agent/:agentId/runs", isAuthenticated, async (req: any, res) => {
+    try {
+      const runs = await storage.getRunsByAgent(req.params.agentId, 20);
+      res.json(runs);
+    } catch (error) {
+      console.error("Error fetching agent runs:", error);
+      res.status(500).json({ message: "Failed to fetch agent runs" });
+    }
+  });
+
+  app.get("/api/factory/agent/:agentId/tasks", isAuthenticated, async (req: any, res) => {
+    try {
+      const tasks = await storage.getTasksByAgent(req.params.agentId);
+      res.json(tasks);
+    } catch (error) {
+      console.error("Error fetching agent tasks:", error);
+      res.status(500).json({ message: "Failed to fetch agent tasks" });
+    }
+  });
+
   app.get("/api/factory/activity", isAuthenticated, async (req: any, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
