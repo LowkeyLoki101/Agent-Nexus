@@ -28,6 +28,8 @@ import {
   pulseUpdates,
   pheromones,
   areaTemperatures,
+  tokenUsage,
+  tokenBudgets,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -86,6 +88,10 @@ import {
   type InsertPheromone,
   type AreaTemperature,
   type InsertAreaTemperature,
+  type TokenUsage,
+  type InsertTokenUsage,
+  type TokenBudget,
+  type InsertTokenBudget,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
@@ -294,6 +300,17 @@ export interface IStorage {
 
   // Token authentication
   validateApiToken(plainToken: string): Promise<{ token: ApiToken; agent: Agent | null } | null>;
+
+  // Token Usage Tracking
+  logTokenUsage(usage: InsertTokenUsage): Promise<TokenUsage>;
+  getTokenUsageSummary(workspaceId: string): Promise<{ totalTokens: number; totalRequests: number; byProvider: Record<string, number>; byAgent: Record<string, number> }>;
+  getTokenUsageBuckets(workspaceId: string, granularity: string, limit?: number): Promise<Array<{ bucket: string; totalTokens: number; requests: number; avgTokens: number }>>;
+
+  // Token Budgets
+  getTokenBudget(workspaceId: string): Promise<TokenBudget | undefined>;
+  createTokenBudget(budget: InsertTokenBudget): Promise<TokenBudget>;
+  updateTokenBudget(id: string, updates: Partial<InsertTokenBudget>): Promise<TokenBudget | undefined>;
+  getTokenBudgetRemaining(workspaceId: string): Promise<{ allocation: number; used: number; remaining: number; cadence: string } | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1280,6 +1297,88 @@ export class DatabaseStorage implements IStorage {
       .where(eq(areaTemperatures.id, id))
       .returning();
     return updated;
+  }
+
+  async logTokenUsage(usage: InsertTokenUsage): Promise<TokenUsage> {
+    const [entry] = await db.insert(tokenUsage).values(usage).returning();
+    return entry;
+  }
+
+  async getTokenUsageSummary(workspaceId: string): Promise<{ totalTokens: number; totalRequests: number; byProvider: Record<string, number>; byAgent: Record<string, number> }> {
+    const rows = await db.select().from(tokenUsage).where(eq(tokenUsage.workspaceId, workspaceId));
+    const totalTokens = rows.reduce((s, r) => s + (r.tokensTotal || 0), 0);
+    const totalRequests = rows.length;
+    const byProvider: Record<string, number> = {};
+    const byAgent: Record<string, number> = {};
+    for (const r of rows) {
+      byProvider[r.provider] = (byProvider[r.provider] || 0) + (r.tokensTotal || 0);
+      if (r.agentId) {
+        byAgent[r.agentId] = (byAgent[r.agentId] || 0) + (r.tokensTotal || 0);
+      }
+    }
+    return { totalTokens, totalRequests, byProvider, byAgent };
+  }
+
+  async getTokenUsageBuckets(workspaceId: string, granularity: string, limit: number = 30): Promise<Array<{ bucket: string; totalTokens: number; requests: number; avgTokens: number }>> {
+    const truncUnit = granularity === 'minute' ? 'minute' : granularity === 'hour' ? 'hour' : granularity === 'week' ? 'week' : granularity === 'month' ? 'month' : 'day';
+    const result = await db.execute(sql`
+      SELECT
+        date_trunc(${truncUnit}, created_at) as bucket,
+        COALESCE(SUM(tokens_total), 0)::int as total_tokens,
+        COUNT(*)::int as requests,
+        COALESCE(AVG(tokens_total), 0)::int as avg_tokens
+      FROM token_usage
+      WHERE workspace_id = ${workspaceId}
+      GROUP BY bucket
+      ORDER BY bucket DESC
+      LIMIT ${limit}
+    `);
+    return (result.rows as any[]).map(r => ({
+      bucket: r.bucket instanceof Date ? r.bucket.toISOString() : String(r.bucket),
+      totalTokens: Number(r.total_tokens) || 0,
+      requests: Number(r.requests) || 0,
+      avgTokens: Number(r.avg_tokens) || 0,
+    }));
+  }
+
+  async getTokenBudget(workspaceId: string): Promise<TokenBudget | undefined> {
+    const [budget] = await db.select().from(tokenBudgets)
+      .where(eq(tokenBudgets.workspaceId, workspaceId))
+      .orderBy(desc(tokenBudgets.createdAt))
+      .limit(1);
+    return budget;
+  }
+
+  async createTokenBudget(budget: InsertTokenBudget): Promise<TokenBudget> {
+    const [created] = await db.insert(tokenBudgets).values(budget).returning();
+    return created;
+  }
+
+  async updateTokenBudget(id: string, updates: Partial<InsertTokenBudget>): Promise<TokenBudget | undefined> {
+    const [updated] = await db.update(tokenBudgets)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tokenBudgets.id, id))
+      .returning();
+    return updated;
+  }
+
+  async getTokenBudgetRemaining(workspaceId: string): Promise<{ allocation: number; used: number; remaining: number; cadence: string } | null> {
+    const budget = await this.getTokenBudget(workspaceId);
+    if (!budget) return null;
+    const now = new Date();
+    const periodStart = budget.periodStart || budget.createdAt || now;
+    const usageRows = await db.select().from(tokenUsage)
+      .where(and(
+        eq(tokenUsage.workspaceId, workspaceId),
+        sql`created_at >= ${periodStart}`
+      ));
+    const used = usageRows.reduce((s, r) => s + (r.tokensTotal || 0), 0);
+    return {
+      allocation: budget.allocation,
+      used,
+      remaining: Math.max(0, budget.allocation - used),
+      cadence: budget.cadence,
+    };
   }
 }
 

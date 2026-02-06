@@ -959,6 +959,62 @@ export const areaTemperatureRelations = relations(areaTemperatures, ({ one }) =>
   }),
 }));
 
+export const budgetCadenceEnum = pgEnum("budget_cadence", ["daily", "weekly", "monthly"]);
+
+export const tokenUsage = pgTable("token_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  tokensPrompt: integer("tokens_prompt").default(0),
+  tokensCompletion: integer("tokens_completion").default(0),
+  tokensTotal: integer("tokens_total").default(0),
+  requestType: text("request_type"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const tokenUsageRelations = relations(tokenUsage, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [tokenUsage.workspaceId],
+    references: [workspaces.id],
+  }),
+  agent: one(agents, {
+    fields: [tokenUsage.agentId],
+    references: [agents.id],
+  }),
+}));
+
+export const tokenBudgets = pgTable("token_budgets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  cadence: budgetCadenceEnum("cadence").notNull().default("monthly"),
+  allocation: integer("allocation").notNull().default(1000000),
+  used: integer("used").default(0),
+  periodStart: timestamp("period_start").defaultNow(),
+  periodEnd: timestamp("period_end"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const tokenBudgetRelations = relations(tokenBudgets, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [tokenBudgets.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const insertTokenUsageSchema = createInsertSchema(tokenUsage).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertTokenBudgetSchema = createInsertSchema(tokenBudgets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertPheromoneSchema = createInsertSchema(pheromones).omit({
   id: true,
   createdAt: true,
@@ -1049,3 +1105,7 @@ export type Pheromone = typeof pheromones.$inferSelect;
 export type InsertPheromone = z.infer<typeof insertPheromoneSchema>;
 export type AreaTemperature = typeof areaTemperatures.$inferSelect;
 export type InsertAreaTemperature = z.infer<typeof insertAreaTemperatureSchema>;
+export type TokenUsage = typeof tokenUsage.$inferSelect;
+export type InsertTokenUsage = z.infer<typeof insertTokenUsageSchema>;
+export type TokenBudget = typeof tokenBudgets.$inferSelect;
+export type InsertTokenBudget = z.infer<typeof insertTokenBudgetSchema>;

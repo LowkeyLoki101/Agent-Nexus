@@ -79,6 +79,7 @@ async function buildAgentSystemPrompt(agent: Agent, goal: AgentGoal | null, task
   const lastJournal = await getLastJournalEntry(agent.id);
   const hotMemories = await getAgentHotMemories(agent.id);
   const nearbyPheromones = await storage.getPheromonesForAgent(agent.id, WORKSPACE_ID).catch(() => []);
+  const budgetInfo = await storage.getTokenBudgetRemaining(agent.workspaceId).catch(() => null);
 
   const identitySection = agent.identityCard
     ? `## Identity Card\n${agent.identityCard}`
@@ -98,6 +99,20 @@ async function buildAgentSystemPrompt(agent: Agent, goal: AgentGoal | null, task
 
   const pheromoneSection = nearbyPheromones.length > 0
     ? `\n## Signals From Teammates (Pheromone Trail)\nThese are recent signals left by your colleagues — like notes on a shared whiteboard:\n${nearbyPheromones.slice(0, 8).map(p => `- [${p.type}/${p.strength}] ${p.signal}`).join("\n")}\nConsider these when deciding how to approach your work.`
+    : "";
+
+  const budgetSection = budgetInfo
+    ? `\n## Token Budget Awareness
+Your workspace has a ${budgetInfo.cadence} token budget:
+- Allocation: ${budgetInfo.allocation.toLocaleString()} tokens
+- Used so far: ${budgetInfo.used.toLocaleString()} tokens
+- Remaining: ${budgetInfo.remaining.toLocaleString()} tokens (${Math.round((budgetInfo.remaining / budgetInfo.allocation) * 100)}%)
+
+Be mindful of token consumption. When budget is low (<20% remaining), prioritize efficiency:
+- Write concise but substantive outputs
+- Focus on high-impact tasks
+- Consider deferring research-heavy work
+- Coordinate with teammates to distribute workload efficiently`
     : "";
 
   return `${identitySection}
@@ -124,6 +139,7 @@ ${boardContext}
 ${continuitySection}
 ${memorySection}
 ${pheromoneSection}
+${budgetSection}
 
 ## Rules
 - Stay in character as ${agent.name} — write with your unique voice and perspective
@@ -155,7 +171,33 @@ async function getAgentHotMemories(agentId: string): Promise<Array<{ type: strin
   }
 }
 
-async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: string): Promise<string> {
+interface ModelResult {
+  text: string;
+  tokensPrompt: number;
+  tokensCompletion: number;
+  tokensTotal: number;
+  provider: string;
+  model: string;
+}
+
+async function logUsageToDb(agent: Agent, result: ModelResult, requestType?: string) {
+  try {
+    await storage.logTokenUsage({
+      workspaceId: agent.workspaceId,
+      agentId: agent.id,
+      provider: result.provider,
+      model: result.model,
+      tokensPrompt: result.tokensPrompt,
+      tokensCompletion: result.tokensCompletion,
+      tokensTotal: result.tokensTotal,
+      requestType: requestType || "factory",
+    });
+  } catch (e) {
+    console.error("[Factory] Failed to log token usage:", e);
+  }
+}
+
+async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: string, requestType?: string): Promise<string> {
   const provider = agent.provider || "openai";
   const model = agent.modelName || "gpt-4o-mini";
 
@@ -168,7 +210,15 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
         messages: [{ role: "user", content: userPrompt }],
       });
       const block = response.content[0];
-      return block.type === "text" ? block.text : "";
+      const text = block.type === "text" ? block.text : "";
+      const usage = response.usage;
+      await logUsageToDb(agent, {
+        text, provider, model,
+        tokensPrompt: usage?.input_tokens || estimateTokens(systemPrompt + userPrompt),
+        tokensCompletion: usage?.output_tokens || estimateTokens(text),
+        tokensTotal: (usage?.input_tokens || 0) + (usage?.output_tokens || 0) || estimateTokens(systemPrompt + userPrompt + text),
+      }, requestType);
+      return text;
     }
 
     if (provider === "xai") {
@@ -185,7 +235,15 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
         temperature: 0.9,
         max_tokens: 1500,
       });
-      return response.choices[0]?.message?.content || "";
+      const text = response.choices[0]?.message?.content || "";
+      const usage = response.usage;
+      await logUsageToDb(agent, {
+        text, provider: "xai", model,
+        tokensPrompt: usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
+        tokensCompletion: usage?.completion_tokens || estimateTokens(text),
+        tokensTotal: usage?.total_tokens || estimateTokens(systemPrompt + userPrompt + text),
+      }, requestType);
+      return text;
     }
 
     const response = await openai.chat.completions.create({
@@ -197,7 +255,15 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
       temperature: 0.8,
       max_tokens: 1500,
     });
-    return response.choices[0]?.message?.content || "";
+    const text = response.choices[0]?.message?.content || "";
+    const usage = response.usage;
+    await logUsageToDb(agent, {
+      text, provider: "openai", model,
+      tokensPrompt: usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
+      tokensCompletion: usage?.completion_tokens || estimateTokens(text),
+      tokensTotal: usage?.total_tokens || estimateTokens(systemPrompt + userPrompt + text),
+    }, requestType);
+    return text;
   } catch (error: any) {
     console.error(`[Factory] Error calling ${provider}/${model} for ${agent.name}:`, error.message);
     if (provider === "xai" || provider === "anthropic") {
@@ -211,8 +277,16 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
           temperature: 0.8,
           max_tokens: 1500,
         });
+        const text = fallback.choices[0]?.message?.content || "";
+        const usage = fallback.usage;
+        await logUsageToDb(agent, {
+          text, provider: "openai", model: "gpt-4o-mini",
+          tokensPrompt: usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
+          tokensCompletion: usage?.completion_tokens || estimateTokens(text),
+          tokensTotal: usage?.total_tokens || estimateTokens(systemPrompt + userPrompt + text),
+        }, requestType);
         console.log(`[Factory] Fallback to OpenAI for ${agent.name} succeeded`);
-        return fallback.choices[0]?.message?.content || "";
+        return text;
       } catch (fallbackError: any) {
         console.error(`[Factory] Fallback also failed for ${agent.name}:`, fallbackError.message);
       }

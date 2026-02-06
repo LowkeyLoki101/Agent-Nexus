@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,17 +10,55 @@ import {
   Bot, 
   Users, 
   Key, 
-  FileText, 
   Building2,
   ArrowRight,
-  Activity
+  Activity,
+  Zap,
+  TrendingUp,
+  BarChart3,
+  Clock
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import type { Workspace, Agent, AuditLog } from "@shared/schema";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+} from "recharts";
+
+interface TokenUsageSummary {
+  totalTokens: number;
+  totalRequests: number;
+  byProvider: Record<string, number>;
+  byAgent: Record<string, number>;
+}
+
+interface TokenBucket {
+  bucket: string;
+  totalTokens: number;
+  requests: number;
+  avgTokens: number;
+}
+
+interface TokenBudgetRemaining {
+  allocation: number;
+  used: number;
+  remaining: number;
+  cadence: string;
+}
+
+type Granularity = "minute" | "hour" | "day" | "week" | "month";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const [granularity, setGranularity] = useState<Granularity>("hour");
 
   const { data: workspaces, isLoading: loadingWorkspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
@@ -33,10 +72,55 @@ export default function Dashboard() {
     queryKey: ["/api/audit-logs/recent"],
   });
 
+  const { data: tokenSummary, isLoading: loadingTokenSummary } = useQuery<TokenUsageSummary>({
+    queryKey: ["/api/token-usage/summary"],
+  });
+
+  const { data: tokenBuckets, isLoading: loadingBuckets } = useQuery<TokenBucket[]>({
+    queryKey: [`/api/token-usage/buckets?granularity=${granularity}&limit=30`],
+  });
+
+  const { data: tokenBudget } = useQuery<TokenBudgetRemaining | null>({
+    queryKey: ["/api/token-budget"],
+  });
+
   const stats = {
     workspaces: workspaces?.length || 0,
     agents: recentAgents?.length || 0,
   };
+
+  function formatTokenCount(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  }
+
+  function formatBucketLabel(bucket: string): string {
+    const d = new Date(bucket);
+    if (granularity === "minute" || granularity === "hour") {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    if (granularity === "day") {
+      return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+    if (granularity === "week") {
+      return `Wk ${d.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+    }
+    return d.toLocaleDateString([], { month: "short", year: "2-digit" });
+  }
+
+  const chartData = (tokenBuckets || []).map(b => ({
+    ...b,
+    label: formatBucketLabel(b.bucket),
+  }));
+
+  const avgPerRequest = tokenSummary && tokenSummary.totalRequests > 0
+    ? Math.round(tokenSummary.totalTokens / tokenSummary.totalRequests)
+    : 0;
+
+  const budgetPercent = tokenBudget
+    ? Math.round((tokenBudget.used / tokenBudget.allocation) * 100)
+    : null;
 
   return (
     <div className="space-y-8">
@@ -88,25 +172,191 @@ export default function Dashboard() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Team Members</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Tokens Used</CardTitle>
+            <Zap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-member-count">-</div>
-            <p className="text-xs text-muted-foreground">Across all workspaces</p>
+            {loadingTokenSummary ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              <div className="text-2xl font-bold" data-testid="text-tokens-total">
+                {formatTokenCount(tokenSummary?.totalTokens || 0)}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {tokenSummary?.totalRequests || 0} API requests
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">API Tokens</CardTitle>
-            <Key className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Avg per Request</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-token-count">-</div>
-            <p className="text-xs text-muted-foreground">Active tokens</p>
+            {loadingTokenSummary ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              <div className="text-2xl font-bold" data-testid="text-tokens-avg">
+                {formatTokenCount(avgPerRequest)}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">tokens per call</p>
           </CardContent>
         </Card>
       </div>
+
+      {tokenBudget && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <div>
+              <CardTitle className="text-lg">Token Budget</CardTitle>
+              <CardDescription>
+                {tokenBudget.cadence.charAt(0).toUpperCase() + tokenBudget.cadence.slice(1)} allocation
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4 mb-2">
+              <div className="flex-1">
+                <div className="h-3 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(budgetPercent || 0, 100)}%`,
+                      backgroundColor: (budgetPercent || 0) > 90 ? 'hsl(0 84% 60%)' : (budgetPercent || 0) > 70 ? 'hsl(38 92% 50%)' : 'hsl(var(--primary))',
+                    }}
+                  />
+                </div>
+              </div>
+              <span className="text-sm font-medium" data-testid="text-budget-percent">{budgetPercent}%</span>
+            </div>
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>{formatTokenCount(tokenBudget.used)} used</span>
+              <span>{formatTokenCount(tokenBudget.remaining)} remaining of {formatTokenCount(tokenBudget.allocation)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">Token Usage Over Time</CardTitle>
+              <CardDescription>Track AI API consumption across your agents</CardDescription>
+            </div>
+            <div className="flex items-center gap-1">
+              {(["minute", "hour", "day", "week", "month"] as Granularity[]).map((g) => (
+                <Button
+                  key={g}
+                  variant={granularity === g ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setGranularity(g)}
+                  data-testid={`button-granularity-${g}`}
+                >
+                  {g === "minute" ? "Min" : g === "hour" ? "Hr" : g === "day" ? "Day" : g === "week" ? "Wk" : "Mo"}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loadingBuckets ? (
+            <div className="h-64 flex items-center justify-center">
+              <Skeleton className="h-full w-full" />
+            </div>
+          ) : chartData.length > 0 ? (
+            <div className="h-64" data-testid="chart-token-usage">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="label" className="text-xs" tick={{ fontSize: 11 }} />
+                  <YAxis className="text-xs" tick={{ fontSize: 11 }} tickFormatter={(v) => formatTokenCount(v)} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px' }}
+                    labelStyle={{ color: 'hsl(var(--foreground))' }}
+                    formatter={(value: number, name: string) => [
+                      formatTokenCount(value),
+                      name === "totalTokens" ? "Total Tokens" : name === "requests" ? "Requests" : "Avg/Request",
+                    ]}
+                  />
+                  <Area type="monotone" dataKey="totalTokens" stroke="hsl(var(--primary))" fill="hsl(var(--primary) / 0.2)" name="totalTokens" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+              <BarChart3 className="h-12 w-12 mb-4" />
+              <p>No token usage data yet</p>
+              <p className="text-xs mt-1">Start the Agent Factory to begin tracking</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {tokenSummary && (tokenSummary.totalTokens > 0) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Usage by Provider</CardTitle>
+              <CardDescription>Token distribution across AI providers</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {Object.entries(tokenSummary.byProvider).sort((a, b) => b[1] - a[1]).map(([provider, tokens]) => (
+                  <div key={provider} className="flex items-center justify-between gap-4" data-testid={`provider-usage-${provider}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Badge variant="outline">{provider}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${(tokens / tokenSummary.totalTokens) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-medium whitespace-nowrap">{formatTokenCount(tokens)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Usage by Agent</CardTitle>
+              <CardDescription>Token consumption per agent</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {Object.entries(tokenSummary.byAgent).sort((a, b) => b[1] - a[1]).map(([name, tokens]) => (
+                  <div key={name} className="flex items-center justify-between gap-4" data-testid={`agent-usage-${name}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback className="text-xs">
+                          <Bot className="h-3 w-3" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm font-medium truncate">{name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${(tokens / tokenSummary.totalTokens) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-medium whitespace-nowrap">{formatTokenCount(tokens)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -221,7 +471,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="text-center py-8">
-                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <p className="text-muted-foreground">No recent activity</p>
               </div>
             )}

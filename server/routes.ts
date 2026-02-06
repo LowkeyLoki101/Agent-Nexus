@@ -2512,6 +2512,126 @@ export async function registerRoutes(
     }
   });
 
+  // Token Usage & Budget routes
+  app.get("/api/token-usage/summary", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      if (workspaces.length === 0) return res.json({ totalTokens: 0, totalRequests: 0, byProvider: {}, byAgent: {} });
+
+      let totalTokens = 0;
+      let totalRequests = 0;
+      const byProvider: Record<string, number> = {};
+      const byAgent: Record<string, number> = {};
+
+      for (const ws of workspaces) {
+        const summary = await storage.getTokenUsageSummary(ws.id);
+        totalTokens += summary.totalTokens;
+        totalRequests += summary.totalRequests;
+        for (const [k, v] of Object.entries(summary.byProvider)) {
+          byProvider[k] = (byProvider[k] || 0) + v;
+        }
+        for (const [k, v] of Object.entries(summary.byAgent)) {
+          byAgent[k] = (byAgent[k] || 0) + v;
+        }
+      }
+
+      const allAgents = await storage.getAgentsByUser(userId);
+      const agentMap: Record<string, string> = {};
+      for (const a of allAgents) agentMap[a.id] = a.name;
+      const byAgentNamed: Record<string, number> = {};
+      for (const [id, tokens] of Object.entries(byAgent)) {
+        byAgentNamed[agentMap[id] || id] = tokens;
+      }
+
+      res.json({ totalTokens, totalRequests, byProvider, byAgent: byAgentNamed });
+    } catch (error) {
+      console.error("Error fetching token usage summary:", error);
+      res.status(500).json({ message: "Failed to fetch token usage summary" });
+    }
+  });
+
+  app.get("/api/token-usage/buckets", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const granularity = (req.query.granularity as string) || "hour";
+      const limit = parseInt(req.query.limit as string) || 30;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      if (workspaces.length === 0) return res.json([]);
+
+      const allBuckets: Record<string, { totalTokens: number; requests: number; avgTokens: number }> = {};
+      for (const ws of workspaces) {
+        const buckets = await storage.getTokenUsageBuckets(ws.id, granularity, limit);
+        for (const b of buckets) {
+          if (!allBuckets[b.bucket]) {
+            allBuckets[b.bucket] = { totalTokens: 0, requests: 0, avgTokens: 0 };
+          }
+          allBuckets[b.bucket].totalTokens += b.totalTokens;
+          allBuckets[b.bucket].requests += b.requests;
+        }
+      }
+
+      const result = Object.entries(allBuckets)
+        .map(([bucket, data]) => ({
+          bucket,
+          totalTokens: data.totalTokens,
+          requests: data.requests,
+          avgTokens: data.requests > 0 ? Math.round(data.totalTokens / data.requests) : 0,
+        }))
+        .sort((a, b) => new Date(a.bucket).getTime() - new Date(b.bucket).getTime())
+        .slice(-limit);
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching token usage buckets:", error);
+      res.status(500).json({ message: "Failed to fetch token usage buckets" });
+    }
+  });
+
+  app.get("/api/token-budget", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      if (workspaces.length === 0) return res.json(null);
+
+      for (const ws of workspaces) {
+        const remaining = await storage.getTokenBudgetRemaining(ws.id);
+        if (remaining) return res.json(remaining);
+      }
+      res.json(null);
+    } catch (error) {
+      console.error("Error fetching token budget:", error);
+      res.status(500).json({ message: "Failed to fetch token budget" });
+    }
+  });
+
+  app.post("/api/token-budget", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { workspaceId, allocation, cadence } = req.body;
+      const workspace = await storage.getWorkspace(workspaceId);
+      if (!workspace || workspace.ownerId !== userId) return res.status(403).json({ message: "Access denied" });
+
+      const now = new Date();
+      let periodEnd: Date | undefined;
+      if (cadence === "daily") periodEnd = new Date(now.getTime() + 86400000);
+      else if (cadence === "weekly") periodEnd = new Date(now.getTime() + 604800000);
+      else periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      const budget = await storage.createTokenBudget({
+        workspaceId,
+        allocation: allocation || 1000000,
+        cadence: cadence || "monthly",
+        periodStart: now,
+        periodEnd,
+      });
+      res.json(budget);
+    } catch (error) {
+      console.error("Error creating token budget:", error);
+      res.status(500).json({ message: "Failed to create token budget" });
+    }
+  });
+
   // Agent API routes (autonomous agent operations via API tokens)
   app.use("/api/agent", agentApiRoutes);
 

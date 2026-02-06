@@ -58,6 +58,46 @@ async function upsertUser(claims: any) {
     lastName: claims["last_name"],
     profileImageUrl: claims["profile_image_url"],
   });
+  
+  try {
+    await migrateDevDataIfNeeded(claims["sub"]);
+  } catch (e) {
+    console.error("[Auth] Data migration check failed (non-fatal):", e);
+  }
+}
+
+const MIGRATED_USERS = new Set<string>();
+const AUTHORIZED_MIGRATION_USER_ID = "29267516";
+
+async function migrateDevDataIfNeeded(userId: string) {
+  if (userId !== AUTHORIZED_MIGRATION_USER_ID) return;
+  if (MIGRATED_USERS.has(userId)) return;
+  MIGRATED_USERS.add(userId);
+  
+  const { db } = await import("../../db");
+  const { workspaces, workspaceMembers, agents } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
+  
+  const DEV_OWNER_IDS = ["demo-user-id", "test-factory-user", "test-user-gifts"];
+  
+  for (const devId of DEV_OWNER_IDS) {
+    const devWorkspaces = await db.select().from(workspaces).where(eq(workspaces.ownerId, devId));
+    if (devWorkspaces.length > 0) {
+      for (const ws of devWorkspaces) {
+        await db.update(workspaces).set({ ownerId: userId }).where(eq(workspaces.id, ws.id));
+        
+        await db.update(workspaceMembers).set({ userId }).where(eq(workspaceMembers.userId, devId));
+        
+        const wsAgents = await db.select().from(agents).where(eq(agents.workspaceId, ws.id));
+        for (const agent of wsAgents) {
+          if (agent.createdById === devId) {
+            await db.update(agents).set({ createdById: userId }).where(eq(agents.id, agent.id));
+          }
+        }
+      }
+      console.log(`[Auth] Migrated ${devWorkspaces.length} workspace(s) from ${devId} to owner ${userId}`);
+    }
+  }
 }
 
 export async function setupAuth(app: Express) {
