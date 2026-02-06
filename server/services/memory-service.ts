@@ -7,6 +7,9 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export interface MemoryQueryResult {
   entries: MemoryEntry[];
   summary?: string;
+  strategy?: string;
+  searchTerms?: string[];
+  totalScanned?: number;
 }
 
 export async function queryMemory(
@@ -19,18 +22,194 @@ export async function queryMemory(
     summarize?: boolean;
   } = {}
 ): Promise<MemoryQueryResult> {
-  const results = await storage.searchMemory(workspaceId, query, options.tier);
-  
-  for (const entry of results) {
+  const searchTerms = await expandQueryTerms(query);
+
+  const allResults = new Map<string, MemoryEntry>();
+  let totalScanned = 0;
+
+  for (const term of searchTerms) {
+    const results = await storage.searchMemory(workspaceId, term, options.tier);
+    totalScanned += results.length;
+    for (const entry of results) {
+      if (!allResults.has(entry.id)) {
+        allResults.set(entry.id, entry);
+      }
+    }
+  }
+
+  const directResults = await storage.searchMemory(workspaceId, query, options.tier);
+  totalScanned += directResults.length;
+  for (const entry of directResults) {
+    if (!allResults.has(entry.id)) {
+      allResults.set(entry.id, entry);
+    }
+  }
+
+  let entries = Array.from(allResults.values());
+
+  if (entries.length === 0) {
+    const allMemories = await storage.getMemoryEntriesByWorkspace(workspaceId, options.tier);
+    totalScanned += allMemories.length;
+    if (allMemories.length > 0) {
+      entries = await rerankByRelevance(query, allMemories, options.limit || 10);
+    }
+  } else if (entries.length > 3) {
+    entries = await rerankByRelevance(query, entries, options.limit || 20);
+  }
+
+  for (const entry of entries.slice(0, 10)) {
     await storage.incrementMemoryAccess(entry.id);
   }
 
-  if (options.summarize && results.length > 0) {
-    const summary = await summarizeMemories(results, query);
-    return { entries: results, summary };
+  let summary: string | undefined;
+  if ((options.summarize || entries.length > 0) && entries.length > 0) {
+    summary = await synthesizeFindings(entries, query, searchTerms);
   }
 
-  return { entries: results };
+  return {
+    entries,
+    summary,
+    strategy: describeStrategy(searchTerms, totalScanned, entries.length),
+    searchTerms,
+    totalScanned,
+  };
+}
+
+async function expandQueryTerms(query: string): Promise<string[]> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a search query expander for a memory/knowledge system. Given a user query, generate 3-5 alternative search terms that would help find relevant memories. Include synonyms, related concepts, sub-topics, and broader categories.
+
+Return a JSON object with a "terms" array. Example: {"terms": ["term1", "term2", "term3"]}`
+        },
+        { role: "user", content: query }
+      ],
+      temperature: 0.3,
+      max_tokens: 200,
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content || "{}";
+    const result = JSON.parse(raw);
+    const candidates = result.terms || result.queries || result.searchTerms || result.search_terms || [];
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return candidates.filter((t: any) => typeof t === 'string' && t.length > 0).slice(0, 5);
+    }
+    const values = Object.values(result).flat().filter((v: any) => typeof v === 'string' && v.length > 0);
+    if (values.length > 0) {
+      return (values as string[]).slice(0, 5);
+    }
+    return [query];
+  } catch (error) {
+    console.error("Query expansion failed, using original:", error);
+    return [query];
+  }
+}
+
+async function rerankByRelevance(query: string, entries: MemoryEntry[], limit: number): Promise<MemoryEntry[]> {
+  if (entries.length <= limit) {
+    return entries;
+  }
+
+  try {
+    const entryList = entries.slice(0, 50).map((e, i) => 
+      `[${i}] ${e.title} | ${e.type} | ${(e.summary || e.content).substring(0, 150)}`
+    ).join("\n");
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a relevance ranker. Given a query and a list of memory entries, return the indices of the most relevant entries in order of relevance. Return ONLY a JSON object with a "ranked" array of index numbers. Example: {"ranked": [3, 0, 7, 1]}`
+        },
+        { 
+          role: "user", 
+          content: `Query: "${query}"\n\nEntries:\n${entryList}\n\nReturn the top ${limit} most relevant indices.`
+        }
+      ],
+      temperature: 0,
+      max_tokens: 200,
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(response.choices[0]?.message?.content || "{}");
+    const ranked = result.ranked || [];
+    
+    if (Array.isArray(ranked) && ranked.length > 0) {
+      const reranked: MemoryEntry[] = [];
+      for (const idx of ranked) {
+        if (typeof idx === 'number' && idx >= 0 && idx < entries.length) {
+          reranked.push(entries[idx]);
+        }
+      }
+      if (reranked.length > 0) {
+        return reranked.slice(0, limit);
+      }
+    }
+  } catch (error) {
+    console.error("Reranking failed, using original order:", error);
+  }
+
+  return entries.slice(0, limit);
+}
+
+async function synthesizeFindings(memories: MemoryEntry[], query: string, searchTerms: string[]): Promise<string> {
+  const memoryContext = memories.slice(0, 15).map((m, i) => 
+    `[Memory ${i+1}] Type: ${m.type} | Tier: ${m.tier} | Title: "${m.title}"
+${m.summary || m.content.substring(0, 600)}
+${m.tags?.length ? `Tags: ${m.tags.join(', ')}` : ''}
+---`
+  ).join("\n\n");
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "system",
+        content: `You are a Recursive Learning Memory (RLM) synthesis engine for the Creative Intelligence platform. Your job is to recursively process retrieved memories and produce actionable knowledge.
+
+Your synthesis should:
+1. **Answer the query directly** — what does the memory system know about this?
+2. **Connect the dots** — identify patterns, relationships, and implications across memories
+3. **Surface actionable insights** — what can be done with this knowledge?
+4. **Identify gaps** — what's missing from the knowledge base on this topic?
+5. **Suggest next steps** — what should be researched, created, or discussed further?
+
+Format your response with clear sections. Be substantive, not generic. Reference specific memories by their titles when making claims.`
+      },
+      { 
+        role: "user", 
+        content: `Query: "${query}"
+Search strategy used: expanded to terms [${searchTerms.join(', ')}]
+Found ${memories.length} relevant memories.
+
+Retrieved Memories:
+${memoryContext}` 
+      }
+    ],
+    temperature: 0.5,
+    max_tokens: 800,
+  });
+
+  return response.choices[0]?.message?.content || "";
+}
+
+function describeStrategy(searchTerms: string[], totalScanned: number, resultsFound: number): string {
+  const strategies: string[] = [];
+  if (searchTerms.length > 1) {
+    strategies.push(`Expanded query into ${searchTerms.length} search terms`);
+  }
+  strategies.push(`Scanned ${totalScanned} memory entries`);
+  if (resultsFound > 0) {
+    strategies.push(`Found ${resultsFound} relevant matches`);
+  }
+  strategies.push("Applied AI-powered relevance ranking and synthesis");
+  return strategies.join(" → ");
 }
 
 export async function getHotMemory(workspaceId: string, agentId?: string): Promise<MemoryEntry[]> {
@@ -57,7 +236,7 @@ export async function createMemory(
 
 export async function generateSummary(content: string): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",

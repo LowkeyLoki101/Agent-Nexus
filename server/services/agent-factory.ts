@@ -264,20 +264,23 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
     let task = pendingTasks[0];
 
     if (!task && urgentSignals.length > 0) {
-      task = await respondToPheromone(agent, urgentSignals[0]);
+      const pheromoneTask = await respondToPheromone(agent, urgentSignals[0]);
+      if (pheromoneTask) task = pheromoneTask;
     }
 
     if (!task && activeGoal) {
-      task = await autoGenerateTask(agent, activeGoal);
+      const goalTask = await autoGenerateTask(agent, activeGoal);
+      if (goalTask) task = goalTask;
     }
 
     if (!task) {
       console.log(`[Factory] No tasks for ${agent.name}, entering self-reflection loop`);
-      task = await selfReflectAndGenerate(agent, run);
-      if (!task) {
+      const reflectionTask = await selfReflectAndGenerate(agent, run);
+      if (!reflectionTask) {
         await storage.updateAgentRun(run.id, { phase: "handoff", status: "completed", completedAt: new Date() });
         return;
       }
+      task = reflectionTask;
     }
 
     await storage.updateAgentTask(task.id, { status: "in_progress", startedAt: new Date() });
@@ -839,44 +842,57 @@ async function generatePulseUpdate(agent: Agent, task: AgentTask, output: string
 async function generateSynthesisArtifact(agent: Agent, task: AgentTask, output: string): Promise<void> {
   if (task.type === "reflect" || task.type === "coordinate") return;
 
-  const shouldSynthesize = Math.random() < 0.3;
-  if (!shouldSynthesize) return;
+  const alwaysSynthesize = ["research", "discuss", "create"];
+  const maybeSynthesize = ["review"];
+  if (alwaysSynthesize.includes(task.type)) {
+  } else if (maybeSynthesize.includes(task.type)) {
+    if (Math.random() > 0.6) return;
+  } else {
+    return;
+  }
 
   try {
-    const synthesisPrompt = `Based on your completed work, create a brief educational summary document.
+    const giftType = task.type === "research" ? "document" : "pdf";
+    const typeLabel = task.type === "research" ? "Research Brief" : 
+                      task.type === "create" ? "Build Report" :
+                      task.type === "review" ? "Review Summary" :
+                      "Discussion Brief";
+
+    const synthesisPrompt = `Based on your completed work, create a ${typeLabel} as a professional deliverable.
 
 Task completed: "${task.title}"
-Your output: ${output.substring(0, 1000)}
+Your output: ${output.substring(0, 2000)}
 
-Create a structured document that could be shared as an educational resource. Format it with:
-- A clear title
-- An executive summary (2-3 sentences)
-- Key findings or deliverables (3-5 bullet points)
-- Recommendations or next steps
-- A "What This Means" section explaining why this matters
+Create a structured ${typeLabel} formatted as a downloadable document:
+- Title (clear, specific — not generic)
+- Executive Summary (2-3 sentences capturing the key takeaway)
+- Key Findings or Deliverables (3-5 detailed bullet points with substance)
+- Analysis & Insights (what patterns you noticed, what surprised you, what connects to other work)
+- Recommendations / Next Steps (actionable items for the team)
+- "Why This Matters" section (business/creative impact, lessons learned)
 
-Keep it concise but comprehensive. This will become a downloadable PDF.`;
+Be specific and substantive — reference actual findings, real data, concrete observations. No filler. This will be a downloadable document for stakeholders.`;
 
     const synthesisContent = await callAgentModel(agent,
-      `You are ${agent.name}, creating an educational deliverable from your recent work. Write clearly and professionally. This document will be downloadable.`,
+      `You are ${agent.name}, creating a professional ${typeLabel} from your recent work. Write clearly, specifically, and professionally. Reference concrete findings. This document will be downloadable by stakeholders.`,
       synthesisPrompt
     );
 
     if (synthesisContent && synthesisContent.length > 100) {
-      const { generatePDF, createGift } = await import("./gift-generator");
+      const { createGift } = await import("./gift-generator");
 
       const gift = await createGift({
         workspaceId: WORKSPACE_ID,
         agentId: agent.id,
         createdById: "system",
-        title: `${agent.name}'s Brief: ${task.title.substring(0, 60)}`,
-        description: `Auto-generated educational summary from ${agent.name}'s ${task.type} work.`,
-        type: "pdf",
+        title: `${typeLabel}: ${task.title.substring(0, 60)}`,
+        description: `${typeLabel} by ${agent.name} — auto-generated from ${task.type} work.`,
+        type: giftType,
         prompt: synthesisContent,
-        tags: ["synthesis", "auto-generated", task.type, "factory"],
+        tags: ["synthesis", "auto-generated", task.type, "factory", typeLabel.toLowerCase().replace(/\s+/g, "-")],
       });
 
-      console.log(`[Factory] ${agent.name} synthesized a deliverable: "${gift?.title || task.title}"`);
+      console.log(`[Factory] ${agent.name} produced ${typeLabel}: "${gift?.title || task.title}"`);
     }
   } catch (error: any) {
     console.error(`[Factory] Synthesis artifact failed for ${agent.name}:`, error.message);

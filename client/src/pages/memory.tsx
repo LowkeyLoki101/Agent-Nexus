@@ -370,7 +370,7 @@ export default function Memory() {
   });
 
   const searchMutation = useMutation({
-    mutationFn: async (query: string): Promise<{ entries: MemoryEntry[]; summary?: string }> => {
+    mutationFn: async (query: string): Promise<{ entries: MemoryEntry[]; summary?: string; strategy?: string; searchTerms?: string[]; totalScanned?: number }> => {
       if (!firstWorkspace) throw new Error("No workspace");
       const res = await apiRequest("POST", `/api/workspaces/${firstWorkspace.slug}/memory/search`, {
         query,
@@ -379,7 +379,7 @@ export default function Memory() {
       return res.json();
     },
     onSuccess: (data) => {
-      toast({ title: `Found ${data.entries?.length || 0} memories` });
+      toast({ title: `Found ${data.entries?.length || 0} memories across ${data.totalScanned || 0} scanned` });
     },
   });
 
@@ -619,13 +619,16 @@ export default function Memory() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Search Memory</CardTitle>
-          <CardDescription>Query the memory system to find relevant information</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Search className="h-5 w-5" />
+            Recursive Learning Memory (RLM)
+          </CardTitle>
+          <CardDescription>AI-powered semantic search: expands your query, scans all memories, ranks by relevance, and synthesizes findings</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex gap-2">
             <Input
-              placeholder="Search for memories..."
+              placeholder="Ask anything — e.g. 'What do we know about coordination strategies?'"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -636,14 +639,77 @@ export default function Memory() {
               disabled={searchMutation.isPending}
               data-testid="button-search"
             >
-              <Search className="h-4 w-4 mr-2" />
+              {searchMutation.isPending ? (
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4 mr-2" />
+              )}
               Search
             </Button>
           </div>
+
+          {searchMutation.isPending && (
+            <div className="p-4 rounded-lg bg-muted/50 space-y-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Expanding query, scanning memories, ranking by relevance...
+              </div>
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          )}
+
+          {searchMutation.data?.strategy && (
+            <div className="p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground flex items-start gap-2">
+              <Brain className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-medium">RLM Strategy:</span> {searchMutation.data.strategy}
+                {searchMutation.data.searchTerms && searchMutation.data.searchTerms.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {searchMutation.data.searchTerms.map((term, i) => (
+                      <Badge key={i} variant="outline" className="text-xs">{term}</Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {searchMutation.data?.summary && (
-            <div className="mt-4 p-4 rounded-lg bg-muted">
-              <h4 className="font-medium mb-2">Summary</h4>
-              <p className="text-sm text-muted-foreground">{searchMutation.data.summary}</p>
+            <div className="p-4 rounded-lg bg-primary/5 border border-primary/10">
+              <h4 className="font-medium mb-2 flex items-center gap-2">
+                <Lightbulb className="h-4 w-4 text-primary" />
+                RLM Synthesis
+              </h4>
+              <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0.5">
+                <ReactMarkdown>{searchMutation.data.summary}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+
+          {searchMutation.data?.entries && searchMutation.data.entries.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-muted-foreground">
+                Retrieved Memories ({searchMutation.data.entries.length})
+              </h4>
+              {searchMutation.data.entries.map((memory) => (
+                <MemoryCard
+                  key={memory.id}
+                  memory={memory}
+                  agent={memory.agentId ? agentMap.get(memory.agentId) : undefined}
+                  onPromote={(id) => promoteMutation.mutate(id)}
+                  onArchive={(id) => archiveMutation.mutate(id)}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                  onUpdate={handleUpdate}
+                />
+              ))}
+            </div>
+          )}
+
+          {searchMutation.data && searchMutation.data.entries?.length === 0 && (
+            <div className="text-center py-6 text-muted-foreground">
+              <Brain className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No memories found for this query. Try different terms or add memories first.</p>
             </div>
           )}
         </CardContent>
