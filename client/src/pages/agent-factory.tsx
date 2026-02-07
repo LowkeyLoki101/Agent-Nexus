@@ -44,6 +44,9 @@ import {
   Signal,
   Flame,
   Snowflake,
+  AlertCircle,
+  CircleCheck,
+  CircleMinus,
 } from "lucide-react";
 
 function providerColor(provider: string): string {
@@ -578,6 +581,44 @@ export default function AgentFactory() {
           </CardContent>
         </Card>
       </div>
+
+      {dashboard?.apiHealth && Object.entries(dashboard.apiHealth).some(([_, h]: [string, any]) => h.status === "error") && (
+        <Card className="border-destructive/50 bg-destructive/5" data-testid="card-api-health-alert">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+              <div className="space-y-2 flex-1">
+                <p className="font-medium text-sm">API Provider Issues Detected</p>
+                <div className="flex flex-wrap gap-3">
+                  {Object.entries(dashboard.apiHealth).map(([provider, health]: [string, any]) => (
+                    <div key={provider} className="flex items-center gap-1.5 text-xs">
+                      {health.status === "ok" ? (
+                        <CircleCheck className="h-3.5 w-3.5 text-emerald-500" />
+                      ) : health.status === "error" ? (
+                        <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                      ) : (
+                        <CircleMinus className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                      <span className="font-medium capitalize">{provider}</span>
+                      {health.status === "error" && (
+                        <span className="text-muted-foreground max-w-[300px] truncate">
+                          {health.lastError?.includes("quota") ? "Quota exceeded" :
+                           health.lastError?.includes("credit balance") ? "Credits depleted" :
+                           health.lastError?.includes("Incorrect API key") ? "Invalid API key" :
+                           "Error"}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Agent tasks will fail until API credits are replenished. Check your API provider billing.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="factory-tabs">
         <TabsList data-testid="factory-tabs-list">
