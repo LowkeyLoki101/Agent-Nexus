@@ -31,11 +31,15 @@ import {
   WifiOff,
   Activity,
   ArrowRight,
+  HardDrive,
+  Zap,
+  Layers,
 } from "lucide-react";
 import {
   useFactoryWebSocket,
   type FactoryAgent,
   type FactoryRoom,
+  type MemoryStats,
 } from "@/hooks/use-factory-ws";
 
 // ============================================================
@@ -516,6 +520,56 @@ function AgentInspector({
 }
 
 // ============================================================
+// RLM Memory Stats Bar
+// ============================================================
+
+function MemoryStatsBar({ memory }: { memory: MemoryStats | null | undefined }) {
+  if (!memory) return null;
+
+  const savings = memory.totalTokensStored > 0
+    ? Math.round((1 - memory.compressionRatio) * 100)
+    : 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 border text-xs">
+      <div className="flex items-center gap-1.5">
+        <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="font-semibold text-muted-foreground">RLM Memory</span>
+      </div>
+      <Separator orientation="vertical" className="h-4" />
+      <div className="flex items-center gap-1">
+        <Layers className="h-3 w-3 text-muted-foreground" />
+        <span className="text-muted-foreground">
+          {memory.totalDocs} docs
+        </span>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="w-2 h-2 rounded-full bg-green-500" />
+        <span className="text-muted-foreground">{memory.byTier.hot} hot</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="w-2 h-2 rounded-full bg-amber-500" />
+        <span className="text-muted-foreground">{memory.byTier.warm} warm</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="w-2 h-2 rounded-full bg-slate-400" />
+        <span className="text-muted-foreground">{memory.byTier.cold} cold</span>
+      </div>
+      <Separator orientation="vertical" className="h-4" />
+      <div className="flex items-center gap-1">
+        <Zap className="h-3 w-3 text-muted-foreground" />
+        <span className="text-muted-foreground">
+          {savings}% token savings
+        </span>
+      </div>
+      <div className="text-muted-foreground">
+        {memory.totalExtracts} extracts
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Stats Bar
 // ============================================================
 
@@ -681,6 +735,11 @@ export default function FactoryMonitor() {
                 );
               })}
             </div>
+          </div>
+
+          {/* RLM Memory stats */}
+          <div className="mb-4">
+            <MemoryStatsBar memory={state.memory} />
           </div>
 
           {/* Room grid */}

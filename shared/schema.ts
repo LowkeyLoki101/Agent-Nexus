@@ -1,9 +1,24 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, pgEnum, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 export * from "./models/auth";
+
+// RLM Memory enums
+export const memoryTierEnum = pgEnum("memory_tier", ["hot", "warm", "cold"]);
+export const memoryLayerEnum = pgEnum("memory_layer", ["private", "shared"]);
+export const memorySourceEnum = pgEnum("memory_source", [
+  "diary_entry",
+  "thought",
+  "task_complete",
+  "room_transition",
+  "handoff",
+  "anomaly",
+  "compression_extract",
+  "synthesis",
+  "manual",
+]);
 
 export const memberRoleEnum = pgEnum("member_role", ["owner", "admin", "member", "viewer"]);
 export const entityTypeEnum = pgEnum("entity_type", ["human", "agent"]);
@@ -155,6 +170,117 @@ export const briefingRelations = relations(briefings, ({ one }) => ({
     references: [workspaces.id],
   }),
 }));
+
+// ============================================================
+// RLM Memory Tables
+// ============================================================
+
+// Docs table: each indexed document/entry gets a row
+export const memoryDocs = pgTable("memory_docs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull(),
+  source: memorySourceEnum("source").notNull(),
+  path: text("path"),                    // logical path (e.g. "agent-alpha/diary/entry-42")
+  tier: memoryTierEnum("tier").notNull().default("hot"),
+  layer: memoryLayerEnum("layer").notNull().default("private"),
+  tokenCount: integer("token_count").default(0),  // estimated tokens of full content
+  accessCount: integer("access_count").default(0),
+  lastAccessedAt: timestamp("last_accessed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Chunks table: each doc is split into chunks with summaries
+export const memoryChunks = pgTable("memory_chunks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  docId: varchar("doc_id").notNull().references(() => memoryDocs.id, { onDelete: "cascade" }),
+  layer: memoryLayerEnum("layer").notNull().default("private"),
+  content: text("content").notNull(),      // full text of this chunk
+  summary: text("summary"),                // compressed summary (the RLM payoff)
+  tags: text("tags").array(),              // searchable tags extracted from content
+  keywords: text("keywords").array(),      // high-signal keywords for search
+  position: integer("position").default(0), // ordering within doc
+  tokenCount: integer("token_count").default(0),
+  summaryTokenCount: integer("summary_token_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Extracts: compression engine outputs (lessons, patterns, insights, etc.)
+export const memoryExtracts = pgTable("memory_extracts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sourceDocId: varchar("source_doc_id").references(() => memoryDocs.id, { onDelete: "set null" }),
+  agentId: varchar("agent_id").notNull(),
+  type: text("type").notNull(),            // lesson | pattern | insight | tension | artifact | proposal | process
+  content: jsonb("content").notNull(),     // structured extract (varies by type)
+  summary: text("summary").notNull(),      // one-line summary for search
+  domains: text("domains").array(),        // engineering, marketing, revenue, etc.
+  outputChannels: text("output_channels").array(),
+  priority: text("priority").default("medium"),
+  reusability: integer("reusability").default(5), // 1-10 how broadly applicable
+  actionRequired: boolean("action_required").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Agent context: the compressed working memory fed back to agents
+export const agentContext = pgTable("agent_context", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull(),
+  contextType: text("context_type").notNull(), // identity | lesson | behavior | capability
+  content: text("content").notNull(),
+  supersedes: varchar("supersedes"),           // id of context entry this replaces
+  active: boolean("active").default(true),
+  sourceExtractId: varchar("source_extract_id").references(() => memoryExtracts.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const memoryDocRelations = relations(memoryDocs, ({ many }) => ({
+  chunks: many(memoryChunks),
+  extracts: many(memoryExtracts),
+}));
+
+export const memoryChunkRelations = relations(memoryChunks, ({ one }) => ({
+  doc: one(memoryDocs, {
+    fields: [memoryChunks.docId],
+    references: [memoryDocs.id],
+  }),
+}));
+
+export const memoryExtractRelations = relations(memoryExtracts, ({ one }) => ({
+  sourceDoc: one(memoryDocs, {
+    fields: [memoryExtracts.sourceDocId],
+    references: [memoryDocs.id],
+  }),
+}));
+
+export const insertMemoryDocSchema = createInsertSchema(memoryDocs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMemoryChunkSchema = createInsertSchema(memoryChunks).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertMemoryExtractSchema = createInsertSchema(memoryExtracts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAgentContextSchema = createInsertSchema(agentContext).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type MemoryDoc = typeof memoryDocs.$inferSelect;
+export type InsertMemoryDoc = z.infer<typeof insertMemoryDocSchema>;
+export type MemoryChunk = typeof memoryChunks.$inferSelect;
+export type InsertMemoryChunk = z.infer<typeof insertMemoryChunkSchema>;
+export type MemoryExtract = typeof memoryExtracts.$inferSelect;
+export type InsertMemoryExtract = z.infer<typeof insertMemoryExtractSchema>;
+export type AgentContext = typeof agentContext.$inferSelect;
+export type InsertAgentContext = z.infer<typeof insertAgentContextSchema>;
 
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,

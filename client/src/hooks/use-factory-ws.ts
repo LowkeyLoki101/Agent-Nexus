@@ -41,11 +41,23 @@ export interface FactoryAgent {
   movementLog: { roomId: string; timestamp: number }[];
 }
 
+export interface MemoryStats {
+  totalDocs: number;
+  byTier: { hot: number; warm: number; cold: number };
+  totalChunks: number;
+  totalExtracts: number;
+  totalTokensStored: number;
+  totalSummaryTokens: number;
+  compressionRatio: number;
+  activeContextEntries: number;
+}
+
 export interface FactoryState {
   rooms: FactoryRoom[];
   agents: FactoryAgent[];
   tickCount: number;
   timestamp: number;
+  memory?: MemoryStats | null;
 }
 
 export function useFactoryWebSocket() {

@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
+import { rlmMemory } from "./rlm-memory";
 
 // ============================================================
 // Factory Room Definitions
@@ -249,6 +250,7 @@ class FactorySimulation {
   private agents: FactoryAgent[] = [];
   private tickCount = 0;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private compressionHandle: ReturnType<typeof setInterval> | null = null;
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
 
@@ -256,9 +258,54 @@ class FactorySimulation {
   private agentTaskIndices: Map<string, number> = new Map();
   // Sub-tick within a task (0 = moving, 1-100 = working)
   private agentSubTick: Map<string, number> = new Map();
+  // Track last indexed thought to avoid duplicate writes
+  private lastIndexedThought: Map<string, string> = new Map();
+  // RLM memory stats (cached for dashboard broadcast)
+  private memoryStats: any = null;
 
   constructor() {
     this.initializeAgents();
+  }
+
+  // ----------------------------------------------------------
+  // RLM: Index an agent event into memory (fire-and-forget)
+  // ----------------------------------------------------------
+  private indexToMemory(
+    agentId: string,
+    source: "thought" | "task_complete" | "room_transition" | "diary_entry",
+    content: string,
+    layer: "private" | "shared" = "private"
+  ) {
+    // Non-blocking — don't await in the tick loop
+    rlmMemory
+      .index({ agentId, source, content, layer })
+      .catch((err) => console.error("[rlm] index error:", err));
+  }
+
+  // ----------------------------------------------------------
+  // RLM: Run compression cycle (hot→warm→cold)
+  // ----------------------------------------------------------
+  private runCompression() {
+    rlmMemory
+      .compress({ hotThresholdMs: 5 * 60 * 1000, warmThresholdMs: 30 * 60 * 1000 })
+      .then((result) => {
+        if (result.hotToWarm > 0 || result.warmToCold > 0) {
+          console.log(
+            `[rlm] Compression: ${result.hotToWarm} hot→warm, ${result.warmToCold} warm→cold, ${result.tokensReclaimed} tokens reclaimed`
+          );
+        }
+      })
+      .catch((err) => console.error("[rlm] compression error:", err));
+
+    // Refresh stats cache
+    rlmMemory
+      .getStats()
+      .then((stats) => { this.memoryStats = stats; })
+      .catch(() => {});
+  }
+
+  getMemoryStats() {
+    return this.memoryStats;
   }
 
   private initializeAgents() {
@@ -359,6 +406,15 @@ class FactorySimulation {
             ...agent.movementLog.slice(-19),
             { roomId: task.room, timestamp: now },
           ];
+
+          // RLM: Index room transition
+          const roomName = FACTORY_ROOMS.find((r) => r.id === task.room)?.name || task.room;
+          this.indexToMemory(
+            agent.id,
+            "room_transition",
+            `${agent.name} moved to ${roomName}. Starting: ${task.task}. Sub-goal: ${task.subGoal}. Long-term: ${def.longTermGoal}`,
+            "shared"
+          );
         }
       } else {
         // Working phase
@@ -386,6 +442,26 @@ class FactorySimulation {
             ...agent.thoughtHistory.slice(-9),
             agent.thought,
           ];
+
+          // RLM: Index new thought (deduplicated)
+          if (this.lastIndexedThought.get(agent.id) !== newThought) {
+            this.lastIndexedThought.set(agent.id, newThought);
+            this.indexToMemory(
+              agent.id,
+              "thought",
+              `[${agent.name} in ${task.room} using ${task.tool}] ${newThought}`
+            );
+          }
+        }
+
+        // RLM: Index task completion when progress hits 95%+
+        if (agent.progress >= 95 && agent.progress - Math.round(((workPosition - 1) / TASK_DURATION) * 100) < 95) {
+          this.indexToMemory(
+            agent.id,
+            "task_complete",
+            `${agent.name} completed: ${task.task}. Sub-goal: ${task.subGoal}. Tool used: ${task.tool}. Room: ${task.room}. Thoughts during task: ${task.thoughts.join(" | ")}`,
+            "shared"
+          );
         }
 
         // Brief idle moments
@@ -400,12 +476,13 @@ class FactorySimulation {
     this.broadcast();
   }
 
-  getState(): FactoryState {
+  getState(): FactoryState & { memory?: any } {
     return {
       rooms: FACTORY_ROOMS,
       agents: this.agents,
       tickCount: this.tickCount,
       timestamp: Date.now(),
+      memory: this.memoryStats,
     };
   }
 
@@ -424,13 +501,23 @@ class FactorySimulation {
     if (this.intervalHandle) return;
     // Tick every 1.5 seconds for visible but not frantic movement
     this.intervalHandle = setInterval(() => this.tick(), 1500);
-    console.log("[factory] Simulation started");
+
+    // RLM: Run compression every 2 minutes
+    this.compressionHandle = setInterval(() => this.runCompression(), 2 * 60 * 1000);
+    // Initial stats fetch
+    this.runCompression();
+
+    console.log("[factory] Simulation started with RLM memory");
   }
 
   stop() {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
+    }
+    if (this.compressionHandle) {
+      clearInterval(this.compressionHandle);
+      this.compressionHandle = null;
     }
   }
 

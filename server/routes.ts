@@ -5,6 +5,7 @@ import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integra
 import { insertWorkspaceSchema, insertAgentSchema } from "@shared/schema";
 import { z } from "zod";
 import { factorySimulation } from "./factory-simulation";
+import { rlmMemory } from "./rlm-memory";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -632,6 +633,87 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching factory state:", error);
       res.status(500).json({ message: "Failed to fetch factory state" });
+    }
+  });
+
+  // ----------------------------------------------------------
+  // RLM Memory endpoints
+  // ----------------------------------------------------------
+
+  // Search memory (returns summaries, not full content — the RLM way)
+  app.get("/api/memory/search", isAuthenticated, async (req: any, res) => {
+    try {
+      const { q, agent, layer, tier, limit } = req.query;
+      if (!q || typeof q !== "string") {
+        return res.status(400).json({ message: "Query parameter 'q' is required" });
+      }
+      const results = await rlmMemory.search({
+        query: q,
+        agentId: typeof agent === "string" ? agent : undefined,
+        layer: layer === "private" || layer === "shared" ? layer : undefined,
+        tier: tier === "hot" || tier === "warm" || tier === "cold" ? tier : undefined,
+        limit: limit ? parseInt(limit as string, 10) : 10,
+      });
+      res.json(results);
+    } catch (error) {
+      console.error("Error searching memory:", error);
+      res.status(500).json({ message: "Failed to search memory" });
+    }
+  });
+
+  // Get full document (expensive — only when needed)
+  app.get("/api/memory/retrieve/:docId", isAuthenticated, async (req: any, res) => {
+    try {
+      const result = await rlmMemory.retrieve(req.params.docId);
+      if (!result) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      res.json(result);
+    } catch (error) {
+      console.error("Error retrieving memory:", error);
+      res.status(500).json({ message: "Failed to retrieve memory" });
+    }
+  });
+
+  // Get agent context (the RLM core: budget-aware retrieval)
+  app.get("/api/memory/context/:agentId", isAuthenticated, async (req: any, res) => {
+    try {
+      const { q, budget } = req.query;
+      const result = await rlmMemory.getContext({
+        agentId: req.params.agentId,
+        query: typeof q === "string" ? q : "",
+        tokenBudget: budget ? parseInt(budget as string, 10) : 2000,
+        includeShared: true,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error getting context:", error);
+      res.status(500).json({ message: "Failed to get context" });
+    }
+  });
+
+  // Memory stats
+  app.get("/api/memory/stats", isAuthenticated, async (req: any, res) => {
+    try {
+      const { agent } = req.query;
+      const stats = await rlmMemory.getStats(
+        typeof agent === "string" ? agent : undefined
+      );
+      res.json(stats);
+    } catch (error) {
+      console.error("Error getting memory stats:", error);
+      res.status(500).json({ message: "Failed to get memory stats" });
+    }
+  });
+
+  // Trigger manual compression
+  app.post("/api/memory/compress", isAuthenticated, async (_req: any, res) => {
+    try {
+      const result = await rlmMemory.compress();
+      res.json(result);
+    } catch (error) {
+      console.error("Error compressing memory:", error);
+      res.status(500).json({ message: "Failed to compress memory" });
     }
   });
 
