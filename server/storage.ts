@@ -9,6 +9,8 @@ import {
   messages,
   gifts,
   memoryEntries,
+  memoryDocs,
+  memoryChunks,
   boards,
   topics,
   posts,
@@ -50,6 +52,10 @@ import {
   type InsertGift,
   type MemoryEntry,
   type InsertMemoryEntry,
+  type MemoryDoc,
+  type InsertMemoryDoc,
+  type MemoryChunk,
+  type InsertMemoryChunk,
   type Board,
   type InsertBoard,
   type Topic,
@@ -740,6 +746,144 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     return result.length;
+  }
+
+  // RLM Memory Docs & Chunks
+  async createMemoryDoc(doc: InsertMemoryDoc): Promise<MemoryDoc> {
+    const [created] = await db.insert(memoryDocs).values(doc).returning();
+    return created;
+  }
+
+  async getMemoryDoc(id: string): Promise<MemoryDoc | undefined> {
+    const [doc] = await db.select().from(memoryDocs).where(eq(memoryDocs.id, id));
+    return doc;
+  }
+
+  async getMemoryDocsByWorkspace(workspaceId: string, tier?: string): Promise<MemoryDoc[]> {
+    if (tier) {
+      return db.select().from(memoryDocs)
+        .where(and(eq(memoryDocs.workspaceId, workspaceId), eq(memoryDocs.tier, tier as any)))
+        .orderBy(desc(memoryDocs.createdAt));
+    }
+    return db.select().from(memoryDocs)
+      .where(eq(memoryDocs.workspaceId, workspaceId))
+      .orderBy(desc(memoryDocs.createdAt));
+  }
+
+  async getMemoryDocsByAgent(agentId: string, tier?: string): Promise<MemoryDoc[]> {
+    if (tier) {
+      return db.select().from(memoryDocs)
+        .where(and(eq(memoryDocs.agentId, agentId), eq(memoryDocs.tier, tier as any)))
+        .orderBy(desc(memoryDocs.createdAt));
+    }
+    return db.select().from(memoryDocs)
+      .where(eq(memoryDocs.agentId, agentId))
+      .orderBy(desc(memoryDocs.createdAt));
+  }
+
+  async getMemoryDocsByTierAndAge(tier: string, olderThanMs: number): Promise<MemoryDoc[]> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    return db.select().from(memoryDocs)
+      .where(and(
+        eq(memoryDocs.tier, tier as any),
+        sql`${memoryDocs.createdAt} < ${cutoff}`
+      ))
+      .orderBy(desc(memoryDocs.createdAt));
+  }
+
+  async updateMemoryDoc(id: string, updates: Partial<InsertMemoryDoc>): Promise<MemoryDoc | undefined> {
+    const [updated] = await db.update(memoryDocs)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(memoryDocs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteMemoryDoc(id: string): Promise<void> {
+    await db.delete(memoryDocs).where(eq(memoryDocs.id, id));
+  }
+
+  async searchMemoryDocs(workspaceId: string, query: string, tier?: string): Promise<MemoryDoc[]> {
+    const searchPattern = `%${query.toLowerCase()}%`;
+    const conditions = [
+      eq(memoryDocs.workspaceId, workspaceId),
+      or(
+        ilike(memoryDocs.title, searchPattern),
+        ilike(memoryDocs.content, searchPattern),
+        ilike(memoryDocs.summary, searchPattern)
+      )
+    ];
+    if (tier) {
+      conditions.push(eq(memoryDocs.tier, tier as any));
+    }
+    return db.select().from(memoryDocs)
+      .where(and(...conditions))
+      .orderBy(desc(memoryDocs.accessCount))
+      .limit(20);
+  }
+
+  async searchMemoryChunks(workspaceId: string, query: string): Promise<(MemoryChunk & { docTitle: string; docTier: string })[]> {
+    const searchPattern = `%${query.toLowerCase()}%`;
+    const results = await db.select({
+      id: memoryChunks.id,
+      docId: memoryChunks.docId,
+      chunkIndex: memoryChunks.chunkIndex,
+      content: memoryChunks.content,
+      keywords: memoryChunks.keywords,
+      tokenCount: memoryChunks.tokenCount,
+      createdAt: memoryChunks.createdAt,
+      docTitle: memoryDocs.title,
+      docTier: memoryDocs.tier,
+    })
+      .from(memoryChunks)
+      .innerJoin(memoryDocs, eq(memoryChunks.docId, memoryDocs.id))
+      .where(and(
+        eq(memoryDocs.workspaceId, workspaceId),
+        ilike(memoryChunks.content, searchPattern)
+      ))
+      .limit(30);
+    return results;
+  }
+
+  async incrementMemoryDocAccess(id: string): Promise<void> {
+    const doc = await this.getMemoryDoc(id);
+    if (doc) {
+      await db.update(memoryDocs)
+        .set({ accessCount: (doc.accessCount || 0) + 1, lastAccessedAt: new Date() })
+        .where(eq(memoryDocs.id, id));
+    }
+  }
+
+  async createMemoryChunk(chunk: InsertMemoryChunk): Promise<MemoryChunk> {
+    const [created] = await db.insert(memoryChunks).values(chunk).returning();
+    return created;
+  }
+
+  async createMemoryChunksBatch(chunks: InsertMemoryChunk[]): Promise<MemoryChunk[]> {
+    if (chunks.length === 0) return [];
+    return db.insert(memoryChunks).values(chunks).returning();
+  }
+
+  async getChunksByDoc(docId: string): Promise<MemoryChunk[]> {
+    return db.select().from(memoryChunks)
+      .where(eq(memoryChunks.docId, docId))
+      .orderBy(memoryChunks.chunkIndex);
+  }
+
+  async deleteChunksByDoc(docId: string): Promise<void> {
+    await db.delete(memoryChunks).where(eq(memoryChunks.docId, docId));
+  }
+
+  async getMemoryDocStats(workspaceId: string): Promise<{ tier: string; count: number; totalTokens: number }[]> {
+    const results = await db.select({
+      tier: memoryDocs.tier,
+      count: sql<number>`count(*)::int`,
+      totalTokens: sql<number>`coalesce(sum(${memoryDocs.totalTokens}), 0)::int`,
+    })
+      .from(memoryDocs)
+      .where(eq(memoryDocs.workspaceId, workspaceId))
+      .groupBy(memoryDocs.tier);
+    return results;
   }
 
   // Message Boards

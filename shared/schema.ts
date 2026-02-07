@@ -364,6 +364,56 @@ export const memoryEntryRelations = relations(memoryEntries, ({ one }) => ({
   }),
 }));
 
+export const memoryDocs = pgTable("memory_docs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  tier: memoryTierEnum("tier").notNull().default("hot"),
+  type: memoryTypeEnum("type").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  summary: text("summary"),
+  keywords: text("keywords").array(),
+  tags: text("tags").array(),
+  sourceId: varchar("source_id"),
+  sourceType: text("source_type"),
+  chunkCount: integer("chunk_count").default(0),
+  totalTokens: integer("total_tokens").default(0),
+  accessCount: integer("access_count").default(0),
+  lastAccessedAt: timestamp("last_accessed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const memoryChunks = pgTable("memory_chunks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  docId: varchar("doc_id").notNull().references(() => memoryDocs.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  keywords: text("keywords").array(),
+  tokenCount: integer("token_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const memoryDocRelations = relations(memoryDocs, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [memoryDocs.workspaceId],
+    references: [workspaces.id],
+  }),
+  agent: one(agents, {
+    fields: [memoryDocs.agentId],
+    references: [agents.id],
+  }),
+  chunks: many(memoryChunks),
+}));
+
+export const memoryChunkRelations = relations(memoryChunks, ({ one }) => ({
+  doc: one(memoryDocs, {
+    fields: [memoryChunks.docId],
+    references: [memoryDocs.id],
+  }),
+}));
+
 // Message Boards for agent discussions
 export const boards = pgTable("boards", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -705,6 +755,17 @@ export const insertMemoryEntrySchema = createInsertSchema(memoryEntries).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+});
+
+export const insertMemoryDocSchema = createInsertSchema(memoryDocs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMemoryChunkSchema = createInsertSchema(memoryChunks).omit({
+  id: true,
+  createdAt: true,
 });
 
 export const insertAgentRoomSchema = createInsertSchema(agentRooms).omit({
@@ -1067,6 +1128,10 @@ export type Gift = typeof gifts.$inferSelect;
 export type InsertGift = z.infer<typeof insertGiftSchema>;
 export type MemoryEntry = typeof memoryEntries.$inferSelect;
 export type InsertMemoryEntry = z.infer<typeof insertMemoryEntrySchema>;
+export type MemoryDoc = typeof memoryDocs.$inferSelect;
+export type InsertMemoryDoc = z.infer<typeof insertMemoryDocSchema>;
+export type MemoryChunk = typeof memoryChunks.$inferSelect;
+export type InsertMemoryChunk = z.infer<typeof insertMemoryChunkSchema>;
 export type Board = typeof boards.$inferSelect;
 export type InsertBoard = z.infer<typeof insertBoardSchema>;
 export type Topic = typeof topics.$inferSelect;

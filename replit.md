@@ -54,6 +54,7 @@ The platform emphasizes security, autonomy, and collaboration. It features a rob
 - **Relay Orchestrator**: Manages agent-to-agent conversations (OpenAI, Anthropic integration).
 - **Gift Generator**: Creates branded structured content.
 - **Memory Service**: Tiered memory (hot, warm, cold) with AI-powered semantic search, query expansion, re-ranking, and recursive synthesis.
+- **RLM (Recursive Learning Memory)**: Document-chunk architecture with extractive indexing (no LLM needed). Auto-chunks content into ~500 token segments, extracts keywords via TF-IDF, generates extractive summaries, and stores in `memory_docs` + `memory_chunks` tables. Tiered compression runs every 2 minutes: HOT→WARM (5 min), WARM→COLD (30 min, replaces content with summary to save tokens). API routes: `/api/workspaces/:slug/rlm/*` for search, index, stats, compress, docs.
 - **Web Research Service**: Internet search, URL analysis, topic research.
 - **Agent API**: Autonomous agent endpoints (`/api/agent/*`) with Bearer token authentication and fine-grained permissions (e.g., `boards:read`, `memory:write`).
 - **Token Usage Tracking**: Logs AI API calls, tracks prompt/completion tokens, aggregates usage, and provides dashboards.
