@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { storage } from "../storage";
 import type { Agent, AgentGoal, AgentTask, AgentRun } from "@shared/schema";
+import { index as rlmIndex, startCompressor, stopCompressor } from "./rlm-memory";
 
 const WORKSPACE_ID = "55716a79-7cdc-44f2-b806-93869b0295f2";
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
@@ -430,6 +431,19 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
 
     await extractAndSaveInsights(agent, task, output).catch(e =>
       console.error(`[Factory] Memory extraction failed for ${agent.name}:`, e.message)
+    );
+
+    rlmIndex({
+      workspaceId: WORKSPACE_ID,
+      agentId: agent.id,
+      type: task.type === "research" ? "fact" : task.type === "reflect" ? "summary" : "event",
+      title: `${agent.name}: ${task.title}`,
+      content: output,
+      sourceId: task.id,
+      sourceType: `factory-${task.type}`,
+      additionalTags: [agent.name.toLowerCase(), task.type],
+    }).catch(e =>
+      console.error(`[Factory] RLM indexing failed for ${agent.name}:`, e.message)
     );
 
     await generatePulseUpdate(agent, task, output, artifactId).catch(e =>
@@ -1440,6 +1454,8 @@ export function startFactory(): void {
   isRunning = true;
   console.log(`[Factory] Starting autonomous factory (interval: ${CYCLE_INTERVAL_MS / 1000}s)`);
 
+  startCompressor();
+
   setTimeout(() => runFactoryCycle(), 10_000);
   schedulerInterval = setInterval(() => runFactoryCycle(), CYCLE_INTERVAL_MS);
 }
@@ -1452,6 +1468,7 @@ export function stopFactory(): void {
     clearInterval(schedulerInterval);
     schedulerInterval = null;
   }
+  stopCompressor();
   console.log("[Factory] Stopped");
 }
 

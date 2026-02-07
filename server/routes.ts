@@ -1485,6 +1485,163 @@ export async function registerRoutes(
   });
 
   // =================================
+  // RLM Memory Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/rlm/stats", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { getStats } = await import("./services/rlm-memory");
+      const stats = await getStats(access.workspaceId);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching RLM stats:", error);
+      res.status(500).json({ message: "Failed to fetch RLM stats" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/rlm/search", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+      const { query, tier, limit } = req.body;
+
+      if (!query || typeof query !== "string") {
+        return res.status(400).json({ message: "Query is required" });
+      }
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { search } = await import("./services/rlm-memory");
+      const results = await search(access.workspaceId, query, { tier, limit });
+      res.json(results);
+    } catch (error) {
+      console.error("Error searching RLM memory:", error);
+      res.status(500).json({ message: "Failed to search RLM memory" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/rlm/index", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+      const { type, title, content, agentId, sourceId, sourceType, tags } = req.body;
+
+      if (!type || !title || !content) {
+        return res.status(400).json({ message: "type, title, and content are required" });
+      }
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { index } = await import("./services/rlm-memory");
+      const result = await index({
+        workspaceId: access.workspaceId,
+        agentId,
+        type,
+        title,
+        content,
+        sourceId,
+        sourceType,
+        additionalTags: tags,
+      });
+
+      res.json({
+        message: "Content indexed successfully",
+        docId: result.doc.id,
+        chunkCount: result.chunkCount,
+        totalTokens: result.totalTokens,
+        keywords: result.keywords,
+        summary: result.summary,
+      });
+    } catch (error) {
+      console.error("Error indexing RLM memory:", error);
+      res.status(500).json({ message: "Failed to index content" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/rlm/compress", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) {
+        return res.status(404).json({ message: "Workspace not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const { compress } = await import("./services/rlm-memory");
+      const result = await compress();
+      res.json({
+        message: "Compression completed",
+        ...result,
+      });
+    } catch (error) {
+      console.error("Error running RLM compression:", error);
+      res.status(500).json({ message: "Failed to run compression" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/rlm/docs", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+      const tier = req.query.tier as string | undefined;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const docs = await storage.getMemoryDocsByWorkspace(access.workspaceId, tier);
+      res.json(docs);
+    } catch (error) {
+      console.error("Error fetching RLM docs:", error);
+      res.status(500).json({ message: "Failed to fetch RLM docs" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/rlm/docs/:id/chunks", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug, id } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const doc = await storage.getMemoryDoc(id);
+      if (!doc || doc.workspaceId !== access.workspaceId) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      const chunks = await storage.getChunksByDoc(id);
+      res.json({ doc, chunks });
+    } catch (error) {
+      console.error("Error fetching RLM chunks:", error);
+      res.status(500).json({ message: "Failed to fetch chunks" });
+    }
+  });
+
+  // =================================
   // Message Boards Routes
   // =================================
   
