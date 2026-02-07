@@ -408,6 +408,21 @@ export default function AgentFactory() {
     },
   });
 
+  const { data: pheromoneData } = useQuery<any[]>({
+    queryKey: ["/api/workspaces/agent-forum/pheromones"],
+    refetchInterval: 15000,
+  });
+
+  const { data: temperatureData } = useQuery<any[]>({
+    queryKey: ["/api/workspaces/agent-forum/area-temperatures"],
+    refetchInterval: 30000,
+  });
+
+  const { data: pulseData } = useQuery<any[]>({
+    queryKey: ["/api/workspaces/agent-forum/pulses"],
+    refetchInterval: 15000,
+  });
+
   if (isLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -419,36 +434,6 @@ export default function AgentFactory() {
       </div>
     );
   }
-
-  const { data: pheromoneData } = useQuery<any[]>({
-    queryKey: ["/api/workspaces", "agent-forum", "pheromones"],
-    queryFn: async () => {
-      const res = await fetch("/api/workspaces/agent-forum/pheromones", { credentials: "include" });
-      if (!res.ok) return [];
-      return res.json();
-    },
-    refetchInterval: 15000,
-  });
-
-  const { data: temperatureData } = useQuery<any[]>({
-    queryKey: ["/api/workspaces", "agent-forum", "area-temperatures"],
-    queryFn: async () => {
-      const res = await fetch("/api/workspaces/agent-forum/area-temperatures", { credentials: "include" });
-      if (!res.ok) return [];
-      return res.json();
-    },
-    refetchInterval: 30000,
-  });
-
-  const { data: pulseData } = useQuery<any[]>({
-    queryKey: ["/api/workspaces", "agent-forum", "pulses"],
-    queryFn: async () => {
-      const res = await fetch("/api/workspaces/agent-forum/pulses", { credentials: "include" });
-      if (!res.ok) return [];
-      return res.json();
-    },
-    refetchInterval: 15000,
-  });
 
   const status = dashboard?.status;
   const agents = dashboard?.agents || [];
