@@ -16,6 +16,36 @@ let cycleCount = 0;
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+interface ApiProviderHealth {
+  status: "ok" | "error" | "unknown";
+  lastError: string | null;
+  lastErrorTime: Date | null;
+  lastSuccessTime: Date | null;
+}
+
+const apiHealth: Record<string, ApiProviderHealth> = {
+  openai: { status: "unknown", lastError: null, lastErrorTime: null, lastSuccessTime: null },
+  anthropic: { status: "unknown", lastError: null, lastErrorTime: null, lastSuccessTime: null },
+  xai: { status: "unknown", lastError: null, lastErrorTime: null, lastSuccessTime: null },
+};
+
+function markApiSuccess(provider: string) {
+  if (!apiHealth[provider]) apiHealth[provider] = { status: "unknown", lastError: null, lastErrorTime: null, lastSuccessTime: null };
+  apiHealth[provider].status = "ok";
+  apiHealth[provider].lastSuccessTime = new Date();
+}
+
+function markApiError(provider: string, error: string) {
+  if (!apiHealth[provider]) apiHealth[provider] = { status: "unknown", lastError: null, lastErrorTime: null, lastSuccessTime: null };
+  apiHealth[provider].status = "error";
+  apiHealth[provider].lastError = error;
+  apiHealth[provider].lastErrorTime = new Date();
+}
+
+export function getApiHealth(): Record<string, ApiProviderHealth> {
+  return { ...apiHealth };
+}
+
 interface FactoryStatus {
   isRunning: boolean;
   lastCycleTime: Date | null;
@@ -218,6 +248,7 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
         tokensCompletion: usage?.output_tokens || estimateTokens(text),
         tokensTotal: (usage?.input_tokens || 0) + (usage?.output_tokens || 0) || estimateTokens(systemPrompt + userPrompt + text),
       }, requestType);
+      markApiSuccess("anthropic");
       return text;
     }
 
@@ -243,6 +274,7 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
         tokensCompletion: usage?.completion_tokens || estimateTokens(text),
         tokensTotal: usage?.total_tokens || estimateTokens(systemPrompt + userPrompt + text),
       }, requestType);
+      markApiSuccess("xai");
       return text;
     }
 
@@ -263,9 +295,11 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
       tokensCompletion: usage?.completion_tokens || estimateTokens(text),
       tokensTotal: usage?.total_tokens || estimateTokens(systemPrompt + userPrompt + text),
     }, requestType);
+    markApiSuccess("openai");
     return text;
   } catch (error: any) {
     console.error(`[Factory] Error calling ${provider}/${model} for ${agent.name}:`, error.message);
+    markApiError(provider, error.message);
     if (provider === "xai" || provider === "anthropic") {
       try {
         const fallback = await openai.chat.completions.create({
@@ -286,9 +320,11 @@ async function callAgentModel(agent: Agent, systemPrompt: string, userPrompt: st
           tokensTotal: usage?.total_tokens || estimateTokens(systemPrompt + userPrompt + text),
         }, requestType);
         console.log(`[Factory] Fallback to OpenAI for ${agent.name} succeeded`);
+        markApiSuccess("openai");
         return text;
       } catch (fallbackError: any) {
         console.error(`[Factory] Fallback also failed for ${agent.name}:`, fallbackError.message);
+        markApiError("openai", fallbackError.message);
       }
     }
     return "";
@@ -1483,5 +1519,6 @@ export async function getFactoryDashboardData() {
       completed: tasks.filter(t => t.status === "completed").length,
       failed: tasks.filter(t => t.status === "failed").length,
     },
+    apiHealth: getApiHealth(),
   };
 }

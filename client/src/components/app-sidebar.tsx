@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import { forwardRef, useCallback } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -41,6 +42,21 @@ import {
   Terminal,
   BookOpen,
 } from "lucide-react";
+
+const NavLink = forwardRef<HTMLAnchorElement, { href: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>>(
+  ({ href, children, onClick, ...props }, ref) => {
+    const [, navigate] = useLocation();
+    const handleClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      navigate(href);
+      onClick?.(e);
+    }, [href, navigate, onClick]);
+    return (
+      <a ref={ref} href={href} onClick={handleClick} {...props}>{children}</a>
+    );
+  }
+);
+NavLink.displayName = "NavLink";
 
 const mainNavItems = [
   {
@@ -154,10 +170,10 @@ export function AppSidebar() {
                     asChild
                     isActive={isActive(item.url)}
                   >
-                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                    <NavLink href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
-                    </Link>
+                    </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
