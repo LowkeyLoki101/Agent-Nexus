@@ -78,7 +78,7 @@ async function migrateDevDataIfNeeded(userId: string) {
   const { workspaces, workspaceMembers, agents } = await import("@shared/schema");
   const { eq } = await import("drizzle-orm");
   
-  const DEV_OWNER_IDS = ["demo-user-id", "test-factory-user", "test-user-gifts"];
+  const DEV_OWNER_IDS = ["demo-user-id", "test-factory-user", "test-user-gifts", "test-agent-room-czMxDC"];
   
   for (const devId of DEV_OWNER_IDS) {
     const devWorkspaces = await db.select().from(workspaces).where(eq(workspaces.ownerId, devId));
