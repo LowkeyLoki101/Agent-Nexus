@@ -1661,12 +1661,12 @@ export class DatabaseStorage implements IStorage {
   async upsertLeaderboardScore(agentId: string, workspaceId: string, updates: Partial<InsertLeaderboardScore>): Promise<LeaderboardScore> {
     const existing = await this.getLeaderboardScore(agentId, workspaceId);
     if (existing) {
-      const newVotes = (existing.totalVotes || 0) + (updates.totalVotes || 0);
-      const newStars = (existing.totalStars || 0) + (updates.totalStars || 0);
-      const newTools = (existing.toolsCreated || 0) + (updates.toolsCreated || 0);
-      const newProjects = (existing.projectsCreated || 0) + (updates.projectsCreated || 0);
-      const newUsage = (existing.toolUsageCount || 0) + (updates.toolUsageCount || 0);
-      const newArt = (existing.artCreated || 0) + (updates.artCreated || 0);
+      const newVotes = Math.max(0, (existing.totalVotes || 0) + (updates.totalVotes || 0));
+      const newStars = Math.max(0, (existing.totalStars || 0) + (updates.totalStars || 0));
+      const newTools = Math.max(0, (existing.toolsCreated || 0) + (updates.toolsCreated || 0));
+      const newProjects = Math.max(0, (existing.projectsCreated || 0) + (updates.projectsCreated || 0));
+      const newUsage = Math.max(0, (existing.toolUsageCount || 0) + (updates.toolUsageCount || 0));
+      const newArt = Math.max(0, (existing.artCreated || 0) + (updates.artCreated || 0));
       const totalScore = newVotes * 2 + newStars * 5 + newTools * 10 + newProjects * 15 + newUsage * 1 + newArt * 8;
       const [updated] = await db.update(leaderboardScores).set({
         totalVotes: newVotes,

@@ -1762,11 +1762,13 @@ FEEDBACK: [one sentence overall feedback]`;
     if (winnerId) {
       const isCreative = ["creative_build", "design", "data_viz"].includes(comp.category);
       const scoreUpdate = isCreative ? { artCreated: 1 } : { toolsCreated: 1 };
-      storage.upsertLeaderboardScore(winnerId, WORKSPACE_ID, scoreUpdate).catch(() => {});
+      const compWorkspace = comp.workspaceId || WORKSPACE_ID;
+      storage.upsertLeaderboardScore(winnerId, compWorkspace, scoreUpdate).catch(() => {});
     }
 
+    const compWorkspace = comp.workspaceId || WORKSPACE_ID;
     for (const entry of entries) {
-      storage.upsertLeaderboardScore(entry.agentId, WORKSPACE_ID, { toolUsageCount: 1 }).catch(() => {});
+      storage.upsertLeaderboardScore(entry.agentId, compWorkspace, { toolUsageCount: 1 }).catch(() => {});
     }
 
     const winnerName = winnerId ? agentMap.get(winnerId)?.name : null;
