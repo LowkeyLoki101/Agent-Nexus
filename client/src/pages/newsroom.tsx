@@ -19,8 +19,12 @@ import {
   ChevronUp,
   Sparkles,
   BarChart3,
+  Share2,
+  ExternalLink,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
+import { Link, useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 interface MediaReport {
   id: string;
@@ -175,6 +179,7 @@ function AudioPlayer({ reportId, hasAudio, duration }: { reportId: string; hasAu
 
 function HeroReport({ report, agentMap }: { report: MediaReport; agentMap: Map<string, Agent> }) {
   const [expanded, setExpanded] = useState(false);
+  const { toast } = useToast();
   const reporter = report.createdByAgentId ? agentMap.get(report.createdByAgentId) : null;
   const mentionedAgents = report.mentionedAgentIds.map(id => agentMap.get(id)).filter(Boolean) as Agent[];
 
@@ -238,7 +243,7 @@ function HeroReport({ report, agentMap }: { report: MediaReport; agentMap: Map<s
           </div>
         )}
 
-        <div className="mt-4">
+        <div className="mt-4 flex items-center gap-2 flex-wrap">
           <Button
             variant="ghost"
             size="sm"
@@ -250,15 +255,36 @@ function HeroReport({ report, agentMap }: { report: MediaReport; agentMap: Map<s
             {expanded ? "Hide Transcript" : "Read Full Transcript"}
             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </Button>
-          {expanded && (
-            <div
-              className="mt-3 text-sm whitespace-pre-wrap bg-muted/30 rounded-md p-4 max-h-80 overflow-auto leading-relaxed border break-words"
-              data-testid="transcript-hero"
-            >
-              {report.transcript}
-            </div>
-          )}
+          <Link href={`/broadcast/${report.id}`}>
+            <Button variant="ghost" size="sm" className="gap-1" data-testid={`button-view-hero`}>
+              <ExternalLink className="w-3.5 h-3.5" />
+              View Article
+            </Button>
+          </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1"
+            onClick={() => {
+              try {
+                navigator.clipboard.writeText(`${window.location.origin}/broadcast/${report.id}`);
+                toast({ title: "Link copied", description: "Broadcast link copied to clipboard" });
+              } catch { toast({ title: "Unable to copy", variant: "destructive" }); }
+            }}
+            data-testid={`button-share-hero`}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Share
+          </Button>
         </div>
+        {expanded && (
+          <div
+            className="mt-3 text-sm whitespace-pre-wrap bg-muted/30 rounded-md p-4 max-h-80 overflow-auto leading-relaxed border break-words"
+            data-testid="transcript-hero"
+          >
+            {report.transcript}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -266,6 +292,7 @@ function HeroReport({ report, agentMap }: { report: MediaReport; agentMap: Map<s
 
 function CompactReportCard({ report, agentMap }: { report: MediaReport; agentMap: Map<string, Agent> }) {
   const [expanded, setExpanded] = useState(false);
+  const { toast } = useToast();
   const reporter = report.createdByAgentId ? agentMap.get(report.createdByAgentId) : null;
   const mentionedAgents = report.mentionedAgentIds.map(id => agentMap.get(id)).filter(Boolean) as Agent[];
 
@@ -319,17 +346,37 @@ function CompactReportCard({ report, agentMap }: { report: MediaReport; agentMap
           )}
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded(!expanded)}
-          className="gap-1 w-full justify-center"
-          data-testid={`button-expand-${report.id}`}
-        >
-          <Mic className="w-3 h-3" />
-          {expanded ? "Hide" : "Transcript"}
-          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        </Button>
+        <div className="flex items-center gap-1 flex-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded(!expanded)}
+            className="gap-1 flex-1 justify-center"
+            data-testid={`button-expand-${report.id}`}
+          >
+            <Mic className="w-3 h-3" />
+            {expanded ? "Hide" : "Transcript"}
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </Button>
+          <Link href={`/broadcast/${report.id}`}>
+            <Button variant="ghost" size="icon" data-testid={`button-view-${report.id}`}>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Button>
+          </Link>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              try {
+                navigator.clipboard.writeText(`${window.location.origin}/broadcast/${report.id}`);
+                toast({ title: "Link copied", description: "Broadcast link copied to clipboard" });
+              } catch { toast({ title: "Unable to copy", variant: "destructive" }); }
+            }}
+            data-testid={`button-share-${report.id}`}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
 
         {expanded && (
           <div

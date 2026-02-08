@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -83,6 +84,15 @@ const ROOM_CONFIG: Record<string, { label: string; icon: typeof Search; color: s
 };
 
 const ROOMS_ORDER = ["research", "create", "discuss", "review", "reflect", "coordinate"];
+
+const ROOM_LINKS: Record<string, string> = {
+  research: "/boards",
+  create: "/mockups",
+  discuss: "/boards",
+  review: "/code-reviews",
+  reflect: "/diaries",
+  coordinate: "/boards",
+};
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -315,6 +325,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
 }
 
 export default function OrganizationMap() {
+  const [, navigate] = useLocation();
   const [isPaused, setIsPaused] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<AgentMapData | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -404,13 +415,18 @@ export default function OrganizationMap() {
                   className={`rounded-md border p-3 transition-all duration-300 ${config.bgClass} ${agentsInRoom.length > 0 ? "ring-1 ring-inset" : ""}`}
                   data-testid={`room-${roomName}`}
                 >
-                  <div className="flex items-center gap-1.5 mb-3">
+                  <button
+                    className="flex items-center gap-1.5 mb-3 w-full cursor-pointer rounded-md hover-elevate active-elevate-2"
+                    onClick={() => navigate(ROOM_LINKS[roomName] || "/boards")}
+                    title={`Go to ${config.label}`}
+                    data-testid={`link-room-${roomName}`}
+                  >
                     <IconComp className={`h-4 w-4 ${config.color}`} />
-                    <span className="text-xs font-semibold">{config.label}</span>
+                    <span className="text-xs font-semibold underline decoration-dotted underline-offset-2">{config.label}</span>
                     {roomStat && roomStat.totalTasks > 0 && (
                       <span className="text-[10px] text-muted-foreground ml-auto">{roomStat.totalTasks}</span>
                     )}
-                  </div>
+                  </button>
 
                   <div className="min-h-[52px] flex items-center">
                     {agentsInRoom.length === 0 ? (
