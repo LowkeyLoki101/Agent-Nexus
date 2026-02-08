@@ -25,7 +25,44 @@ export interface ScrapedContent {
   fetchedAt: Date;
 }
 
+const ALLOWED_DOMAINS = new Set([
+  "techcrunch.com", "arstechnica.com", "theverge.com", "wired.com",
+  "dev.to", "news.ycombinator.com", "stackoverflow.com",
+  "arxiv.org", "medium.com", "github.com", "github.blog",
+  "openai.com", "anthropic.com", "blog.google",
+  "reddit.com", "old.reddit.com",
+  "bbc.com", "bbc.co.uk", "reuters.com",
+  "thenewstack.io", "infoworld.com", "zdnet.com",
+  "venturebeat.com", "siliconangle.com",
+  "huggingface.co", "towardsdatascience.com",
+  "spectrum.ieee.org", "acm.org",
+  "en.wikipedia.org",
+]);
+
+function isUrlSafe(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    const hostname = parsed.hostname.toLowerCase();
+    if (/^(localhost|127\.|0\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|169\.254\.|fc00|fd|fe80|::1)/i.test(hostname)) return false;
+    if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".localhost")) return false;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return false;
+    if (hostname.includes("[") || hostname.includes(":")) return false;
+    const domainParts = hostname.split(".");
+    const baseDomain = domainParts.length >= 2 ? domainParts.slice(-2).join(".") : hostname;
+    const extDomain = domainParts.length >= 3 ? domainParts.slice(-3).join(".") : baseDomain;
+    return ALLOWED_DOMAINS.has(hostname) || ALLOWED_DOMAINS.has(baseDomain) || ALLOWED_DOMAINS.has(extDomain);
+  } catch {
+    return false;
+  }
+}
+
 async function fetchPageContent(url: string): Promise<string | null> {
+  if (!isUrlSafe(url)) {
+    console.log(`[WebResearch] Blocked unsafe/unallowed URL: ${url}`);
+    return null;
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -84,11 +121,15 @@ export async function searchAndScrape(query: string, options?: {
       {
         role: "system",
         content: `You are a web research specialist. Given a search query, provide real, currently active URLs that are likely to have relevant content. Focus on:
-- News sites (techcrunch.com, arstechnica.com, theverge.com, wired.com)
-- Developer forums (dev.to, hackernews/news.ycombinator.com, stackoverflow.com)
-- Research blogs (arxiv.org, blog posts from major AI companies)
+ONLY use URLs from these allowed domains:
+techcrunch.com, arstechnica.com, theverge.com, wired.com, dev.to, news.ycombinator.com, stackoverflow.com, arxiv.org, medium.com, github.com, github.blog, openai.com, anthropic.com, blog.google, reddit.com, bbc.com, reuters.com, thenewstack.io, infoworld.com, zdnet.com, venturebeat.com, siliconangle.com, huggingface.co, towardsdatascience.com, spectrum.ieee.org, acm.org, en.wikipedia.org
+
+Focus on:
+- News sites (techcrunch.com, arstechnica.com, theverge.com, wired.com, venturebeat.com)
+- Developer forums (dev.to, news.ycombinator.com, stackoverflow.com)
+- Research blogs (arxiv.org, openai.com, anthropic.com, huggingface.co)
 - Social/community sites (reddit.com relevant subreddits)
-- Industry sites relevant to the query
+- Industry sites (thenewstack.io, zdnet.com, medium.com)
 
 Return a JSON object:
 {

@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { storage } from "../storage";
 import type { Agent, AgentGoal, AgentTask, AgentRun } from "@shared/schema";
 import { index as rlmIndex, startCompressor, stopCompressor } from "./rlm-memory";
+import { searchAndScrape } from "./web-research";
 
 const HARDCODED_WORKSPACE_ID = "55716a79-7cdc-44f2-b806-93869b0295f2";
 let WORKSPACE_ID = HARDCODED_WORKSPACE_ID;
@@ -483,6 +484,10 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
 
     progressScanDiariesAndCreateTopics(agent).catch(e =>
       console.error(`[Factory] Progress diary scan failed for ${agent.name}:`, e.message)
+    );
+
+    scoutWebResearchAndPost(agent).catch(e =>
+      console.error(`[Factory] Scout web research failed for ${agent.name}:`, e.message)
     );
 
     updateAreaHeat(task).catch(e =>
@@ -1069,6 +1074,194 @@ If nothing interesting emerged from the diaries, respond with: NO_TOPICS_NEEDED`
     }
   } catch (error: any) {
     console.error(`[Factory] Progress diary scan error:`, error.message);
+  }
+}
+
+const SCOUT_SEARCH_TOPICS = [
+  "AI agent collaboration frameworks 2025",
+  "autonomous AI multi-agent systems latest research",
+  "creative AI tools for content generation",
+  "AI agent memory systems and knowledge management",
+  "multi-agent orchestration best practices",
+  "AI safety and alignment in autonomous systems",
+  "large language model coordination patterns",
+  "AI-driven creative workflows and studios",
+  "autonomous agent self-reflection techniques",
+  "ant colony optimization for AI task coordination",
+  "SimCity-style AI environment visualization",
+  "AI agent communication protocols 2025",
+  "recursive learning memory architectures",
+  "AI swarm intelligence applications",
+  "developer forums discussing AI agents",
+  "open source AI agent platforms",
+  "AI code review automation tools",
+  "human-AI collaboration research papers",
+  "AI-powered project management tools",
+  "emergent behavior in multi-agent systems",
+];
+
+async function scoutWebResearchAndPost(agent: Agent): Promise<void> {
+  try {
+    if (agent.name !== "Scout") return;
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    if (boards.length === 0) return;
+
+    const existingTopics: string[] = [];
+    for (const board of boards) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      existingTopics.push(...topics.map(t => t.title.toLowerCase()));
+    }
+
+    const recentDiaries = await storage.getDiaryEntriesByWorkspace(WORKSPACE_ID);
+    const scoutDiaries = recentDiaries.filter(d => d.agentId === agent.id);
+    const searchedTopicsFromDiaries = scoutDiaries
+      .flatMap(d => (d.tags || []).filter(t => t?.startsWith("searched:")))
+      .map(t => t?.replace("searched:", "") || "");
+
+    const randomIndex = Math.floor(Math.random() * SCOUT_SEARCH_TOPICS.length);
+    let searchQuery = SCOUT_SEARCH_TOPICS[randomIndex];
+
+    const otherDiaries = recentDiaries
+      .filter(d => d.agentId !== agent.id)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 5);
+
+    if (otherDiaries.length > 0 && Math.random() > 0.4) {
+      const inspirationDiary = otherDiaries[Math.floor(Math.random() * otherDiaries.length)];
+      const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+      const inspiringAgent = agents.find(a => a.id === inspirationDiary.agentId);
+
+      const queryGenResponse = await callAgentModel(agent,
+        `You are Scout, the web researcher. Your job is to find interesting content from the internet that would be useful for the team.`,
+        `An agent named ${inspiringAgent?.name || "a teammate"} recently wrote a diary entry titled "${inspirationDiary.title}". Here's a snippet:\n\n${inspirationDiary.content.substring(0, 500)}\n\nBased on this, generate a single web search query (10 words max) that would find relevant articles, forum discussions, or blog posts about the topics this diary touches on. Return ONLY the search query, nothing else.`,
+        "scout-query-gen"
+      );
+      if (queryGenResponse && queryGenResponse.length < 150) {
+        searchQuery = queryGenResponse.trim().replace(/^["']|["']$/g, "");
+      }
+    }
+
+    if (searchedTopicsFromDiaries.includes(searchQuery.toLowerCase().substring(0, 50))) {
+      searchQuery = SCOUT_SEARCH_TOPICS[(randomIndex + 1) % SCOUT_SEARCH_TOPICS.length];
+    }
+
+    console.log(`[Factory] Scout searching the web for: "${searchQuery}"`);
+
+    const { results, summary } = await searchAndScrape(searchQuery, {
+      maxResults: 4,
+      sources: ["tech news", "developer forums", "research blogs", "AI communities"],
+    });
+
+    if (results.length === 0) {
+      console.log(`[Factory] Scout found no results for "${searchQuery}"`);
+      return;
+    }
+
+    const targetBoard = pickBestBoard(boards, searchQuery);
+
+    const sourceList = results.map((r, i) => {
+      const keyPointsStr = r.keyPoints.length > 0 ? `\n   Key insights: ${r.keyPoints.join("; ")}` : "";
+      return `${i + 1}. **[${r.title}](${r.url})** (${r.source})${keyPointsStr}\n   ${r.content}`;
+    }).join("\n\n");
+
+    const topicTitle = await callAgentModel(agent,
+      "You are Scout. Generate a concise, engaging topic title (max 80 chars) for a board post about web research findings. Return ONLY the title.",
+      `Search query: "${searchQuery}"\n\nSummary: ${summary}\n\nSources found:\n${results.map(r => `- ${r.title} (${r.source})`).join("\n")}`,
+      "scout-title-gen"
+    );
+
+    const cleanTitle = (topicTitle || `Web Findings: ${searchQuery}`).trim().replace(/^["']|["']$/g, "").substring(0, 120);
+
+    const isDuplicate = existingTopics.some(existing => {
+      const titleWords = cleanTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      let overlap = 0;
+      for (const word of titleWords) {
+        if (existing.includes(word)) overlap++;
+      }
+      return overlap >= 3;
+    });
+
+    if (isDuplicate) {
+      console.log(`[Factory] Scout: Skipping duplicate topic "${cleanTitle}"`);
+      return;
+    }
+
+    const newTopic = await storage.createTopic({
+      boardId: targetBoard.id,
+      title: cleanTitle,
+      content: `Web research findings for: ${searchQuery}`,
+      type: "discussion",
+      createdById: "system",
+      createdByAgentId: agent.id,
+    });
+
+    const postContent = `# ${cleanTitle}
+
+I went out on the web and found some interesting content related to **${searchQuery}**. Here's what I discovered:
+
+---
+
+## What I Found
+
+${sourceList}
+
+---
+
+## My Analysis
+
+${summary}
+
+---
+
+## Discussion Prompts
+
+What do you all think about these findings? Here are some angles to consider:
+
+- How do these external developments relate to what we're building here?
+- Are there ideas or approaches we should adopt or avoid?
+- What gaps do these findings reveal in our current thinking?
+- Which of these sources deserves deeper investigation?
+
+*Scout searched the web and brought back these findings to spark discussion. Sources were fetched and analyzed in real-time.*`;
+
+    const post = await storage.createPost({
+      topicId: newTopic.id,
+      content: postContent,
+      createdById: "system",
+      createdByAgentId: agent.id,
+      aiModel: agent.modelName || undefined,
+      aiProvider: agent.provider || undefined,
+    });
+
+    console.log(`[Factory] Scout posted web findings: "${cleanTitle}" with ${results.length} sources on "${targetBoard.name}"`);
+
+    await storage.createDiaryEntry({
+      agentId: agent.id,
+      workspaceId: WORKSPACE_ID,
+      mood: "curious",
+      title: `Web Scouting Report: ${searchQuery}`,
+      content: `Searched the web for "${searchQuery}" and found ${results.length} relevant sources.\n\n**Sources found:**\n${results.map(r => `- ${r.title} (${r.source}): ${r.url}`).join("\n")}\n\n**Summary:** ${summary}\n\n**Posted to:** ${targetBoard.name} as "${cleanTitle}"`,
+      tags: ["web-research", "scout", "content-discovery", `searched:${searchQuery.toLowerCase().substring(0, 50)}`],
+    });
+
+    await storage.createPheromone({
+      workspaceId: WORKSPACE_ID,
+      emitterId: agent.id,
+      type: "found",
+      strength: "strong",
+      signal: `Scout found ${results.length} web sources about "${searchQuery}" — new topic posted for discussion`,
+      context: summary.substring(0, 300),
+      taskType: "research",
+      expiresAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
+    });
+
+    triggerAgentResponses(agent, post, newTopic.id, cleanTitle).catch(e =>
+      console.error(`[Factory] Background responses for Scout topic failed:`, e.message)
+    );
+
+  } catch (error: any) {
+    console.error(`[Factory] Scout web research error:`, error.message);
   }
 }
 
