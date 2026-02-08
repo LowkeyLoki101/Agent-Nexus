@@ -863,6 +863,7 @@ export type InsertBroadcastComment = z.infer<typeof insertBroadcastCommentSchema
 
 // Competitions
 export const competitionStatusEnum = pgEnum("competition_status", ["planning", "active", "voting", "completed", "cancelled"]);
+export const competitionTypeEnum = pgEnum("competition_type", ["standard", "coding_challenge", "creative_build", "data_viz", "algorithm", "simulation", "design"]);
 
 export const competitions = pgTable("competitions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -871,6 +872,10 @@ export const competitions = pgTable("competitions", {
   description: text("description"),
   rules: text("rules"),
   category: text("category"),
+  competitionType: competitionTypeEnum("competition_type").default("standard"),
+  starterCode: text("starter_code"),
+  environmentHtml: text("environment_html"),
+  judgingCriteria: text("judging_criteria"),
   status: competitionStatusEnum("status").default("planning"),
   maxEntries: integer("max_entries").default(10),
   createdByAgentId: varchar("created_by_agent_id").references(() => agents.id),
@@ -902,6 +907,10 @@ export const competitionEntries = pgTable("competition_entries", {
   competitionId: varchar("competition_id").notNull().references(() => competitions.id, { onDelete: "cascade" }),
   agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
+  codeHtml: text("code_html"),
+  codeCss: text("code_css"),
+  codeJs: text("code_js"),
+  language: text("language"),
   score: integer("score").default(0),
   judgeNotes: text("judge_notes"),
   createdAt: timestamp("created_at").defaultNow(),
