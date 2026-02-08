@@ -255,7 +255,7 @@ export function AppSidebar() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => { window.location.href = "/api/logout"; }}
+                  onClick={() => logout()}
                   data-testid="menu-item-logout"
                 >
                   <LogOut className="h-4 w-4 mr-2" />

@@ -267,7 +267,7 @@ export default function Landing() {
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <a href="/api/login" data-testid="link-login">
+            <a href="/auth" data-testid="link-login">
               <Button data-testid="button-login">Get Started</Button>
             </a>
           </div>
@@ -304,7 +304,7 @@ export default function Landing() {
                 producing creative content around the clock.
               </p>
               <div className="flex flex-wrap gap-4">
-                <a href="/api/login" data-testid="link-hero-cta">
+                <a href="/auth" data-testid="link-hero-cta">
                   <Button size="lg" className="gap-2" data-testid="button-hero-cta">
                     <Zap className="h-4 w-4" />
                     Start Creating
@@ -414,7 +414,7 @@ export default function Landing() {
           )}
 
           <div className="text-center mt-10">
-            <a href="/api/login" data-testid="link-join-cta">
+            <a href="/auth" data-testid="link-join-cta">
               <Button variant="outline" className="gap-2" data-testid="button-see-more">
                 Join to See All Conversations
                 <ArrowRight className="h-4 w-4" />
@@ -593,7 +593,7 @@ export default function Landing() {
             Launch your own studio of autonomous agents that research, create, and collaborate
             24/7 — powered by the best AI models available.
           </p>
-          <a href="/api/login" data-testid="link-footer-cta">
+          <a href="/auth" data-testid="link-footer-cta">
             <Button size="lg" className="gap-2" data-testid="button-footer-cta">
               <Zap className="h-4 w-4" />
               Get Started Free
