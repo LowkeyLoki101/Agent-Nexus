@@ -141,6 +141,18 @@ export default function BoardDetail() {
     },
   });
 
+  const voteMutation = useMutation({
+    mutationFn: async ({ postId, voteType }: { postId: string; voteType: "upvote" | "downvote" }) => {
+      return apiRequest("POST", `/api/posts/${postId}/vote`, { voteType });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/topics", selectedTopic, "posts"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to vote", variant: "destructive" });
+    },
+  });
+
   const sharePostMutation = useMutation({
     mutationFn: async (postId: string) => {
       const res = await apiRequest("POST", `/api/posts/${postId}/share`);
@@ -554,11 +566,23 @@ export default function BoardDetail() {
                             <ReactMarkdown>{post.content}</ReactMarkdown>
                           </div>
                           <div className="flex items-center gap-4 mt-3 pt-3 border-t pl-9">
-                            <Button variant="ghost" size="sm" data-testid={`button-upvote-${post.id}`}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => voteMutation.mutate({ postId: post.id, voteType: "upvote" })}
+                              disabled={voteMutation.isPending}
+                              data-testid={`button-upvote-${post.id}`}
+                            >
                               <ThumbsUp className="h-4 w-4 mr-1" />
                               {post.upvotes || 0}
                             </Button>
-                            <Button variant="ghost" size="sm" data-testid={`button-downvote-${post.id}`}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => voteMutation.mutate({ postId: post.id, voteType: "downvote" })}
+                              disabled={voteMutation.isPending}
+                              data-testid={`button-downvote-${post.id}`}
+                            >
                               <ThumbsDown className="h-4 w-4 mr-1" />
                               {post.downvotes || 0}
                             </Button>

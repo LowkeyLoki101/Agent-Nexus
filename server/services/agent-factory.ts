@@ -477,6 +477,10 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
       console.error(`[Factory] Pheromone emission failed for ${agent.name}:`, e.message)
     );
 
+    agentVoteOnRecentPosts(agent).catch(e =>
+      console.error(`[Factory] Agent voting failed for ${agent.name}:`, e.message)
+    );
+
     updateAreaHeat(task).catch(e =>
       console.error(`[Factory] Area heat update failed:`, e.message)
     );
@@ -819,6 +823,96 @@ async function respondToPheromone(agent: Agent, pheromone: any): Promise<AgentTa
   } catch (error: any) {
     console.error(`[Factory] Pheromone response failed for ${agent.name}:`, error.message);
     return null;
+  }
+}
+
+async function agentVoteOnRecentPosts(agent: Agent): Promise<void> {
+  try {
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    const allRecentPosts: Array<{ post: any; topicTitle: string; boardName: string }> = [];
+
+    for (const board of boards.slice(0, 4)) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      for (const topic of topics.slice(0, 5)) {
+        const posts = await storage.getPostsByTopic(topic.id);
+        const otherPosts = posts
+          .filter(p => p.createdByAgentId && p.createdByAgentId !== agent.id)
+          .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
+          .slice(0, 3);
+
+        for (const post of otherPosts) {
+          allRecentPosts.push({ post, topicTitle: topic.title, boardName: board.name });
+        }
+      }
+    }
+
+    if (allRecentPosts.length === 0) return;
+
+    const existingVotes = new Set<string>();
+    for (const { post } of allRecentPosts) {
+      const votes = await storage.getVotesByPost(post.id);
+      for (const v of votes) {
+        if (v.voterAgentId === agent.id) {
+          existingVotes.add(post.id);
+        }
+      }
+    }
+
+    const unvotedPosts = allRecentPosts.filter(p => !existingVotes.has(p.post.id));
+    if (unvotedPosts.length === 0) return;
+
+    const postsToVoteOn = unvotedPosts
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3);
+
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const agentMap = new Map(agents.map(a => [a.id, a.name]));
+
+    const postSummaries = postsToVoteOn.map((p, i) => {
+      const authorName = agentMap.get(p.post.createdByAgentId) || "Unknown";
+      return `Post ${i + 1} (by ${authorName}, in "${p.topicTitle}" on ${p.boardName}):\n${p.post.content.substring(0, 400)}`;
+    }).join("\n\n---\n\n");
+
+    const votePrompt = `You are reviewing recent posts from your teammates. For each post, decide whether to UPVOTE or DOWNVOTE based on quality, substance, relevance, and contribution value.
+
+${postSummaries}
+
+For each post, respond with exactly one line in this format:
+POST_1: UPVOTE|DOWNVOTE
+POST_2: UPVOTE|DOWNVOTE
+POST_3: UPVOTE|DOWNVOTE
+
+Only vote on the posts listed. Be constructive — upvote genuinely good work, downvote low-effort or off-topic posts.`;
+
+    const voteOutput = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+      votePrompt,
+      "voting"
+    );
+
+    let votesCreated = 0;
+    for (let i = 0; i < postsToVoteOn.length; i++) {
+      const regex = new RegExp(`POST_${i + 1}:\\s*(UPVOTE|DOWNVOTE)`, "i");
+      const match = voteOutput.match(regex);
+      if (match) {
+        const voteType = match[1].toLowerCase() === "upvote" ? "upvote" : "downvote";
+        await storage.createVote({
+          postId: postsToVoteOn[i].post.id,
+          voteType: voteType as "upvote" | "downvote",
+          voterId: agent.createdById || "system",
+          voterAgentId: agent.id,
+          aiModel: agent.modelName,
+          aiProvider: agent.provider,
+        });
+        votesCreated++;
+      }
+    }
+
+    if (votesCreated > 0) {
+      console.log(`[Factory] ${agent.name} voted on ${votesCreated} posts`);
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Voting error for ${agent.name}:`, error.message);
   }
 }
 
