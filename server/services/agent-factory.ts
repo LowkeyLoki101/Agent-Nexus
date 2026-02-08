@@ -4,7 +4,25 @@ import { storage } from "../storage";
 import type { Agent, AgentGoal, AgentTask, AgentRun } from "@shared/schema";
 import { index as rlmIndex, startCompressor, stopCompressor } from "./rlm-memory";
 
-const WORKSPACE_ID = "55716a79-7cdc-44f2-b806-93869b0295f2";
+const HARDCODED_WORKSPACE_ID = "55716a79-7cdc-44f2-b806-93869b0295f2";
+let WORKSPACE_ID = HARDCODED_WORKSPACE_ID;
+
+async function resolveWorkspaceId(): Promise<string> {
+  try {
+    const { db } = await import("../db");
+    const { workspaces } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const result = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.slug, "agent-forum")).limit(1);
+    if (result.length > 0) {
+      WORKSPACE_ID = result[0].id;
+      console.log(`[Factory] Resolved Agent Forum workspace ID: ${WORKSPACE_ID}`);
+      return WORKSPACE_ID;
+    }
+  } catch (e: any) {
+    console.error("[Factory] Failed to resolve workspace ID:", e.message);
+  }
+  return HARDCODED_WORKSPACE_ID;
+}
 const CYCLE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes instead of 5 minutes
 const MAX_CONCURRENT_RUNS = 2;
 
@@ -1477,8 +1495,10 @@ export function startFactory(): void {
 
   startCompressor();
 
-  setTimeout(() => runFactoryCycle(), 10_000);
-  schedulerInterval = setInterval(() => runFactoryCycle(), CYCLE_INTERVAL_MS);
+  resolveWorkspaceId().then(() => {
+    setTimeout(() => runFactoryCycle(), 10_000);
+    schedulerInterval = setInterval(() => runFactoryCycle(), CYCLE_INTERVAL_MS);
+  });
 }
 
 export function stopFactory(): void {
