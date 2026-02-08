@@ -101,6 +101,12 @@ import {
   type InsertTokenUsage,
   type TokenBudget,
   type InsertTokenBudget,
+  showcaseVotes,
+  leaderboardScores,
+  type ShowcaseVote,
+  type InsertShowcaseVote,
+  type LeaderboardScore,
+  type InsertLeaderboardScore,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
@@ -327,6 +333,15 @@ export interface IStorage {
   createTokenBudget(budget: InsertTokenBudget): Promise<TokenBudget>;
   updateTokenBudget(id: string, updates: Partial<InsertTokenBudget>): Promise<TokenBudget | undefined>;
   getTokenBudgetRemaining(workspaceId: string): Promise<{ allocation: number; used: number; remaining: number; cadence: string } | null>;
+
+  // Showcase Votes & Leaderboard
+  createShowcaseVote(vote: InsertShowcaseVote): Promise<ShowcaseVote>;
+  getShowcaseVotes(targetType: string, targetId: string): Promise<ShowcaseVote[]>;
+  getShowcaseVotesByWorkspace(workspaceId: string): Promise<ShowcaseVote[]>;
+  deleteShowcaseVote(id: string): Promise<void>;
+  getLeaderboard(workspaceId: string): Promise<LeaderboardScore[]>;
+  getLeaderboardScore(agentId: string, workspaceId: string): Promise<LeaderboardScore | undefined>;
+  upsertLeaderboardScore(agentId: string, workspaceId: string, updates: Partial<InsertLeaderboardScore>): Promise<LeaderboardScore>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1557,6 +1572,72 @@ export class DatabaseStorage implements IStorage {
       remaining: Math.max(0, budget.allocation - used),
       cadence: budget.cadence,
     };
+  }
+
+  async createShowcaseVote(vote: InsertShowcaseVote): Promise<ShowcaseVote> {
+    const [created] = await db.insert(showcaseVotes).values(vote).returning();
+    return created;
+  }
+
+  async getShowcaseVotes(targetType: string, targetId: string): Promise<ShowcaseVote[]> {
+    return db.select().from(showcaseVotes)
+      .where(and(eq(showcaseVotes.targetType, targetType as any), eq(showcaseVotes.targetId, targetId)))
+      .orderBy(desc(showcaseVotes.createdAt));
+  }
+
+  async getShowcaseVotesByWorkspace(workspaceId: string): Promise<ShowcaseVote[]> {
+    return db.select().from(showcaseVotes)
+      .where(eq(showcaseVotes.workspaceId, workspaceId))
+      .orderBy(desc(showcaseVotes.createdAt));
+  }
+
+  async deleteShowcaseVote(id: string): Promise<void> {
+    await db.delete(showcaseVotes).where(eq(showcaseVotes.id, id));
+  }
+
+  async getLeaderboard(workspaceId: string): Promise<LeaderboardScore[]> {
+    return db.select().from(leaderboardScores)
+      .where(eq(leaderboardScores.workspaceId, workspaceId))
+      .orderBy(desc(leaderboardScores.totalScore));
+  }
+
+  async getLeaderboardScore(agentId: string, workspaceId: string): Promise<LeaderboardScore | undefined> {
+    const [score] = await db.select().from(leaderboardScores)
+      .where(and(eq(leaderboardScores.agentId, agentId), eq(leaderboardScores.workspaceId, workspaceId)));
+    return score;
+  }
+
+  async upsertLeaderboardScore(agentId: string, workspaceId: string, updates: Partial<InsertLeaderboardScore>): Promise<LeaderboardScore> {
+    const existing = await this.getLeaderboardScore(agentId, workspaceId);
+    if (existing) {
+      const newVotes = (existing.totalVotes || 0) + (updates.totalVotes || 0);
+      const newStars = (existing.totalStars || 0) + (updates.totalStars || 0);
+      const newTools = (existing.toolsCreated || 0) + (updates.toolsCreated || 0);
+      const newProjects = (existing.projectsCreated || 0) + (updates.projectsCreated || 0);
+      const newUsage = (existing.toolUsageCount || 0) + (updates.toolUsageCount || 0);
+      const newArt = (existing.artCreated || 0) + (updates.artCreated || 0);
+      const totalScore = newVotes * 2 + newStars * 5 + newTools * 10 + newProjects * 15 + newUsage * 1 + newArt * 8;
+      const [updated] = await db.update(leaderboardScores).set({
+        totalVotes: newVotes,
+        totalStars: newStars,
+        toolsCreated: newTools,
+        projectsCreated: newProjects,
+        toolUsageCount: newUsage,
+        artCreated: newArt,
+        totalScore,
+        updatedAt: new Date(),
+      }).where(eq(leaderboardScores.id, existing.id)).returning();
+      return updated;
+    } else {
+      const totalScore = (updates.totalVotes || 0) * 2 + (updates.totalStars || 0) * 5 + (updates.toolsCreated || 0) * 10 + (updates.projectsCreated || 0) * 15 + (updates.toolUsageCount || 0) * 1 + (updates.artCreated || 0) * 8;
+      const [created] = await db.insert(leaderboardScores).values({
+        agentId,
+        workspaceId,
+        ...updates,
+        totalScore,
+      }).returning();
+      return created;
+    }
   }
 }
 

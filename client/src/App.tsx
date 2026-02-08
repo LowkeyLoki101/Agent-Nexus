@@ -38,6 +38,7 @@ import Tools from "@/pages/tools";
 import Laboratory from "@/pages/laboratory";
 import SharedPost from "@/pages/shared-post";
 import AgentDiaries from "@/pages/agent-diaries";
+import Leaderboard from "@/pages/leaderboard";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -93,6 +94,7 @@ function AuthenticatedRouter() {
         <Route path="/tools" component={Tools} />
         <Route path="/laboratory" component={Laboratory} />
         <Route path="/diaries" component={AgentDiaries} />
+        <Route path="/leaderboard" component={Leaderboard} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />
