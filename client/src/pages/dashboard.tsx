@@ -1,11 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import OrganizationMap from "@/components/organization-map";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Plus, 
   Bot, 
@@ -19,6 +21,10 @@ import {
   BarChart3,
   Clock,
   Download,
+  Upload,
+  FileUp,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
@@ -58,10 +64,24 @@ interface TokenBudgetRemaining {
 
 type Granularity = "minute" | "hour" | "day" | "week" | "month";
 
+interface ImportResult {
+  message: string;
+  results: Record<string, { imported: number; skipped: number; errors: number }>;
+  totalImported: number;
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [granularity, setGranularity] = useState<Granularity>("hour");
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<{ exportedAt: string; version: string; tableCounts: Record<string, number> } | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = async () => {
     setExporting(true);
@@ -81,6 +101,65 @@ export default function Dashboard() {
       console.error("Export failed:", err);
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFile(file);
+    setImportResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        if (!data.tables || typeof data.tables !== "object") {
+          toast({ title: "Invalid file", description: "This doesn't look like a valid export file.", variant: "destructive" });
+          setImportFile(null);
+          return;
+        }
+        setImportPreview({
+          exportedAt: data.exportedAt || "Unknown",
+          version: data.version || "Unknown",
+          tableCounts: data.tableCounts || Object.fromEntries(
+            Object.entries(data.tables).map(([k, v]) => [k, (v as any[]).length])
+          ),
+        });
+        setImportDialogOpen(true);
+      } catch {
+        toast({ title: "Invalid file", description: "Could not parse the JSON file.", variant: "destructive" });
+        setImportFile(null);
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleImportConfirm = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    try {
+      const text = await importFile.text();
+      const data = JSON.parse(text);
+      const response = await fetch("/api/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ tables: data.tables }),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || "Import failed");
+      }
+      const result: ImportResult = await response.json();
+      setImportResult(result);
+      queryClient.invalidateQueries();
+      toast({ title: "Import complete", description: `${result.totalImported} records imported successfully.` });
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err.message || "Something went wrong during import.", variant: "destructive" });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -159,6 +238,18 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleFileSelect}
+            data-testid="input-import-file"
+          />
+          <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()} data-testid="button-import-data">
+            <Upload className="h-4 w-4" />
+            Import Data
+          </Button>
           <Button variant="outline" className="gap-2" onClick={handleExport} disabled={exporting} data-testid="button-export-data">
             <Download className="h-4 w-4" />
             {exporting ? "Exporting..." : "Export Data"}
@@ -584,6 +675,100 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
+      <Dialog open={importDialogOpen} onOpenChange={(open) => { if (!importing) { setImportDialogOpen(open); if (!open) { setImportResult(null); setImportFile(null); setImportPreview(null); } } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileUp className="h-5 w-5" />
+              {importResult ? "Import Results" : "Import Data"}
+            </DialogTitle>
+            <DialogDescription>
+              {importResult
+                ? "Here's a summary of what was imported."
+                : "Review the data before importing. Existing records will be kept — only new records are added."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!importResult && importPreview && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Exported on</span>
+                  <p className="font-medium">{new Date(importPreview.exportedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Format version</span>
+                  <p className="font-medium">{importPreview.version}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Data summary</p>
+                <div className="max-h-48 overflow-y-auto rounded-md border p-3 space-y-1">
+                  {Object.entries(importPreview.tableCounts)
+                    .filter(([, count]) => count > 0)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([table, count]) => (
+                      <div key={table} className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">{table.replace(/_/g, " ")}</span>
+                        <Badge variant="secondary">{count}</Badge>
+                      </div>
+                    ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Total: {Object.values(importPreview.tableCounts).reduce((s, n) => s + n, 0)} records across {Object.values(importPreview.tableCounts).filter(n => n > 0).length} tables
+                </p>
+              </div>
+            </div>
+          )}
+
+          {importResult && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span className="font-medium">{importResult.totalImported} records imported</span>
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-md border p-3 space-y-1">
+                {Object.entries(importResult.results)
+                  .filter(([, r]) => r.imported > 0 || r.skipped > 0 || r.errors > 0)
+                  .map(([table, r]) => (
+                    <div key={table} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{table.replace(/_/g, " ")}</span>
+                      <div className="flex items-center gap-2">
+                        {r.imported > 0 && <Badge variant="secondary">{r.imported} new</Badge>}
+                        {r.skipped > 0 && <Badge variant="outline">{r.skipped} existing</Badge>}
+                        {r.errors > 0 && (
+                          <Badge variant="destructive" className="gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            {r.errors}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            {importResult ? (
+              <Button onClick={() => { setImportDialogOpen(false); setImportResult(null); setImportFile(null); setImportPreview(null); }} data-testid="button-import-done">
+                Done
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => { setImportDialogOpen(false); setImportFile(null); setImportPreview(null); }} disabled={importing} data-testid="button-import-cancel">
+                  Cancel
+                </Button>
+                <Button onClick={handleImportConfirm} disabled={importing} className="gap-2" data-testid="button-import-confirm">
+                  <Upload className="h-4 w-4" />
+                  {importing ? "Importing..." : "Import"}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
