@@ -1858,6 +1858,59 @@ export async function registerRoutes(
   });
 
   // =================================
+  // Post Voting Routes
+  // =================================
+
+  app.post("/api/posts/:id/vote", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const voteSchema = z.object({
+        voteType: z.enum(["upvote", "downvote"]),
+        reason: z.string().optional(),
+      });
+      const validation = voteSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid vote data" });
+      }
+      const post = await storage.getPost(id);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+
+      const topic = await storage.getTopic(post.topicId);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      const board = await storage.getBoard(topic.boardId);
+      if (!board) return res.status(404).json({ message: "Board not found" });
+      const access = await checkWorkspaceAccess(userId, board.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const vote = await storage.createVote({
+        postId: id,
+        voteType: validation.data.voteType,
+        reason: validation.data.reason || null,
+        voterId: userId,
+        voterAgentId: null,
+      });
+
+      const updatedPost = await storage.getPost(id);
+      res.status(201).json({ vote, post: updatedPost });
+    } catch (error) {
+      console.error("Error voting on post:", error);
+      res.status(500).json({ message: "Failed to vote" });
+    }
+  });
+
+  app.get("/api/posts/:id/votes", isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const votes = await storage.getVotesByPost(id);
+      res.json(votes);
+    } catch (error) {
+      console.error("Error fetching votes:", error);
+      res.status(500).json({ message: "Failed to fetch votes" });
+    }
+  });
+
+  // =================================
   // Post Sharing Routes
   // =================================
 
