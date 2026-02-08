@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
+import { migrateDevDataToProduction } from "./migrate-data";
 
 const app = express();
 const httpServer = createServer(app);
@@ -63,6 +64,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+  await migrateDevDataToProduction();
   await seedDatabase();
 
   // Auto-start the agent factory for continuous autonomous discussions
