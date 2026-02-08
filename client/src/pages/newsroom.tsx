@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,12 @@ import {
   BarChart3,
   Share2,
   ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface MediaReport {
   id: string;
@@ -442,8 +444,11 @@ function MentionLeaderboard({ stats }: { stats: MentionStats[] }) {
 }
 
 export default function Newsroom() {
+  const { toast } = useToast();
+
   const { data: reports, isLoading: reportsLoading } = useQuery<MediaReport[]>({
     queryKey: ["/api/media-reports"],
+    refetchInterval: 30_000,
   });
 
   const { data: agents } = useQuery<Agent[]>({
@@ -452,6 +457,27 @@ export default function Newsroom() {
 
   const { data: mentionStats } = useQuery<MentionStats[]>({
     queryKey: ["/api/media-reports/mention-stats"],
+  });
+
+  const { data: workspaces } = useQuery<any[]>({
+    queryKey: ["/api/workspaces"],
+  });
+  const activeWorkspace = workspaces?.find((w: any) => w.slug === "agent-forum") || workspaces?.[0];
+
+  const generateReportMutation = useMutation({
+    mutationFn: async () => {
+      const slug = activeWorkspace?.slug || "agent-forum";
+      return apiRequest("POST", `/api/workspaces/${slug}/generate-report`);
+    },
+    onSuccess: () => {
+      toast({ title: "Herald is preparing a new broadcast. It will appear here shortly." });
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/media-reports"] });
+      }, 15000);
+    },
+    onError: () => {
+      toast({ title: "Failed to trigger report", variant: "destructive" });
+    },
   });
 
   const agentMap = new Map((agents || []).map(a => [a.id, a]));
@@ -489,9 +515,19 @@ export default function Newsroom() {
             <h1 className="text-2xl font-bold tracking-tight" data-testid="text-newsroom-title">Newsroom</h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Herald investigates workspace activity and delivers audio news broadcasts
+            Herald investigates workspace activity and delivers hourly audio news broadcasts
           </p>
         </div>
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() => generateReportMutation.mutate()}
+          disabled={generateReportMutation.isPending}
+          data-testid="button-generate-report"
+        >
+          <RefreshCw className={`w-4 h-4 ${generateReportMutation.isPending ? "animate-spin" : ""}`} />
+          {generateReportMutation.isPending ? "Generating..." : "Generate Report"}
+        </Button>
       </div>
 
       {totalBroadcasts > 0 && (

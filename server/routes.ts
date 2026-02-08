@@ -2921,6 +2921,30 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/workspaces/:slug/generate-report", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const agents = await storage.getAgentsByWorkspace(workspace.id);
+      const heraldAgent = agents.find(a => a.name === "Herald");
+      if (!heraldAgent) return res.status(404).json({ message: "Herald agent not found" });
+
+      res.json({ message: "Herald report generation triggered" });
+
+      const { heraldCreateNewsReport } = await import("./services/agent-factory");
+      heraldCreateNewsReport(heraldAgent, true).catch(err =>
+        console.error("[Routes] Herald report generation error:", err.message)
+      );
+    } catch (error) {
+      console.error("Error triggering report:", error);
+      res.status(500).json({ message: "Failed to trigger report" });
+    }
+  });
+
   app.get("/api/workspaces/:slug/mention-stats", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
