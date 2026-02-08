@@ -3724,6 +3724,56 @@ export async function registerRoutes(
     }
   });
 
+  // ============ CHANGE REQUESTS ============
+
+  app.get("/api/change-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const userWorkspaces = await storage.getWorkspacesByUser(userId);
+      let allRequests: any[] = [];
+      for (const ws of userWorkspaces) {
+        const requests = await storage.getChangeRequestsByWorkspace(ws.id);
+        allRequests = allRequests.concat(requests);
+      }
+      allRequests.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+      res.json(allRequests);
+    } catch (error) {
+      console.error("Error fetching change requests:", error);
+      res.status(500).json({ message: "Failed to fetch change requests" });
+    }
+  });
+
+  app.get("/api/change-requests/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const cr = await storage.getChangeRequest(req.params.id);
+      if (!cr) return res.status(404).json({ message: "Change request not found" });
+      res.json(cr);
+    } catch (error) {
+      console.error("Error fetching change request:", error);
+      res.status(500).json({ message: "Failed to fetch change request" });
+    }
+  });
+
+  app.patch("/api/change-requests/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const { status, reviewNotes } = req.body;
+      if (!["approved", "rejected", "implemented"].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+      const updated = await storage.updateChangeRequest(req.params.id, {
+        status,
+        reviewNotes: reviewNotes || null,
+        reviewedBy: req.user.claims.sub,
+        reviewedAt: new Date(),
+      });
+      if (!updated) return res.status(404).json({ message: "Change request not found" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating change request:", error);
+      res.status(500).json({ message: "Failed to update change request" });
+    }
+  });
+
   // Agent API routes (autonomous agent operations via API tokens)
   app.use("/api/agent", agentApiRoutes);
 

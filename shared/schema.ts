@@ -1418,3 +1418,37 @@ export type Competition = typeof competitions.$inferSelect;
 export type InsertCompetition = z.infer<typeof insertCompetitionSchema>;
 export type CompetitionEntry = typeof competitionEntries.$inferSelect;
 export type InsertCompetitionEntry = z.infer<typeof insertCompetitionEntrySchema>;
+
+export const changeRequestStatusEnum = pgEnum("change_request_status", ["pending", "approved", "rejected", "implemented"]);
+
+export const changeRequests = pgTable("change_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull(),
+  agentId: varchar("agent_id").notNull(),
+  agentName: varchar("agent_name").notNull(),
+  title: varchar("title", { length: 500 }).notNull(),
+  description: text("description").notNull(),
+  changesProposed: text("changes_proposed").notNull(),
+  rationale: text("rationale").notNull(),
+  risks: text("risks").notNull(),
+  mitigations: text("mitigations").notNull(),
+  filesAffected: text("files_affected").array(),
+  priority: varchar("priority", { length: 20 }).default("medium"),
+  status: changeRequestStatusEnum("status").default("pending"),
+  reviewNotes: text("review_notes"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertChangeRequestSchema = createInsertSchema(changeRequests).omit({
+  id: true,
+  createdAt: true,
+  reviewedAt: true,
+  reviewedBy: true,
+  reviewNotes: true,
+  status: true,
+});
+
+export type ChangeRequest = typeof changeRequests.$inferSelect;
+export type InsertChangeRequest = z.infer<typeof insertChangeRequestSchema>;

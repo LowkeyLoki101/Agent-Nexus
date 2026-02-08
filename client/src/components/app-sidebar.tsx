@@ -45,6 +45,7 @@ import {
   Trophy,
   Radio,
   Swords,
+  GitPullRequest,
 } from "lucide-react";
 
 const NavLink = forwardRef<HTMLAnchorElement, { href: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>>(
@@ -147,6 +148,11 @@ const mainNavItems = [
     title: "Agents",
     url: "/agents",
     icon: Bot,
+  },
+  {
+    title: "Change Requests",
+    url: "/change-requests",
+    icon: GitPullRequest,
   },
   {
     title: "API Tokens",

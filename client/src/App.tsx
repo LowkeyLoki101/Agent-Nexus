@@ -41,6 +41,7 @@ import AgentDiaries from "@/pages/agent-diaries";
 import Leaderboard from "@/pages/leaderboard";
 import Newsroom from "@/pages/newsroom";
 import Competitions from "@/pages/competitions";
+import ChangeRequests from "@/pages/change-requests";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -101,6 +102,7 @@ function AuthenticatedRouter() {
         <Route path="/competitions" component={Competitions} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
+        <Route path="/change-requests" component={ChangeRequests} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>

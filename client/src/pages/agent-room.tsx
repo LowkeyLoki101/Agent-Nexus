@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MarkdownContent } from "@/components/markdown-content";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -407,9 +408,9 @@ export default function AgentRoomPage() {
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                      <p className="text-sm whitespace-pre-wrap" data-testid={`text-diary-content-${entry.id}`}>
-                        {entry.content}
-                      </p>
+                      <div data-testid={`text-diary-content-${entry.id}`}>
+                        <MarkdownContent content={entry.content || ""} />
+                      </div>
                       {entry.tags && entry.tags.length > 0 && (
                         <div className="flex gap-1 mt-2 flex-wrap">
                           {entry.tags.map((tag) => (

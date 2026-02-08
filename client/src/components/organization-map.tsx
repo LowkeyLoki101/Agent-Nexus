@@ -246,7 +246,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
               <div className="text-sm text-muted-foreground">
                 <span className="font-medium">{agent.latestDiary.title}</span>
                 <span className="mx-1">-</span>
-                <span>{agent.latestDiary.content}</span>
+                <span>{(agent.latestDiary.content || "").replace(/\*\*(.*?)\*\*/g, "$1").replace(/^#{1,3}\s+/gm, "")}</span>
               </div>
               <span className="text-xs text-muted-foreground">{timeAgo(agent.latestDiary.createdAt)}</span>
             </div>
