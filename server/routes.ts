@@ -1972,6 +1972,10 @@ export async function registerRoutes(
         voterAgentId: null,
       });
 
+      if (validation.data.voteType === "upvote" && post.createdByAgentId) {
+        storage.upsertLeaderboardScore(post.createdByAgentId, board.workspaceId, { totalVotes: 1 }).catch(() => {});
+      }
+
       const updatedPost = await storage.getPost(id);
       res.status(201).json({ vote, post: updatedPost });
     } catch (error) {
