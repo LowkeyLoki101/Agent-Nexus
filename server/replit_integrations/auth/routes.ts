@@ -56,6 +56,29 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/auth/set-password", async (req, res) => {
+    try {
+      const userId = (req.user as any)?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "You must be signed in to set a password" });
+      }
+      const { password } = req.body;
+      if (!password || typeof password !== "string" || password.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters" });
+      }
+      const passwordHash = await bcrypt.hash(password, 12);
+      const user = await authStorage.setPasswordForUser(userId, passwordHash);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const { passwordHash: _, ...safeUser } = user;
+      res.json({ message: "Password set successfully", user: safeUser });
+    } catch (error: any) {
+      console.error("Error setting password:", error);
+      res.status(500).json({ message: "Failed to set password" });
+    }
+  });
+
   app.post("/api/auth/register", async (req, res) => {
     try {
       const { email, password, firstName, lastName } = req.body;
@@ -68,11 +91,23 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       const existing = await authStorage.getUserByEmail(email.trim().toLowerCase());
-      if (existing) {
-        return res.status(409).json({ message: "An account with this email already exists" });
+      if (existing && existing.passwordHash) {
+        return res.status(409).json({ message: "An account with this email already exists. Please sign in instead." });
+      }
+      if (existing && !existing.passwordHash) {
+        const sessionUserId = (req.user as any)?.claims?.sub;
+        if (sessionUserId === existing.id) {
+          const passwordHash = await bcrypt.hash(password, 12);
+          console.log(`[Auth] Authenticated OIDC user setting password: ${existing.id}`);
+          const user = await authStorage.setPasswordForUser(existing.id, passwordHash, firstName?.trim() || null, lastName?.trim() || null);
+          const { passwordHash: _, ...safeUser } = user;
+          return res.status(200).json(safeUser);
+        }
+        return res.status(409).json({ message: "An account with this email exists via Replit login. Please sign in with Replit first, then set a password from your profile." });
       }
 
       const passwordHash = await bcrypt.hash(password, 12);
+
       const user = await authStorage.createUserWithPassword({
         email: email.trim().toLowerCase(),
         firstName: firstName?.trim() || null,
