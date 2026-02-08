@@ -147,7 +147,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
             </Avatar>
             <div>
               <div className="text-lg">{agent.name}</div>
-              <div className="text-sm text-muted-foreground font-normal">{agent.roleMetaphor || agent.description?.substring(0, 60)}</div>
+              <div className="text-sm text-muted-foreground font-normal break-words overflow-hidden">{agent.roleMetaphor || agent.description?.substring(0, 80)}</div>
             </div>
           </DialogTitle>
           <DialogDescription className="sr-only">
@@ -155,7 +155,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 mt-2">
+        <div className="space-y-4 mt-2 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="outline" data-testid="badge-provider">{agent.provider}/{agent.modelName}</Badge>
             {agent.currentRoom && (
@@ -171,7 +171,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
                 <Zap className="h-3.5 w-3.5 text-primary" />
                 Currently Doing
               </h4>
-              <p className="text-sm text-muted-foreground" data-testid="text-doing-now">{agent.latestPulse.doingNow}</p>
+              <p className="text-sm text-muted-foreground break-words overflow-hidden" data-testid="text-doing-now">{agent.latestPulse.doingNow}</p>
             </div>
           )}
 
@@ -181,7 +181,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
                 <Target className="h-3.5 w-3.5 text-primary" />
                 Current Task
               </h4>
-              <p className="text-sm text-muted-foreground" data-testid="text-current-task">{agent.currentTask.title}</p>
+              <p className="text-sm text-muted-foreground break-words overflow-hidden" data-testid="text-current-task">{agent.currentTask.title}</p>
               <Badge variant="outline" className="mt-1">{agent.currentTask.type}</Badge>
             </div>
           )}
@@ -192,7 +192,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
                 <ArrowRight className="h-3.5 w-3.5 text-primary" />
                 Long-Term Goal
               </h4>
-              <p className="text-sm text-muted-foreground" data-testid="text-long-term-goal">{agent.longTermGoal.title}</p>
+              <p className="text-sm text-muted-foreground break-words overflow-hidden" data-testid="text-long-term-goal">{agent.longTermGoal.title}</p>
               {agent.longTermGoal.progress != null && (
                 <div className="flex items-center gap-2 mt-1">
                   <Progress value={agent.longTermGoal.progress} className="h-1.5 flex-1" />
@@ -215,7 +215,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
                 <Target className="h-3.5 w-3.5" />
                 Short-Term Goal
               </h4>
-              <p className="text-sm text-muted-foreground">{agent.shortTermGoal.title}</p>
+              <p className="text-sm text-muted-foreground break-words overflow-hidden">{agent.shortTermGoal.title}</p>
             </div>
           )}
 
@@ -227,10 +227,10 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
               </h4>
               <ul className="space-y-1">
                 {agent.yesterdayWork.slice(0, 4).map((t, i) => (
-                  <li key={i} className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
-                    <span className="truncate">{t.title}</span>
-                    <Badge variant="outline" className="text-[10px] ml-auto shrink-0">{t.type}</Badge>
+                  <li key={i} className="text-sm text-muted-foreground flex items-start gap-1.5">
+                    <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0 mt-0.5" />
+                    <span className="break-words overflow-hidden min-w-0 flex-1">{t.title}</span>
+                    <Badge variant="outline" className="text-[10px] shrink-0">{t.type}</Badge>
                   </li>
                 ))}
               </ul>
@@ -243,10 +243,10 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
                 <Brain className="h-3.5 w-3.5" />
                 Latest Reflection
               </h4>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm text-muted-foreground break-words overflow-hidden">
                 <span className="font-medium">{agent.latestDiary.title}</span>
                 <span className="mx-1">-</span>
-                <span>{(agent.latestDiary.content || "").replace(/\*\*(.*?)\*\*/g, "$1").replace(/^#{1,3}\s+/gm, "")}</span>
+                <span>{(agent.latestDiary.content || "").replace(/\*\*(.*?)\*\*/g, "$1").replace(/^#{1,3}\s+/gm, "").substring(0, 300)}</span>
               </div>
               <span className="text-xs text-muted-foreground">{timeAgo(agent.latestDiary.createdAt)}</span>
             </div>
@@ -255,7 +255,7 @@ function AgentDetailDialog({ agent, open, onClose, tokenBudget }: { agent: Agent
           {agent.latestPulse?.nextActions && (
             <div>
               <h4 className="text-sm font-semibold mb-1">Next Actions</h4>
-              <p className="text-sm text-muted-foreground">{agent.latestPulse.nextActions}</p>
+              <p className="text-sm text-muted-foreground break-words overflow-hidden">{agent.latestPulse.nextActions}</p>
             </div>
           )}
 
