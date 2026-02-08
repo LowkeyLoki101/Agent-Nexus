@@ -16,7 +16,8 @@ import {
   Zap,
   TrendingUp,
   BarChart3,
-  Clock
+  Clock,
+  Download,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
@@ -59,6 +60,28 @@ type Granularity = "minute" | "hour" | "day" | "week" | "month";
 export default function Dashboard() {
   const { user } = useAuth();
   const [granularity, setGranularity] = useState<Granularity>("hour");
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const response = await fetch("/api/export", { credentials: "include" });
+      if (!response.ok) throw new Error("Export failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cb-creatives-export-${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const { data: workspaces, isLoading: loadingWorkspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
@@ -133,12 +156,18 @@ export default function Dashboard() {
             Manage your studios, agents, and creative collaboration
           </p>
         </div>
-        <Link href="/workspaces/new">
-          <Button className="gap-2" data-testid="button-new-workspace">
-            <Plus className="h-4 w-4" />
-            New Studio
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" className="gap-2" onClick={handleExport} disabled={exporting} data-testid="button-export-data">
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting..." : "Export Data"}
           </Button>
-        </Link>
+          <Link href="/workspaces/new">
+            <Button className="gap-2" data-testid="button-new-workspace">
+              <Plus className="h-4 w-4" />
+              New Studio
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

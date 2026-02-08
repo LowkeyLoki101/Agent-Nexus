@@ -127,6 +127,7 @@ import { randomBytes, createHash } from "crypto";
 export interface IStorage {
   getWorkspace(id: string): Promise<Workspace | undefined>;
   getWorkspaceBySlug(slug: string): Promise<Workspace | undefined>;
+  getWorkspaces(): Promise<Workspace[]>;
   getWorkspacesByUser(userId: string): Promise<Workspace[]>;
   createWorkspace(workspace: InsertWorkspace): Promise<Workspace>;
   updateWorkspace(id: string, updates: Partial<InsertWorkspace>): Promise<Workspace | undefined>;
@@ -383,6 +384,10 @@ export class DatabaseStorage implements IStorage {
   async getWorkspaceBySlug(slug: string): Promise<Workspace | undefined> {
     const [workspace] = await db.select().from(workspaces).where(eq(workspaces.slug, slug));
     return workspace;
+  }
+
+  async getWorkspaces(): Promise<Workspace[]> {
+    return db.select().from(workspaces);
   }
 
   async getWorkspacesByUser(userId: string): Promise<Workspace[]> {

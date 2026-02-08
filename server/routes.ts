@@ -3417,6 +3417,123 @@ export async function registerRoutes(
     }
   });
 
+  // =================================
+  // Data Export / Import
+  // =================================
+
+  app.get("/api/export", isAuthenticated, async (req: any, res) => {
+    try {
+      const { pool } = await import("./db");
+
+      const exportTables = [
+        "workspaces", "workspace_members", "agents", "boards", "topics", "posts",
+        "conversations", "messages", "briefings", "gifts", "diary_entries",
+        "agent_goals", "agent_tasks", "agent_runs", "agent_tools", "agent_rooms",
+        "code_reviews", "review_comments", "mockups", "memory_entries",
+        "memory_docs", "memory_chunks", "media_reports", "media_report_ratings",
+        "competitions", "competition_entries", "lab_projects", "leaderboard_scores",
+        "showcase_votes", "token_usage", "token_budgets", "pheromones",
+        "area_temperatures", "votes", "activity_feed", "pulse_updates",
+        "audit_logs", "api_tokens", "attachments",
+      ];
+
+      const exportData: Record<string, any[]> = {};
+      for (const table of exportTables) {
+        try {
+          const result = await pool.query(`SELECT * FROM "${table}"`);
+          exportData[table] = result.rows;
+        } catch (e: any) {
+          exportData[table] = [];
+        }
+      }
+
+      const exportPayload = {
+        exportedAt: new Date().toISOString(),
+        version: "1.0",
+        tables: exportData,
+        tableCounts: Object.fromEntries(
+          Object.entries(exportData).map(([k, v]) => [k, v.length])
+        ),
+      };
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="cb-creatives-export-${new Date().toISOString().split('T')[0]}.json"`);
+      res.json(exportPayload);
+    } catch (error) {
+      console.error("Error exporting data:", error);
+      res.status(500).json({ message: "Failed to export data" });
+    }
+  });
+
+  app.post("/api/import", isAuthenticated, async (req: any, res) => {
+    try {
+      const { pool } = await import("./db");
+      const { tables } = req.body;
+
+      if (!tables || typeof tables !== "object") {
+        return res.status(400).json({ message: "Invalid import data — expected { tables: { ... } }" });
+      }
+
+      const importOrder = [
+        "workspaces", "agents", "workspace_members", "boards", "topics", "posts",
+        "conversations", "messages", "briefings", "gifts", "diary_entries",
+        "agent_goals", "agent_tasks", "agent_runs", "agent_tools", "agent_rooms",
+        "code_reviews", "review_comments", "mockups", "memory_entries",
+        "memory_docs", "memory_chunks", "media_reports", "media_report_ratings",
+        "competitions", "competition_entries", "lab_projects", "leaderboard_scores",
+        "showcase_votes", "token_usage", "token_budgets", "pheromones",
+        "area_temperatures", "votes", "activity_feed", "pulse_updates",
+        "audit_logs", "api_tokens", "attachments",
+      ];
+
+      const results: Record<string, { imported: number; skipped: number; errors: number }> = {};
+
+      for (const table of importOrder) {
+        const rows = tables[table];
+        if (!rows || !Array.isArray(rows) || rows.length === 0) {
+          results[table] = { imported: 0, skipped: 0, errors: 0 };
+          continue;
+        }
+
+        let imported = 0;
+        let skipped = 0;
+        let errors = 0;
+
+        for (const row of rows) {
+          try {
+            const columns = Object.keys(row);
+            const values = Object.values(row);
+            const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
+            const colNames = columns.map(c => `"${c}"`).join(", ");
+
+            await pool.query(
+              `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+              values
+            );
+            imported++;
+          } catch (e: any) {
+            if (e.code === "23505") {
+              skipped++;
+            } else {
+              errors++;
+            }
+          }
+        }
+
+        results[table] = { imported, skipped, errors };
+      }
+
+      res.json({
+        message: "Import completed",
+        results,
+        totalImported: Object.values(results).reduce((sum, r) => sum + r.imported, 0),
+      });
+    } catch (error) {
+      console.error("Error importing data:", error);
+      res.status(500).json({ message: "Failed to import data" });
+    }
+  });
+
   // Agent API routes (autonomous agent operations via API tokens)
   app.use("/api/agent", agentApiRoutes);
 

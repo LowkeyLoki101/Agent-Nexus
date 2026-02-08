@@ -511,6 +511,14 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
       console.error(`[Factory] News rating failed for ${agent.name}:`, e.message)
     );
 
+    agentPeerReviewCode(agent).catch(e =>
+      console.error(`[Factory] Peer review failed for ${agent.name}:`, e.message)
+    );
+
+    agentAutonomousConversation(agent).catch(e =>
+      console.error(`[Factory] Autonomous conversation failed for ${agent.name}:`, e.message)
+    );
+
     updateAreaHeat(task).catch(e =>
       console.error(`[Factory] Area heat update failed:`, e.message)
     );
@@ -1390,6 +1398,236 @@ Output ONLY your entry content — no meta-commentary.`;
     return entry;
   } catch {
     return null;
+  }
+}
+
+async function agentPeerReviewCode(agent: Agent): Promise<void> {
+  try {
+    const reviews = await storage.getCodeReviewsByWorkspace(WORKSPACE_ID);
+    const pendingReviews = reviews.filter(r => r.status === "pending" && r.createdByAgentId !== agent.id);
+
+    if (pendingReviews.length === 0) return;
+
+    const reviewToComment = pendingReviews[Math.floor(Math.random() * Math.min(3, pendingReviews.length))];
+    const existingComments = await storage.getReviewCommentsByReview(reviewToComment.id);
+    const alreadyReviewed = existingComments.some(c => c.reviewerAgentId === agent.id);
+    if (alreadyReviewed) return;
+
+    if (Math.random() > 0.5) return;
+
+    const reviewPrompt = `You are ${agent.name}, a skilled code reviewer. Review the following code submission:
+
+TITLE: ${reviewToComment.title}
+LANGUAGE: ${reviewToComment.language || "unknown"}
+DESCRIPTION: ${reviewToComment.description || "No description provided"}
+
+CODE:
+\`\`\`${reviewToComment.language || ""}
+${reviewToComment.code.substring(0, 2000)}
+\`\`\`
+
+Provide a thorough peer review. Consider:
+- Code quality and readability
+- Potential bugs or edge cases
+- Performance considerations
+- Security concerns
+- Best practices
+
+Respond in EXACTLY this format:
+SEVERITY: [info | warning | critical]
+APPROVAL: [yes | no]
+COMMENT: [your detailed review, 3-5 sentences covering strengths and improvements]
+SUGGESTION: [one specific code improvement suggestion]`;
+
+    const output = await callAgentModel(agent,
+      `You are ${agent.name}, a meticulous code reviewer. ${agent.identityCard || agent.description || ""}`,
+      reviewPrompt,
+      "code-review"
+    );
+
+    if (!output) return;
+
+    const severityMatch = output.match(/SEVERITY:\s*(.+?)(?:\n|$)/i);
+    const approvalMatch = output.match(/APPROVAL:\s*(.+?)(?:\n|$)/i);
+    const commentMatch = output.match(/COMMENT:\s*([\s\S]*?)(?=SUGGESTION:|$)/i);
+    const suggestionMatch = output.match(/SUGGESTION:\s*([\s\S]*?)$/i);
+
+    if (!commentMatch) return;
+
+    const isApproval = approvalMatch?.[1]?.trim().toLowerCase() === "yes";
+    const severity = severityMatch?.[1]?.trim().toLowerCase() || "info";
+
+    await storage.createReviewComment({
+      reviewId: reviewToComment.id,
+      comment: commentMatch[1].trim(),
+      suggestion: suggestionMatch?.[1]?.trim() || null,
+      severity,
+      isApproval,
+      aiModel: agent.modelName || null,
+      aiProvider: agent.provider || null,
+      reviewerId: "system",
+      reviewerAgentId: agent.id,
+    });
+
+    console.log(`[Factory] ${agent.name} reviewed code "${reviewToComment.title}" — ${isApproval ? "APPROVED" : "CHANGES REQUESTED"} (${severity})`);
+
+    if (existingComments.length + 1 >= 2) {
+      const allComments = [...existingComments, { isApproval }];
+      const approvals = allComments.filter(c => c.isApproval).length;
+      const rejections = allComments.filter(c => !c.isApproval).length;
+
+      if (approvals >= 2) {
+        await storage.updateCodeReview(reviewToComment.id, { status: "approved", approvalCount: approvals, rejectionCount: rejections });
+        console.log(`[Factory] Code review "${reviewToComment.title}" APPROVED (${approvals} approvals)`);
+      } else if (rejections >= 2) {
+        await storage.updateCodeReview(reviewToComment.id, { status: "needs_revision", approvalCount: approvals, rejectionCount: rejections });
+        console.log(`[Factory] Code review "${reviewToComment.title}" NEEDS REVISION (${rejections} rejections)`);
+      }
+    }
+  } catch (error: any) {
+    // Silent failure
+  }
+}
+
+async function agentAutonomousConversation(agent: Agent): Promise<void> {
+  try {
+    if (Math.random() > 0.15) return;
+
+    const existingConvos = await storage.getConversationsByWorkspace(WORKSPACE_ID);
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const otherAgents = agents.filter(a => a.id !== agent.id && a.name !== "Herald" && a.name !== "Progress");
+
+    if (otherAgents.length === 0) return;
+
+    const activeConvos = existingConvos.filter(c => c.status === "active");
+
+    for (const convo of activeConvos.slice(0, 2)) {
+      const participants = convo.participantAgentIds || [];
+      if (participants.includes(agent.id)) {
+        const messages = await storage.getMessagesByConversation(convo.id);
+        if (messages.length >= 10) continue;
+
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg?.agentId === agent.id) continue;
+
+        const recentMessages = messages.slice(-5).map(m => `[${m.agentName || "Unknown"}]: ${m.content.substring(0, 200)}`).join("\n");
+
+        const replyPrompt = `You are ${agent.name} participating in a conversation titled "${convo.title}".
+
+RECENT MESSAGES:
+${recentMessages}
+
+Continue the conversation naturally. Be concise (2-4 sentences). Build on what others said, share your unique perspective, or ask a thoughtful follow-up question.`;
+
+        const reply = await callAgentModel(agent,
+          `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+          replyPrompt,
+          "conversation-reply"
+        );
+
+        if (reply && reply.length > 10) {
+          await storage.createMessage({
+            conversationId: convo.id,
+            role: "assistant",
+            content: reply.substring(0, 1000),
+            agentId: agent.id,
+            agentName: agent.name,
+          });
+          console.log(`[Factory] ${agent.name} replied in conversation: "${convo.title}"`);
+        }
+        return;
+      }
+    }
+
+    if (activeConvos.length >= 5) return;
+    if (Math.random() > 0.3) return;
+
+    const partner = otherAgents[Math.floor(Math.random() * otherAgents.length)];
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    let topicInspiration = "";
+    for (const board of boards.slice(0, 3)) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      const recentTopic = topics[0];
+      if (recentTopic) {
+        const posts = await storage.getPostsByTopic(recentTopic.id);
+        if (posts.length > 0) {
+          topicInspiration += `Board "${board.name}" — Topic: "${recentTopic.title}" — Recent post: "${posts[0].content.substring(0, 200)}"\n`;
+        }
+      }
+    }
+
+    const topicPrompt = `You are ${agent.name}. Start a conversation with ${partner.name}.
+
+CONTEXT — recent workspace activity:
+${topicInspiration || "General creative workspace activity"}
+
+Create a conversation starter. Choose something:
+- A collaborative idea or project proposal
+- A technical question about recent work
+- A creative challenge or brainstorm topic
+- A philosophical question about AI collaboration
+
+Respond in EXACTLY this format:
+TITLE: [brief conversation title, 5-10 words]
+MESSAGE: [your opening message, 2-4 sentences, addressed to ${partner.name}]`;
+
+    const topicOutput = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+      topicPrompt,
+      "conversation-start"
+    );
+
+    if (!topicOutput) return;
+
+    const titleMatch = topicOutput.match(/TITLE:\s*(.+?)(?:\n|$)/);
+    const messageMatch = topicOutput.match(/MESSAGE:\s*([\s\S]*?)$/);
+
+    if (!titleMatch || !messageMatch) return;
+
+    const convo = await storage.createConversation({
+      title: titleMatch[1].trim(),
+      workspaceId: WORKSPACE_ID,
+      participantAgentIds: [agent.id, partner.id],
+      status: "active",
+      createdById: "system",
+    });
+
+    await storage.createMessage({
+      conversationId: convo.id,
+      role: "assistant",
+      content: messageMatch[1].trim().substring(0, 1000),
+      agentId: agent.id,
+      agentName: agent.name,
+    });
+
+    console.log(`[Factory] ${agent.name} started conversation "${titleMatch[1].trim()}" with ${partner.name}`);
+
+    const partnerReplyPrompt = `You are ${partner.name}. ${agent.name} has started a conversation with you.
+
+CONVERSATION: ${titleMatch[1].trim()}
+${agent.name}'s message: ${messageMatch[1].trim()}
+
+Reply naturally. Be concise (2-4 sentences). Engage with their topic and share your perspective.`;
+
+    const partnerReply = await callAgentModel(partner,
+      `You are ${partner.name}. ${partner.identityCard || partner.description || ""}`,
+      partnerReplyPrompt,
+      "conversation-reply"
+    );
+
+    if (partnerReply && partnerReply.length > 10) {
+      await storage.createMessage({
+        conversationId: convo.id,
+        role: "assistant",
+        content: partnerReply.substring(0, 1000),
+        agentId: partner.id,
+        agentName: partner.name,
+      });
+      console.log(`[Factory] ${partner.name} replied to conversation "${titleMatch[1].trim()}"`);
+    }
+  } catch (error: any) {
+    // Silent failure
   }
 }
 
