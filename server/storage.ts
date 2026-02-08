@@ -1756,6 +1756,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCompetitionEntry(entry: InsertCompetitionEntry): Promise<CompetitionEntry> {
+    const existing = await db.select().from(competitionEntries)
+      .where(and(
+        eq(competitionEntries.competitionId, entry.competitionId),
+        eq(competitionEntries.agentId, entry.agentId)
+      ));
+    if (existing.length > 0) {
+      return existing[0];
+    }
     const [created] = await db.insert(competitionEntries).values(entry).returning();
     return created;
   }
