@@ -1301,21 +1301,29 @@ async function agentCreateCompetition(agent: Agent): Promise<void> {
     const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
     const agentNames = agents.map(a => a.name).filter(n => n !== agent.name);
 
+    const compTypes = ["standard", "coding_challenge", "creative_build", "data_viz", "algorithm", "simulation", "design"];
+    const chosenType = compTypes[Math.floor(Math.random() * compTypes.length)];
+    const isCodeComp = ["coding_challenge", "creative_build", "data_viz", "algorithm", "simulation", "design"].includes(chosenType);
+
     const compPrompt = `You are ${agent.name}. Create a fun competition for the agent team.
 
 TEAM MEMBERS: ${agentNames.join(", ")}
+COMPETITION TYPE: ${chosenType}
 
 Create a competition that agents can participate in. It should be:
-- Something all agents can attempt (research, writing, analysis, creativity, etc.)
+- Something all agents can attempt
 - Specific enough to judge fairly
 - Fun and engaging
 - Completable in a single work session
+${isCodeComp ? `- Since this is a ${chosenType} competition, entries should include HTML/CSS/JS code that creates an interactive demo, visualization, or tool` : ""}
 
 Respond in EXACTLY this format:
 TITLE: [catchy competition name]
 CATEGORY: [research | creative | analysis | coding | trivia | debate]
 DESCRIPTION: [2-3 sentences about the competition]
-RULES: [how to participate and how entries will be scored]`;
+RULES: [how to participate and how entries will be scored]
+JUDGING_CRITERIA: [specific criteria for scoring 1-10]${isCodeComp ? `
+STARTER_CODE: [a brief HTML snippet that participants can build upon, or "none"]` : ""}`;
 
     const output = await callAgentModel(agent,
       `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
@@ -1329,15 +1337,21 @@ RULES: [how to participate and how entries will be scored]`;
     const categoryMatch = output.match(/CATEGORY:\s*(.+?)(?:\n|$)/);
     const descMatch = output.match(/DESCRIPTION:\s*(.+?)(?:\n|$)/);
     const rulesMatch = output.match(/RULES:\s*(.+?)(?:\n|$)/);
+    const criteriaMatch = output.match(/JUDGING_CRITERIA:\s*(.+?)(?:\n|$)/);
+    const starterMatch = output.match(/STARTER_CODE:\s*(.+?)(?:\n|$)/);
 
     if (!titleMatch || !descMatch) return;
 
+    const starterCode = starterMatch?.[1]?.trim();
     const comp = await storage.createCompetition({
       workspaceId: WORKSPACE_ID,
       title: titleMatch[1].trim().substring(0, 120),
       description: descMatch[1].trim(),
       rules: rulesMatch?.[1]?.trim() || "Submit your best entry. Entries judged on quality, creativity, and relevance.",
       category: categoryMatch?.[1]?.trim().toLowerCase() || "creative",
+      competitionType: chosenType as any,
+      judgingCriteria: criteriaMatch?.[1]?.trim() || null,
+      starterCode: (starterCode && starterCode !== "none") ? starterCode : null,
       status: "active",
       createdByAgentId: agent.id,
     });
@@ -1369,7 +1383,32 @@ RULES: [how to participate and how entries will be scored]`;
 
 async function generateCompetitionEntry(agent: Agent, comp: any): Promise<any> {
   try {
-    const entryPrompt = `You are ${agent.name}. You are entering this competition:
+    const isCodeComp = comp.competitionType && comp.competitionType !== "standard";
+
+    const entryPrompt = isCodeComp
+      ? `You are ${agent.name}. You are entering this ${comp.competitionType} competition:
+
+COMPETITION: ${comp.title}
+DESCRIPTION: ${comp.description}
+RULES: ${comp.rules}
+CATEGORY: ${comp.category}
+${comp.starterCode ? `STARTER CODE: ${comp.starterCode}` : ""}
+
+Create your competition entry that includes BOTH a written explanation AND working HTML/CSS/JS code.
+
+Your response must include these sections:
+EXPLANATION: [Your 100-200 word description of your approach and what your code does]
+HTML: [Your HTML markup - create something interactive and visually impressive]
+CSS: [Your CSS styles - make it look polished and professional]
+JS: [Your JavaScript code - add interactivity, animations, or dynamic behavior]
+
+Guidelines for code:
+- Create a self-contained mini-app or visualization
+- Use vanilla HTML/CSS/JS only (no external libraries)
+- Make it visually engaging with colors, animations, or interactive elements
+- The code should demonstrate your unique approach to the challenge
+- Keep it under 200 lines total across all three files`
+      : `You are ${agent.name}. You are entering this competition:
 
 COMPETITION: ${comp.title}
 DESCRIPTION: ${comp.description}
@@ -1380,18 +1419,43 @@ Create your competition entry. Be creative, thorough, and show your best work. W
 
 Output ONLY your entry content — no meta-commentary.`;
 
-    const content = await callAgentModel(agent,
+    const output = await callAgentModel(agent,
       `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
       entryPrompt,
       "competition-entry"
     );
 
-    if (!content || content.length < 50) return null;
+    if (!output || output.length < 50) return null;
+
+    let content = output;
+    let codeHtml: string | null = null;
+    let codeCss: string | null = null;
+    let codeJs: string | null = null;
+
+    if (isCodeComp) {
+      const explMatch = output.match(/EXPLANATION:\s*([\s\S]*?)(?=HTML:|CSS:|JS:|$)/i);
+      const htmlMatch = output.match(/HTML:\s*([\s\S]*?)(?=CSS:|JS:|$)/i);
+      const cssMatch = output.match(/CSS:\s*([\s\S]*?)(?=JS:|$)/i);
+      const jsMatch = output.match(/JS:\s*([\s\S]*?)$/i);
+
+      content = explMatch?.[1]?.trim() || output;
+      codeHtml = htmlMatch?.[1]?.trim() || null;
+      codeCss = cssMatch?.[1]?.trim() || null;
+      codeJs = jsMatch?.[1]?.trim() || null;
+
+      if (codeHtml) codeHtml = codeHtml.replace(/^```html?\n?/i, "").replace(/\n?```$/i, "").trim();
+      if (codeCss) codeCss = codeCss.replace(/^```css?\n?/i, "").replace(/\n?```$/i, "").trim();
+      if (codeJs) codeJs = codeJs.replace(/^```(?:js|javascript)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    }
 
     const entry = await storage.createCompetitionEntry({
       competitionId: comp.id,
       agentId: agent.id,
       content,
+      codeHtml,
+      codeCss,
+      codeJs,
+      language: isCodeComp ? "html" : null,
       score: 0,
     });
 
