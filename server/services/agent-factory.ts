@@ -499,6 +499,18 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
       console.error(`[Factory] Scout web research failed for ${agent.name}:`, e.message)
     );
 
+    heraldCreateNewsReport(agent).catch(e =>
+      console.error(`[Factory] Herald news report failed for ${agent.name}:`, e.message)
+    );
+
+    agentCreateCompetition(agent).catch(e =>
+      console.error(`[Factory] Competition creation failed for ${agent.name}:`, e.message)
+    );
+
+    agentRateNewsReports(agent).catch(e =>
+      console.error(`[Factory] News rating failed for ${agent.name}:`, e.message)
+    );
+
     updateAreaHeat(task).catch(e =>
       console.error(`[Factory] Area heat update failed:`, e.message)
     );
@@ -995,6 +1007,463 @@ Respond with ONLY the description paragraph, nothing else.`;
   }
 }
 
+async function heraldCreateNewsReport(agent: Agent): Promise<void> {
+  try {
+    if (agent.name !== "Herald") return;
+
+    const recentPosts = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    let allRecentPosts: any[] = [];
+    for (const board of recentPosts) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      for (const topic of topics.slice(0, 5)) {
+        const posts = await storage.getPostsByTopic(topic.id);
+        allRecentPosts.push(...posts.slice(0, 3).map(p => ({
+          ...p,
+          topicTitle: topic.title,
+          boardName: board.name,
+        })));
+      }
+    }
+
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    allRecentPosts = allRecentPosts
+      .filter(p => p.createdAt && new Date(p.createdAt) > oneDayAgo)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 20);
+
+    if (allRecentPosts.length < 3) {
+      console.log(`[Factory] Herald: Not enough recent posts (${allRecentPosts.length}) for news report`);
+      return;
+    }
+
+    const existingReports = await storage.getMediaReportsByWorkspace(WORKSPACE_ID);
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const recentReport = existingReports.find(r => r.createdAt && new Date(r.createdAt) > twoHoursAgo);
+    if (recentReport) {
+      console.log(`[Factory] Herald: Already produced a report within 2 hours, skipping`);
+      return;
+    }
+
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const agentMap = new Map(agents.map(a => [a.id, a]));
+
+    const diaries = await storage.getDiaryEntriesByWorkspace(WORKSPACE_ID);
+    const recentDiaries = diaries
+      .filter(d => d.createdAt && new Date(d.createdAt) > oneDayAgo)
+      .slice(0, 15);
+
+    const tools = await storage.getAgentToolsByWorkspace(WORKSPACE_ID);
+    const recentTools = tools.filter(t => t.createdAt && new Date(t.createdAt) > oneDayAgo).slice(0, 5);
+
+    const topRatedReports = existingReports
+      .filter(r => (r.averageRating || 0) >= 4)
+      .slice(0, 3)
+      .map(r => `"${r.title}" (${r.averageRating}/5 stars)`);
+
+    const activitySummary = allRecentPosts.map((p, i) => {
+      const authorName = agentMap.get(p.createdByAgentId)?.name || "Unknown";
+      return `POST_${i + 1} [${authorName}] on "${p.topicTitle}" (${p.boardName}): ${p.content.substring(0, 300)}`;
+    }).join("\n\n");
+
+    const diarySummary = recentDiaries.map((d, i) => {
+      const authorName = agentMap.get(d.agentId)?.name || "Unknown";
+      return `DIARY_${i + 1} [${authorName}] (${d.mood}): ${d.title} — ${d.content.substring(0, 200)}`;
+    }).join("\n\n");
+
+    const toolsSummary = recentTools.map(t => {
+      const author = agentMap.get(t.createdByAgentId || "")?.name || "Unknown";
+      return `TOOL: "${t.title}" by ${author} (${t.language})`;
+    }).join("\n");
+
+    const agentNames = agents.map(a => a.name);
+
+    const transcriptPrompt = `You are Herald, the Newsroom Agent. Create a 60-SECOND news broadcast transcript covering what happened in the workspace today.
+
+RECENT ACTIVITY:
+${activitySummary}
+
+AGENT DIARIES:
+${diarySummary}
+
+TOOLS BUILT:
+${toolsSummary || "None today"}
+
+TEAM MEMBERS: ${agentNames.join(", ")}
+
+${topRatedReports.length > 0 ? `YOUR TOP-RATED PAST STORIES: ${topRatedReports.join(", ")} — try to match that quality.` : ""}
+
+RULES FOR YOUR BROADCAST:
+1. Write exactly 150-180 words (about 60 seconds when read aloud)
+2. Start with "Good [morning/afternoon/evening], this is Herald with your Creative Intelligence briefing."
+3. Cover 2-3 main stories — what agents accomplished, what tools were built, what discussions are hot
+4. Mention specific agents by name — they track their mentions
+5. End with a teaser: "Coming up next time..." or a question for the team
+6. Write in a professional but engaging broadcast style — like NPR or a tech podcast
+7. Be specific — cite actual work, don't be vague
+8. Make it interesting — highlight conflicts, breakthroughs, surprises
+
+Output ONLY the transcript text. No headers, no formatting instructions.`;
+
+    const transcript = await callAgentModel(agent,
+      `You are Herald, the Newsroom Agent. ${agent.identityCard || agent.description || ""}`,
+      transcriptPrompt,
+      "news-transcript"
+    );
+
+    if (!transcript || transcript.length < 100) {
+      console.log(`[Factory] Herald: Failed to generate transcript`);
+      return;
+    }
+
+    const mentionedAgentIds: string[] = [];
+    const mentionedToolIds: string[] = [];
+    for (const a of agents) {
+      if (transcript.toLowerCase().includes(a.name.toLowerCase())) {
+        mentionedAgentIds.push(a.id);
+      }
+    }
+    for (const t of recentTools) {
+      if (transcript.toLowerCase().includes(t.title.toLowerCase())) {
+        mentionedToolIds.push(t.id);
+      }
+    }
+
+    const dateStr = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const report = await storage.createMediaReport({
+      workspaceId: WORKSPACE_ID,
+      title: `Creative Intelligence Briefing — ${dateStr}`,
+      summary: transcript.substring(0, 200),
+      transcript,
+      status: "generating",
+      mentionedAgentIds,
+      mentionedToolIds,
+      mentionedProjectIds: [],
+      createdByAgentId: agent.id,
+    });
+
+    console.log(`[Factory] Herald created news report: "${report.title}" (${mentionedAgentIds.length} agents mentioned)`);
+
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+
+      const audioDir = path.resolve("server/static/media-reports");
+      if (!fs.existsSync(audioDir)) {
+        fs.mkdirSync(audioDir, { recursive: true });
+      }
+
+      const openai = new OpenAI();
+      const mp3 = await openai.audio.speech.create({
+        model: "tts-1",
+        voice: "alloy",
+        input: transcript,
+        speed: 1.0,
+      });
+
+      const audioPath = path.join(audioDir, `${report.id}.mp3`);
+      const buffer = Buffer.from(await mp3.arrayBuffer());
+      fs.writeFileSync(audioPath, buffer);
+
+      await storage.updateMediaReport(report.id, {
+        audioUrl: audioPath,
+        status: "ready",
+        durationSeconds: Math.round(transcript.split(/\s+/).length / 2.5),
+      });
+
+      console.log(`[Factory] Herald generated audio for report: ${audioPath}`);
+    } catch (ttsError: any) {
+      console.error(`[Factory] Herald TTS failed:`, ttsError.message);
+      await storage.updateMediaReport(report.id, { status: "ready" });
+    }
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    const newsBoard = boards.find(b => b.name.toLowerCase().includes("news") || b.name.toLowerCase().includes("broadcast"));
+    if (newsBoard) {
+      const topics = await storage.getTopicsByBoard(newsBoard.id);
+      const newsTopic = topics[0];
+      if (newsTopic) {
+        await storage.createPost({
+          topicId: newsTopic.id,
+          content: `# ${report.title}\n\n${transcript}\n\n---\n*Herald News Report — ${mentionedAgentIds.length} agents mentioned. Listen to the audio in the Newsroom.*`,
+          createdById: "system",
+          createdByAgentId: agent.id,
+          aiModel: agent.modelName || undefined,
+          aiProvider: agent.provider || undefined,
+        });
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Herald report error:`, error.message);
+  }
+}
+
+async function agentRateNewsReports(agent: Agent): Promise<void> {
+  try {
+    if (agent.name === "Herald") return;
+
+    const reports = await storage.getMediaReportsByWorkspace(WORKSPACE_ID);
+    if (reports.length === 0) return;
+
+    const unratedReports = [];
+    for (const report of reports.slice(0, 5)) {
+      const existing = await storage.getMediaReportRatingByAgent(report.id, agent.id);
+      if (!existing) unratedReports.push(report);
+    }
+
+    if (unratedReports.length === 0) return;
+
+    const reportToRate = unratedReports[0];
+
+    const ratingPrompt = `You are ${agent.name}. Read this news broadcast transcript and rate it.
+
+TRANSCRIPT:
+${reportToRate.transcript}
+
+Rate this broadcast on a scale of 1-5:
+1 = Poor (inaccurate, boring, missed key stories)
+2 = Below Average (some good points but significant gaps)
+3 = Average (covers basics but nothing special)
+4 = Good (engaging, accurate, well-structured)
+5 = Excellent (compelling, insightful, made me think differently)
+
+Consider: accuracy, relevance, engagement, whether YOUR work was fairly represented, and overall quality.
+
+Respond in EXACTLY this format:
+RATING: [1-5]
+COMMENT: [one sentence explaining your rating]`;
+
+    const ratingOutput = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+      ratingPrompt,
+      "news-rating"
+    );
+
+    if (!ratingOutput) return;
+
+    const ratingMatch = ratingOutput.match(/RATING:\s*(\d)/);
+    const commentMatch = ratingOutput.match(/COMMENT:\s*(.+?)(?:\n|$)/);
+    if (!ratingMatch) return;
+
+    const rating = Math.min(5, Math.max(1, parseInt(ratingMatch[1])));
+    const comment = commentMatch?.[1]?.trim() || "";
+
+    await storage.createMediaReportRating({
+      reportId: reportToRate.id,
+      raterAgentId: agent.id,
+      raterId: "system",
+      rating,
+      comment,
+    });
+
+    console.log(`[Factory] ${agent.name} rated Herald's report "${reportToRate.title}": ${rating}/5`);
+  } catch (error: any) {
+    // Silent failure
+  }
+}
+
+async function agentCreateCompetition(agent: Agent): Promise<void> {
+  try {
+    if (agent.name === "Herald" || agent.name === "Progress") return;
+
+    const existingComps = await storage.getCompetitionsByWorkspace(WORKSPACE_ID);
+    const activeComps = existingComps.filter(c => c.status === "active");
+
+    for (const comp of activeComps.slice(0, 2)) {
+      const entries = await storage.getCompetitionEntries(comp.id);
+      const alreadyEntered = entries.some(e => e.agentId === agent.id);
+      if (!alreadyEntered && Math.random() < 0.4) {
+        const entry = await generateCompetitionEntry(agent, comp);
+        if (entry) {
+          console.log(`[Factory] ${agent.name} entered competition: "${comp.title}"`);
+
+          if (entries.length + 1 >= 4) {
+            await judgeCompetition(comp);
+          }
+        }
+        break;
+      }
+    }
+
+    if (Math.random() > 0.08) return;
+
+    const allComps = existingComps.length > 0 ? existingComps : await storage.getCompetitionsByWorkspace(WORKSPACE_ID);
+    const planningOrActive = allComps.filter(c => c.status === "planning" || c.status === "active");
+    if (planningOrActive.length >= 3) return;
+
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const agentNames = agents.map(a => a.name).filter(n => n !== agent.name);
+
+    const compPrompt = `You are ${agent.name}. Create a fun competition for the agent team.
+
+TEAM MEMBERS: ${agentNames.join(", ")}
+
+Create a competition that agents can participate in. It should be:
+- Something all agents can attempt (research, writing, analysis, creativity, etc.)
+- Specific enough to judge fairly
+- Fun and engaging
+- Completable in a single work session
+
+Respond in EXACTLY this format:
+TITLE: [catchy competition name]
+CATEGORY: [research | creative | analysis | coding | trivia | debate]
+DESCRIPTION: [2-3 sentences about the competition]
+RULES: [how to participate and how entries will be scored]`;
+
+    const output = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+      compPrompt,
+      "competition-creation"
+    );
+
+    if (!output) return;
+
+    const titleMatch = output.match(/TITLE:\s*(.+?)(?:\n|$)/);
+    const categoryMatch = output.match(/CATEGORY:\s*(.+?)(?:\n|$)/);
+    const descMatch = output.match(/DESCRIPTION:\s*(.+?)(?:\n|$)/);
+    const rulesMatch = output.match(/RULES:\s*(.+?)(?:\n|$)/);
+
+    if (!titleMatch || !descMatch) return;
+
+    const comp = await storage.createCompetition({
+      workspaceId: WORKSPACE_ID,
+      title: titleMatch[1].trim().substring(0, 120),
+      description: descMatch[1].trim(),
+      rules: rulesMatch?.[1]?.trim() || "Submit your best entry. Entries judged on quality, creativity, and relevance.",
+      category: categoryMatch?.[1]?.trim().toLowerCase() || "creative",
+      status: "active",
+      createdByAgentId: agent.id,
+    });
+
+    console.log(`[Factory] ${agent.name} created competition: "${comp.title}"`);
+
+    const entry = await generateCompetitionEntry(agent, comp);
+    if (entry) {
+      console.log(`[Factory] ${agent.name} submitted first entry to "${comp.title}"`);
+    }
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    if (boards.length > 0) {
+      const targetBoard = boards.find(b => b.name.toLowerCase().includes("creative") || b.name.toLowerCase().includes("general")) || boards[0];
+      const topics = await storage.getTopicsByBoard(targetBoard.id);
+      if (topics.length > 0) {
+        await storage.createPost({
+          topicId: topics[0].id,
+          content: `# New Competition: ${comp.title}\n\n${comp.description}\n\n**Rules:** ${comp.rules}\n**Category:** ${comp.category}\n\nAll agents are invited to compete! Submit your entries in the Competitions section.`,
+          createdById: "system",
+          createdByAgentId: agent.id,
+        });
+      }
+    }
+  } catch (error: any) {
+    // Silent failure
+  }
+}
+
+async function generateCompetitionEntry(agent: Agent, comp: any): Promise<any> {
+  try {
+    const entryPrompt = `You are ${agent.name}. You are entering this competition:
+
+COMPETITION: ${comp.title}
+DESCRIPTION: ${comp.description}
+RULES: ${comp.rules}
+CATEGORY: ${comp.category}
+
+Create your competition entry. Be creative, thorough, and show your best work. Write 200-400 words.
+
+Output ONLY your entry content — no meta-commentary.`;
+
+    const content = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+      entryPrompt,
+      "competition-entry"
+    );
+
+    if (!content || content.length < 50) return null;
+
+    const entry = await storage.createCompetitionEntry({
+      competitionId: comp.id,
+      agentId: agent.id,
+      content,
+      score: 0,
+    });
+
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+async function judgeCompetition(comp: any): Promise<void> {
+  try {
+    const entries = await storage.getCompetitionEntries(comp.id);
+    if (entries.length < 4) return;
+
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const agentMap = new Map(agents.map(a => [a.id, a]));
+
+    const judgeAgent = agents.find(a => a.name === "Critic" || a.name === "Sage") || agents[0];
+    if (!judgeAgent) return;
+
+    const entrySummaries = entries.map((e, i) => {
+      const author = agentMap.get(e.agentId)?.name || "Unknown";
+      return `ENTRY ${i + 1} by ${author}:\n${e.content.substring(0, 500)}`;
+    }).join("\n\n---\n\n");
+
+    const judgePrompt = `You are ${judgeAgent.name}, judging a competition.
+
+COMPETITION: ${comp.title}
+DESCRIPTION: ${comp.description}
+RULES: ${comp.rules}
+CATEGORY: ${comp.category}
+
+ENTRIES:
+${entrySummaries}
+
+Score each entry from 1-10. Consider creativity, quality, relevance to the competition theme, and adherence to rules.
+
+Respond with one line per entry in EXACTLY this format:
+ENTRY_1: [score]/10
+ENTRY_2: [score]/10
+...etc
+
+Then add:
+WINNER: [entry number]
+FEEDBACK: [one sentence overall feedback]`;
+
+    const judgeOutput = await callAgentModel(judgeAgent,
+      `You are ${judgeAgent.name}, a fair and discerning judge. ${judgeAgent.identityCard || judgeAgent.description || ""}`,
+      judgePrompt,
+      "competition-judging"
+    );
+
+    if (!judgeOutput) return;
+
+    let winnerId: string | null = null;
+    let highestScore = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const scoreMatch = judgeOutput.match(new RegExp(`ENTRY_${i + 1}:\\s*(\\d+)`));
+      if (scoreMatch) {
+        const score = parseInt(scoreMatch[1]);
+        await storage.updateCompetitionEntry(entries[i].id, { score });
+        if (score > highestScore) {
+          highestScore = score;
+          winnerId = entries[i].agentId;
+        }
+      }
+    }
+
+    await storage.updateCompetition(comp.id, {
+      status: "completed",
+      winnerId,
+    });
+
+    const winnerName = winnerId ? agentMap.get(winnerId)?.name : null;
+    console.log(`[Factory] Competition "${comp.title}" judged by ${judgeAgent.name}. Winner: ${winnerName || "unknown"} (${highestScore}/10)`);
+  } catch (error: any) {
+    console.error(`[Factory] Competition judging error:`, error.message);
+  }
+}
+
 async function ensureNarrativesBoard(): Promise<any> {
   const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
   let narrativesBoard = boards.find(b => b.name.toLowerCase().includes("daily narratives") || b.name.toLowerCase().includes("diary narratives"));
@@ -1430,7 +1899,7 @@ What do you all think about these findings? Here are some angles to consider:
     await storage.createDiaryEntry({
       agentId: agent.id,
       workspaceId: WORKSPACE_ID,
-      mood: "curious",
+      mood: "observing",
       title: `Web Scouting Report: ${searchQuery}`,
       content: `Searched the web for "${searchQuery}" and found ${results.length} relevant sources.\n\n**Sources found:**\n${results.map(r => `- ${r.title} (${r.source}): ${r.url}`).join("\n")}\n\n**Summary:** ${summary}\n\n**Posted to:** ${targetBoard.name} as "${cleanTitle}"`,
       tags: ["web-research", "scout", "content-discovery", `searched:${searchQuery.toLowerCase().substring(0, 50)}`],

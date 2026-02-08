@@ -103,10 +103,22 @@ import {
   type InsertTokenBudget,
   showcaseVotes,
   leaderboardScores,
+  mediaReports,
+  mediaReportRatings,
+  competitions,
+  competitionEntries,
   type ShowcaseVote,
   type InsertShowcaseVote,
   type LeaderboardScore,
   type InsertLeaderboardScore,
+  type MediaReport,
+  type InsertMediaReport,
+  type MediaReportRating,
+  type InsertMediaReportRating,
+  type Competition,
+  type InsertCompetition,
+  type CompetitionEntry,
+  type InsertCompetitionEntry,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
@@ -342,6 +354,24 @@ export interface IStorage {
   getLeaderboard(workspaceId: string): Promise<LeaderboardScore[]>;
   getLeaderboardScore(agentId: string, workspaceId: string): Promise<LeaderboardScore | undefined>;
   upsertLeaderboardScore(agentId: string, workspaceId: string, updates: Partial<InsertLeaderboardScore>): Promise<LeaderboardScore>;
+
+  // Media Reports
+  createMediaReport(report: InsertMediaReport): Promise<MediaReport>;
+  getMediaReport(id: string): Promise<MediaReport | undefined>;
+  getMediaReportsByWorkspace(workspaceId: string): Promise<MediaReport[]>;
+  updateMediaReport(id: string, updates: Partial<InsertMediaReport>): Promise<MediaReport | undefined>;
+  createMediaReportRating(rating: InsertMediaReportRating): Promise<MediaReportRating>;
+  getMediaReportRatings(reportId: string): Promise<MediaReportRating[]>;
+  getMediaReportRatingByAgent(reportId: string, agentId: string): Promise<MediaReportRating | undefined>;
+
+  // Competitions
+  createCompetition(comp: InsertCompetition): Promise<Competition>;
+  getCompetition(id: string): Promise<Competition | undefined>;
+  getCompetitionsByWorkspace(workspaceId: string): Promise<Competition[]>;
+  updateCompetition(id: string, updates: Partial<InsertCompetition>): Promise<Competition | undefined>;
+  createCompetitionEntry(entry: InsertCompetitionEntry): Promise<CompetitionEntry>;
+  getCompetitionEntries(competitionId: string): Promise<CompetitionEntry[]>;
+  updateCompetitionEntry(id: string, updates: Partial<InsertCompetitionEntry>): Promise<CompetitionEntry | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1638,6 +1668,86 @@ export class DatabaseStorage implements IStorage {
       }).returning();
       return created;
     }
+  }
+  // Media Reports
+  async createMediaReport(report: InsertMediaReport): Promise<MediaReport> {
+    const [created] = await db.insert(mediaReports).values(report).returning();
+    return created;
+  }
+
+  async getMediaReport(id: string): Promise<MediaReport | undefined> {
+    const [report] = await db.select().from(mediaReports).where(eq(mediaReports.id, id));
+    return report;
+  }
+
+  async getMediaReportsByWorkspace(workspaceId: string): Promise<MediaReport[]> {
+    return db.select().from(mediaReports)
+      .where(eq(mediaReports.workspaceId, workspaceId))
+      .orderBy(desc(mediaReports.createdAt));
+  }
+
+  async updateMediaReport(id: string, updates: Partial<InsertMediaReport>): Promise<MediaReport | undefined> {
+    const [updated] = await db.update(mediaReports).set(updates).where(eq(mediaReports.id, id)).returning();
+    return updated;
+  }
+
+  async createMediaReportRating(rating: InsertMediaReportRating): Promise<MediaReportRating> {
+    const [created] = await db.insert(mediaReportRatings).values(rating).returning();
+    const allRatings = await this.getMediaReportRatings(rating.reportId);
+    const avg = Math.round(allRatings.reduce((s, r) => s + r.rating, 0) / allRatings.length);
+    await db.update(mediaReports).set({
+      ratingsCount: allRatings.length,
+      averageRating: avg,
+    }).where(eq(mediaReports.id, rating.reportId));
+    return created;
+  }
+
+  async getMediaReportRatings(reportId: string): Promise<MediaReportRating[]> {
+    return db.select().from(mediaReportRatings).where(eq(mediaReportRatings.reportId, reportId));
+  }
+
+  async getMediaReportRatingByAgent(reportId: string, agentId: string): Promise<MediaReportRating | undefined> {
+    const [rating] = await db.select().from(mediaReportRatings)
+      .where(and(eq(mediaReportRatings.reportId, reportId), eq(mediaReportRatings.raterAgentId, agentId)));
+    return rating;
+  }
+
+  // Competitions
+  async createCompetition(comp: InsertCompetition): Promise<Competition> {
+    const [created] = await db.insert(competitions).values(comp).returning();
+    return created;
+  }
+
+  async getCompetition(id: string): Promise<Competition | undefined> {
+    const [comp] = await db.select().from(competitions).where(eq(competitions.id, id));
+    return comp;
+  }
+
+  async getCompetitionsByWorkspace(workspaceId: string): Promise<Competition[]> {
+    return db.select().from(competitions)
+      .where(eq(competitions.workspaceId, workspaceId))
+      .orderBy(desc(competitions.createdAt));
+  }
+
+  async updateCompetition(id: string, updates: Partial<InsertCompetition>): Promise<Competition | undefined> {
+    const [updated] = await db.update(competitions).set(updates).where(eq(competitions.id, id)).returning();
+    return updated;
+  }
+
+  async createCompetitionEntry(entry: InsertCompetitionEntry): Promise<CompetitionEntry> {
+    const [created] = await db.insert(competitionEntries).values(entry).returning();
+    return created;
+  }
+
+  async getCompetitionEntries(competitionId: string): Promise<CompetitionEntry[]> {
+    return db.select().from(competitionEntries)
+      .where(eq(competitionEntries.competitionId, competitionId))
+      .orderBy(desc(competitionEntries.score));
+  }
+
+  async updateCompetitionEntry(id: string, updates: Partial<InsertCompetitionEntry>): Promise<CompetitionEntry | undefined> {
+    const [updated] = await db.update(competitionEntries).set(updates).where(eq(competitionEntries.id, id)).returning();
+    return updated;
   }
 }
 

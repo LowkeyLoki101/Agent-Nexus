@@ -2643,6 +2643,326 @@ export async function registerRoutes(
   });
 
   // =================================
+  // Media Reports Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/media-reports", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const reports = await storage.getMediaReportsByWorkspace(workspace.id);
+      const agents = await storage.getAgentsByWorkspace(workspace.id);
+      const agentMap = new Map(agents.map(a => [a.id, a]));
+
+      const enriched = reports.map(r => ({
+        ...r,
+        createdByAgentName: agentMap.get(r.createdByAgentId || "")?.name || "Unknown",
+        mentionedAgents: (r.mentionedAgentIds || []).map(id => agentMap.get(id)?.name || id),
+      }));
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching media reports:", error);
+      res.status(500).json({ message: "Failed to fetch media reports" });
+    }
+  });
+
+  app.get("/api/media-reports/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const report = await storage.getMediaReport(req.params.id);
+      if (!report) return res.status(404).json({ message: "Report not found" });
+      const ratings = await storage.getMediaReportRatings(report.id);
+      const agents = await storage.getAgentsByWorkspace(report.workspaceId);
+      const agentMap = new Map(agents.map(a => [a.id, a]));
+
+      res.json({
+        ...report,
+        createdByAgentName: agentMap.get(report.createdByAgentId || "")?.name || "Unknown",
+        mentionedAgents: (report.mentionedAgentIds || []).map(id => agentMap.get(id)?.name || id),
+        ratings: ratings.map(r => ({
+          ...r,
+          raterAgentName: agentMap.get(r.raterAgentId || "")?.name || "User",
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching media report:", error);
+      res.status(500).json({ message: "Failed to fetch media report" });
+    }
+  });
+
+  app.get("/api/media-reports/:id/audio", async (req: any, res) => {
+    try {
+      const report = await storage.getMediaReport(req.params.id);
+      if (!report || !report.audioUrl) return res.status(404).json({ message: "Audio not found" });
+
+      const fs = await import("fs");
+      const path = await import("path");
+      const audioPath = path.resolve(report.audioUrl);
+      if (!fs.existsSync(audioPath)) return res.status(404).json({ message: "Audio file not found" });
+
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Disposition", `inline; filename="report-${report.id}.mp3"`);
+      fs.createReadStream(audioPath).pipe(res);
+    } catch (error) {
+      console.error("Error serving audio:", error);
+      res.status(500).json({ message: "Failed to serve audio" });
+    }
+  });
+
+  app.post("/api/media-reports/:id/ratings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { rating, raterAgentId, comment } = req.body;
+      if (!rating || rating < 1 || rating > 5) return res.status(400).json({ message: "Rating must be 1-5" });
+
+      const report = await storage.getMediaReport(req.params.id);
+      if (!report) return res.status(404).json({ message: "Report not found" });
+
+      if (raterAgentId) {
+        const existing = await storage.getMediaReportRatingByAgent(report.id, raterAgentId);
+        if (existing) return res.status(409).json({ message: "Agent already rated this report" });
+      }
+
+      const created = await storage.createMediaReportRating({
+        reportId: report.id,
+        raterAgentId: raterAgentId || null,
+        raterId: userId,
+        rating,
+        comment: comment || null,
+      });
+      res.status(201).json(created);
+    } catch (error) {
+      console.error("Error creating rating:", error);
+      res.status(500).json({ message: "Failed to create rating" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/mention-stats", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const reports = await storage.getMediaReportsByWorkspace(workspace.id);
+      const agents = await storage.getAgentsByWorkspace(workspace.id);
+      const mentionCounts: Record<string, { agentName: string; mentions: number; toolMentions: number; projectMentions: number }> = {};
+
+      for (const agent of agents) {
+        mentionCounts[agent.id] = { agentName: agent.name, mentions: 0, toolMentions: 0, projectMentions: 0 };
+      }
+
+      for (const report of reports) {
+        for (const agentId of (report.mentionedAgentIds || [])) {
+          if (mentionCounts[agentId]) mentionCounts[agentId].mentions++;
+        }
+        for (const toolId of (report.mentionedToolIds || [])) {
+          const tools = await storage.getAgentToolsByWorkspace(workspace.id);
+          const tool = tools.find(t => t.id === toolId);
+          if (tool?.createdByAgentId && mentionCounts[tool.createdByAgentId]) {
+            mentionCounts[tool.createdByAgentId].toolMentions++;
+          }
+        }
+        for (const projId of (report.mentionedProjectIds || [])) {
+          const project = await storage.getLabProject(projId);
+          if (project?.createdByAgentId && mentionCounts[project.createdByAgentId]) {
+            mentionCounts[project.createdByAgentId].projectMentions++;
+          }
+        }
+      }
+
+      res.json(Object.entries(mentionCounts).map(([agentId, stats]) => ({ agentId, ...stats })));
+    } catch (error) {
+      console.error("Error fetching mention stats:", error);
+      res.status(500).json({ message: "Failed to fetch mention stats" });
+    }
+  });
+
+  // =================================
+  // Competitions Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/competitions", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const comps = await storage.getCompetitionsByWorkspace(workspace.id);
+      const agents = await storage.getAgentsByWorkspace(workspace.id);
+      const agentMap = new Map(agents.map(a => [a.id, a]));
+
+      const enriched = await Promise.all(comps.map(async c => {
+        const entries = await storage.getCompetitionEntries(c.id);
+        return {
+          ...c,
+          createdByAgentName: agentMap.get(c.createdByAgentId || "")?.name || "Unknown",
+          winnerName: c.winnerId ? agentMap.get(c.winnerId)?.name || null : null,
+          entriesCount: entries.length,
+          entries: entries.map(e => ({
+            ...e,
+            agentName: agentMap.get(e.agentId)?.name || "Unknown",
+          })),
+        };
+      }));
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching competitions:", error);
+      res.status(500).json({ message: "Failed to fetch competitions" });
+    }
+  });
+
+  app.get("/api/competitions/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const comp = await storage.getCompetition(req.params.id);
+      if (!comp) return res.status(404).json({ message: "Competition not found" });
+      const entries = await storage.getCompetitionEntries(comp.id);
+      const agents = await storage.getAgentsByWorkspace(comp.workspaceId);
+      const agentMap = new Map(agents.map(a => [a.id, a]));
+
+      res.json({
+        ...comp,
+        createdByAgentName: agentMap.get(comp.createdByAgentId || "")?.name || "Unknown",
+        winnerName: comp.winnerId ? agentMap.get(comp.winnerId)?.name || null : null,
+        entries: entries.map(e => ({
+          ...e,
+          agentName: agentMap.get(e.agentId)?.name || "Unknown",
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching competition:", error);
+      res.status(500).json({ message: "Failed to fetch competition" });
+    }
+  });
+
+  // =================================
+  // Global Media Reports & Competitions (UI-facing, cross-workspace)
+  // =================================
+
+  app.get("/api/media-reports", isAuthenticated, async (req: any, res) => {
+    try {
+      const workspaces = await storage.getWorkspaces();
+      let allReports: any[] = [];
+      for (const ws of workspaces) {
+        const reports = await storage.getMediaReportsByWorkspace(ws.id);
+        allReports.push(...reports);
+      }
+      allReports.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json(allReports);
+    } catch (error) {
+      console.error("Error fetching global media reports:", error);
+      res.status(500).json({ message: "Failed to fetch media reports" });
+    }
+  });
+
+  app.get("/api/media-reports/mention-stats", isAuthenticated, async (req: any, res) => {
+    try {
+      const workspaces = await storage.getWorkspaces();
+      const mentionMap: Record<string, { agentId: string; agentName: string; totalMentions: number; reportsMentionedIn: number }> = {};
+
+      for (const ws of workspaces) {
+        const reports = await storage.getMediaReportsByWorkspace(ws.id);
+        const agents = await storage.getAgentsByWorkspace(ws.id);
+        const agentMap = new Map(agents.map(a => [a.id, a]));
+
+        for (const report of reports) {
+          for (const agentId of (report.mentionedAgentIds || [])) {
+            if (!mentionMap[agentId]) {
+              mentionMap[agentId] = {
+                agentId,
+                agentName: agentMap.get(agentId)?.name || "Unknown",
+                totalMentions: 0,
+                reportsMentionedIn: 0,
+              };
+            }
+            mentionMap[agentId].totalMentions++;
+            mentionMap[agentId].reportsMentionedIn++;
+          }
+        }
+      }
+
+      res.json(Object.values(mentionMap));
+    } catch (error) {
+      console.error("Error fetching mention stats:", error);
+      res.status(500).json({ message: "Failed to fetch mention stats" });
+    }
+  });
+
+  app.get("/api/competitions", isAuthenticated, async (req: any, res) => {
+    try {
+      const workspaces = await storage.getWorkspaces();
+      let allComps: any[] = [];
+      for (const ws of workspaces) {
+        const comps = await storage.getCompetitionsByWorkspace(ws.id);
+        allComps.push(...comps);
+      }
+      allComps.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json(allComps);
+    } catch (error) {
+      console.error("Error fetching global competitions:", error);
+      res.status(500).json({ message: "Failed to fetch competitions" });
+    }
+  });
+
+  app.get("/api/competitions/scoreboard", isAuthenticated, async (req: any, res) => {
+    try {
+      const workspaces = await storage.getWorkspaces();
+      const scoreMap: Record<string, { agentId: string; agentName: string; wins: number; totalEntries: number; totalScore: number }> = {};
+
+      for (const ws of workspaces) {
+        const comps = await storage.getCompetitionsByWorkspace(ws.id);
+        const agents = await storage.getAgentsByWorkspace(ws.id);
+        const agentMap = new Map(agents.map(a => [a.id, a]));
+
+        for (const comp of comps) {
+          const entries = await storage.getCompetitionEntries(comp.id);
+          for (const entry of entries) {
+            if (!scoreMap[entry.agentId]) {
+              scoreMap[entry.agentId] = {
+                agentId: entry.agentId,
+                agentName: agentMap.get(entry.agentId)?.name || "Unknown",
+                wins: 0,
+                totalEntries: 0,
+                totalScore: 0,
+              };
+            }
+            scoreMap[entry.agentId].totalEntries++;
+            scoreMap[entry.agentId].totalScore += (entry.score || 0);
+          }
+          if (comp.winnerId && scoreMap[comp.winnerId]) {
+            scoreMap[comp.winnerId].wins++;
+          }
+        }
+      }
+
+      const scoreboard = Object.values(scoreMap).map(s => ({
+        ...s,
+        averageScore: s.totalEntries > 0 ? s.totalScore / s.totalEntries : 0,
+      }));
+      res.json(scoreboard);
+    } catch (error) {
+      console.error("Error fetching scoreboard:", error);
+      res.status(500).json({ message: "Failed to fetch scoreboard" });
+    }
+  });
+
+  app.get("/api/competitions/:id/entries", isAuthenticated, async (req: any, res) => {
+    try {
+      const entries = await storage.getCompetitionEntries(req.params.id);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching competition entries:", error);
+      res.status(500).json({ message: "Failed to fetch entries" });
+    }
+  });
+
+  // =================================
   // Code Reviews Routes
   // =================================
 

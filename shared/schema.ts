@@ -765,6 +765,138 @@ export const insertLeaderboardScoreSchema = createInsertSchema(leaderboardScores
   updatedAt: true,
 });
 
+// Media Reports (Herald agent news broadcasts)
+export const reportStatusEnum = pgEnum("report_status", ["generating", "ready", "failed"]);
+
+export const mediaReports = pgTable("media_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  summary: text("summary"),
+  transcript: text("transcript").notNull(),
+  audioUrl: text("audio_url"),
+  durationSeconds: integer("duration_seconds").default(60),
+  status: reportStatusEnum("status").default("generating"),
+  mentionedAgentIds: text("mentioned_agent_ids").array(),
+  mentionedToolIds: text("mentioned_tool_ids").array(),
+  mentionedProjectIds: text("mentioned_project_ids").array(),
+  topStoriesRating: integer("top_stories_rating").default(0),
+  ratingsCount: integer("ratings_count").default(0),
+  averageRating: integer("average_rating").default(0),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const mediaReportRelations = relations(mediaReports, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [mediaReports.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [mediaReports.createdByAgentId],
+    references: [agents.id],
+  }),
+  ratings: many(mediaReportRatings),
+}));
+
+export const mediaReportRatings = pgTable("media_report_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reportId: varchar("report_id").notNull().references(() => mediaReports.id, { onDelete: "cascade" }),
+  raterAgentId: varchar("rater_agent_id").references(() => agents.id),
+  raterId: varchar("rater_id"),
+  rating: integer("rating").notNull(),
+  comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const mediaReportRatingRelations = relations(mediaReportRatings, ({ one }) => ({
+  report: one(mediaReports, {
+    fields: [mediaReportRatings.reportId],
+    references: [mediaReports.id],
+  }),
+  raterAgent: one(agents, {
+    fields: [mediaReportRatings.raterAgentId],
+    references: [agents.id],
+  }),
+}));
+
+export const insertMediaReportSchema = createInsertSchema(mediaReports).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertMediaReportRatingSchema = createInsertSchema(mediaReportRatings).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Competitions
+export const competitionStatusEnum = pgEnum("competition_status", ["planning", "active", "voting", "completed", "cancelled"]);
+
+export const competitions = pgTable("competitions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  rules: text("rules"),
+  category: text("category"),
+  status: competitionStatusEnum("status").default("planning"),
+  maxEntries: integer("max_entries").default(10),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id),
+  winnerId: varchar("winner_id").references(() => agents.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  endsAt: timestamp("ends_at"),
+});
+
+export const competitionRelations = relations(competitions, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [competitions.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [competitions.createdByAgentId],
+    references: [agents.id],
+    relationName: "competitionCreator",
+  }),
+  winner: one(agents, {
+    fields: [competitions.winnerId],
+    references: [agents.id],
+    relationName: "competitionWinner",
+  }),
+  entries: many(competitionEntries),
+}));
+
+export const competitionEntries = pgTable("competition_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  competitionId: varchar("competition_id").notNull().references(() => competitions.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  score: integer("score").default(0),
+  judgeNotes: text("judge_notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const competitionEntryRelations = relations(competitionEntries, ({ one }) => ({
+  competition: one(competitions, {
+    fields: [competitionEntries.competitionId],
+    references: [competitions.id],
+  }),
+  agent: one(agents, {
+    fields: [competitionEntries.agentId],
+    references: [agents.id],
+  }),
+}));
+
+export const insertCompetitionSchema = createInsertSchema(competitions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCompetitionEntrySchema = createInsertSchema(competitionEntries).omit({
+  id: true,
+  createdAt: true,
+});
+
 // External integrations cache (GitHub, YouTube transcripts, web research)
 export const externalCache = pgTable("external_cache", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1278,3 +1410,11 @@ export type ShowcaseVote = typeof showcaseVotes.$inferSelect;
 export type InsertShowcaseVote = z.infer<typeof insertShowcaseVoteSchema>;
 export type LeaderboardScore = typeof leaderboardScores.$inferSelect;
 export type InsertLeaderboardScore = z.infer<typeof insertLeaderboardScoreSchema>;
+export type MediaReport = typeof mediaReports.$inferSelect;
+export type InsertMediaReport = z.infer<typeof insertMediaReportSchema>;
+export type MediaReportRating = typeof mediaReportRatings.$inferSelect;
+export type InsertMediaReportRating = z.infer<typeof insertMediaReportRatingSchema>;
+export type Competition = typeof competitions.$inferSelect;
+export type InsertCompetition = z.infer<typeof insertCompetitionSchema>;
+export type CompetitionEntry = typeof competitionEntries.$inferSelect;
+export type InsertCompetitionEntry = z.infer<typeof insertCompetitionEntrySchema>;
