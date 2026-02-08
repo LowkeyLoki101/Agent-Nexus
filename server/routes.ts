@@ -3534,6 +3534,137 @@ export async function registerRoutes(
     }
   });
 
+  // Organization Map - real-time agent status across rooms
+  app.get("/api/org-map", isAuthenticated, async (req: any, res) => {
+    try {
+      const { getFactoryStatus } = await import("./services/agent-factory");
+      const userId = req.user.claims.sub;
+      const userWorkspaces = await storage.getWorkspacesByUser(userId);
+      if (userWorkspaces.length === 0) return res.json({ agents: [], rooms: [] });
+
+      let allAgents: any[] = [];
+      let tasks: any[] = [];
+      let goals: any[] = [];
+      let diaries: any[] = [];
+      let pulses: any[] = [];
+      let tokenSummaryAgg: Record<string, number> = {};
+      let budgetRemaining: any = null;
+
+      for (const ws of userWorkspaces) {
+        const wsAgents = await storage.getAgentsByWorkspace(ws.id);
+        const wsTasks = await storage.getTasksByWorkspace(ws.id);
+        const wsGoals = await storage.getGoalsByWorkspace(ws.id);
+        const wsDiaries = await storage.getDiaryEntriesByWorkspace(ws.id);
+        const wsPulses = await storage.getPulsesByWorkspace(ws.id);
+        const wsSummary = await storage.getTokenUsageSummary(ws.id);
+        const wsBudget = await storage.getTokenBudgetRemaining(ws.id);
+        allAgents = allAgents.concat(wsAgents);
+        tasks = tasks.concat(wsTasks);
+        goals = goals.concat(wsGoals);
+        diaries = diaries.concat(wsDiaries);
+        pulses = pulses.concat(wsPulses);
+        for (const [id, tokens] of Object.entries(wsSummary.byAgent)) {
+          tokenSummaryAgg[id] = (tokenSummaryAgg[id] || 0) + (tokens as number);
+        }
+        if (wsBudget && !budgetRemaining) budgetRemaining = wsBudget;
+      }
+      const tokenSummary = { byAgent: tokenSummaryAgg };
+
+      const ROOM_ORDER: string[] = ["research", "create", "discuss", "review", "reflect", "coordinate"];
+
+      const agentData = allAgents.filter(a => a.isVerified).map(agent => {
+        const agentTasks = tasks.filter(t => t.agentId === agent.id);
+        const completedTasks = agentTasks.filter(t => t.status === "completed")
+          .sort((a, b) => {
+            const aTime = a.completedAt ? new Date(a.completedAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+            const bTime = b.completedAt ? new Date(b.completedAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            return aTime - bTime;
+          });
+        const totalCompleted = completedTasks.length;
+        const completedRotations = Math.floor(totalCompleted / ROOM_ORDER.length);
+        const tasksInCurrentCycle = completedTasks.slice(completedRotations * ROOM_ORDER.length);
+        const visitedRoomsSet = new Set(tasksInCurrentCycle.map(t => t.type as string));
+        const visitedRooms = ROOM_ORDER.filter(r => visitedRoomsSet.has(r));
+        const unvisitedRooms = ROOM_ORDER.filter(r => !visitedRoomsSet.has(r));
+
+        const lastCompletedTask = completedTasks[completedTasks.length - 1];
+        const currentRoom = lastCompletedTask?.type || null;
+        const currentTask = agentTasks.find(t => t.status === "in_progress") || agentTasks.find(t => t.status === "queued");
+        const activeGoals = goals.filter(g => g.agentId === agent.id && g.status === "active");
+        const latestDiary = diaries.filter(d => d.agentId === agent.id).sort((a, b) =>
+          new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
+        )[0];
+        const latestPulse = pulses.filter(p => p.agentId === agent.id).sort((a, b) =>
+          new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
+        )[0];
+
+        const yesterdayStart = new Date();
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+        yesterdayStart.setHours(0, 0, 0, 0);
+        const yesterdayEnd = new Date(yesterdayStart);
+        yesterdayEnd.setHours(23, 59, 59, 999);
+        const yesterdayTasks = completedTasks.filter(t => {
+          const time = t.completedAt ? new Date(t.completedAt).getTime() : 0;
+          return time >= yesterdayStart.getTime() && time <= yesterdayEnd.getTime();
+        });
+
+        const agentTokens = tokenSummary.byAgent[agent.id] || 0;
+
+        return {
+          id: agent.id,
+          name: agent.name,
+          description: agent.description,
+          provider: agent.provider,
+          modelName: agent.modelName,
+          avatar: agent.avatar,
+          roleMetaphor: agent.roleMetaphor,
+          strengths: agent.strengths,
+          capabilities: agent.capabilities,
+          currentRoom,
+          rotation: {
+            current: completedRotations + 1,
+            visitedRooms,
+            unvisitedRooms,
+            totalRotations: completedRotations,
+          },
+          currentTask: currentTask ? { title: currentTask.title, type: currentTask.type, status: currentTask.status } : null,
+          longTermGoal: activeGoals.length > 0 ? { title: activeGoals[0].title, progress: activeGoals[0].progress, milestones: activeGoals[0].milestones } : null,
+          shortTermGoal: activeGoals.length > 1 ? { title: activeGoals[1].title, progress: activeGoals[1].progress } : null,
+          latestDiary: latestDiary ? { title: latestDiary.title, mood: latestDiary.mood, content: latestDiary.content?.substring(0, 300), createdAt: latestDiary.createdAt } : null,
+          latestPulse: latestPulse ? { doingNow: latestPulse.doingNow, nextActions: latestPulse.nextActions, createdAt: latestPulse.createdAt } : null,
+          yesterdayWork: yesterdayTasks.map(t => ({ title: t.title, type: t.type })),
+          tokensUsed: agentTokens,
+          totalTasks: totalCompleted,
+          lastActiveAt: lastCompletedTask?.completedAt || lastCompletedTask?.createdAt || null,
+        };
+      });
+
+      const roomStats = ROOM_ORDER.map(room => {
+        const agentsInRoom = agentData.filter(a => a.currentRoom === room);
+        const roomTasks = tasks.filter(t => t.type === room);
+        return {
+          name: room,
+          agentCount: agentsInRoom.length,
+          totalTasks: roomTasks.filter(t => t.status === "completed").length,
+          activeTasks: roomTasks.filter(t => t.status === "in_progress").length,
+        };
+      });
+
+      const factoryStatus = getFactoryStatus();
+
+      res.json({
+        agents: agentData,
+        rooms: roomStats,
+        factory: factoryStatus,
+        tokenBudget: budgetRemaining,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error fetching org map:", error);
+      res.status(500).json({ message: "Failed to fetch organization map" });
+    }
+  });
+
   // Agent API routes (autonomous agent operations via API tokens)
   app.use("/api/agent", agentApiRoutes);
 

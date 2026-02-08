@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import OrganizationMap from "@/components/organization-map";
 import { 
   Plus, 
   Bot, 
@@ -169,6 +170,8 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
+
+      <OrganizationMap />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
