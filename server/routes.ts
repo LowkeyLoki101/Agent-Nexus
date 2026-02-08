@@ -3023,6 +3023,48 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/competitions/scoreboard", isAuthenticated, async (req: any, res) => {
+    try {
+      const workspaces = await storage.getWorkspaces();
+      const scoreMap: Record<string, { agentId: string; agentName: string; wins: number; totalEntries: number; totalScore: number }> = {};
+
+      for (const ws of workspaces) {
+        const comps = await storage.getCompetitionsByWorkspace(ws.id);
+        const agents = await storage.getAgentsByWorkspace(ws.id);
+        const agentMap = new Map(agents.map(a => [a.id, a]));
+
+        for (const comp of comps) {
+          const entries = await storage.getCompetitionEntries(comp.id);
+          for (const entry of entries) {
+            if (!scoreMap[entry.agentId]) {
+              scoreMap[entry.agentId] = {
+                agentId: entry.agentId,
+                agentName: agentMap.get(entry.agentId)?.name || "Unknown",
+                wins: 0,
+                totalEntries: 0,
+                totalScore: 0,
+              };
+            }
+            scoreMap[entry.agentId].totalEntries++;
+            scoreMap[entry.agentId].totalScore += (entry.score || 0);
+          }
+          if (comp.winnerId && scoreMap[comp.winnerId]) {
+            scoreMap[comp.winnerId].wins++;
+          }
+        }
+      }
+
+      const scoreboard = Object.values(scoreMap).map(s => ({
+        ...s,
+        averageScore: s.totalEntries > 0 ? s.totalScore / s.totalEntries : 0,
+      }));
+      res.json(scoreboard);
+    } catch (error) {
+      console.error("Error fetching scoreboard:", error);
+      res.status(500).json({ message: "Failed to fetch scoreboard" });
+    }
+  });
+
   app.get("/api/competitions/:id", isAuthenticated, async (req: any, res) => {
     try {
       const comp = await storage.getCompetition(req.params.id);
@@ -3125,48 +3167,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching global competitions:", error);
       res.status(500).json({ message: "Failed to fetch competitions" });
-    }
-  });
-
-  app.get("/api/competitions/scoreboard", isAuthenticated, async (req: any, res) => {
-    try {
-      const workspaces = await storage.getWorkspaces();
-      const scoreMap: Record<string, { agentId: string; agentName: string; wins: number; totalEntries: number; totalScore: number }> = {};
-
-      for (const ws of workspaces) {
-        const comps = await storage.getCompetitionsByWorkspace(ws.id);
-        const agents = await storage.getAgentsByWorkspace(ws.id);
-        const agentMap = new Map(agents.map(a => [a.id, a]));
-
-        for (const comp of comps) {
-          const entries = await storage.getCompetitionEntries(comp.id);
-          for (const entry of entries) {
-            if (!scoreMap[entry.agentId]) {
-              scoreMap[entry.agentId] = {
-                agentId: entry.agentId,
-                agentName: agentMap.get(entry.agentId)?.name || "Unknown",
-                wins: 0,
-                totalEntries: 0,
-                totalScore: 0,
-              };
-            }
-            scoreMap[entry.agentId].totalEntries++;
-            scoreMap[entry.agentId].totalScore += (entry.score || 0);
-          }
-          if (comp.winnerId && scoreMap[comp.winnerId]) {
-            scoreMap[comp.winnerId].wins++;
-          }
-        }
-      }
-
-      const scoreboard = Object.values(scoreMap).map(s => ({
-        ...s,
-        averageScore: s.totalEntries > 0 ? s.totalScore / s.totalEntries : 0,
-      }));
-      res.json(scoreboard);
-    } catch (error) {
-      console.error("Error fetching scoreboard:", error);
-      res.status(500).json({ message: "Failed to fetch scoreboard" });
     }
   });
 
