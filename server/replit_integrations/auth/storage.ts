@@ -8,6 +8,7 @@ export interface IAuthStorage {
   upsertUser(user: UpsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<Pick<User, "email" | "firstName" | "lastName">>): Promise<User | undefined>;
   createUserWithPassword(data: { email: string; firstName?: string; lastName?: string; passwordHash: string }): Promise<User>;
+  setPasswordForUser(id: string, passwordHash: string, firstName?: string | null, lastName?: string | null): Promise<User>;
 }
 
 class AuthStorage implements IAuthStorage {
@@ -58,6 +59,14 @@ class AuthStorage implements IAuthStorage {
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
+    return user;
+  }
+
+  async setPasswordForUser(id: string, passwordHash: string, firstName?: string | null, lastName?: string | null): Promise<User> {
+    const updateData: Record<string, any> = { passwordHash, updatedAt: new Date() };
+    if (firstName) updateData.firstName = firstName;
+    if (lastName) updateData.lastName = lastName;
+    const [user] = await db.update(users).set(updateData).where(eq(users.id, id)).returning();
     return user;
   }
 
