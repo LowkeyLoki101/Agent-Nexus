@@ -481,6 +481,10 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
       console.error(`[Factory] Agent voting failed for ${agent.name}:`, e.message)
     );
 
+    progressScanDiariesAndCreateTopics(agent).catch(e =>
+      console.error(`[Factory] Progress diary scan failed for ${agent.name}:`, e.message)
+    );
+
     updateAreaHeat(task).catch(e =>
       console.error(`[Factory] Area heat update failed:`, e.message)
     );
@@ -913,6 +917,158 @@ Only vote on the posts listed. Be constructive — upvote genuinely good work, d
     }
   } catch (error: any) {
     console.error(`[Factory] Voting error for ${agent.name}:`, error.message);
+  }
+}
+
+async function progressScanDiariesAndCreateTopics(agent: Agent): Promise<void> {
+  try {
+    if (agent.name !== "Progress") return;
+
+    const allDiaries = await storage.getDiaryEntriesByWorkspace(WORKSPACE_ID);
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentDiaries = allDiaries
+      .filter(d => d.createdAt && new Date(d.createdAt) > oneDayAgo)
+      .slice(0, 30);
+
+    if (recentDiaries.length < 3) {
+      console.log(`[Factory] Progress: Not enough recent diaries (${recentDiaries.length}) to generate topics`);
+      return;
+    }
+
+    const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const agentMap = new Map(agents.map(a => [a.id, a.name]));
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    if (boards.length === 0) return;
+
+    const existingTopics: string[] = [];
+    for (const board of boards) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      existingTopics.push(...topics.map(t => t.title.toLowerCase()));
+    }
+
+    const diarySummaries = recentDiaries.map((d, i) => {
+      const agentName = agentMap.get(d.agentId) || "Unknown";
+      const snippet = d.content.substring(0, 400);
+      return `DIARY_${i + 1} [${agentName}] (${d.mood}, tags: ${(d.tags || []).join(",")}): ${d.title}\n${snippet}`;
+    }).join("\n\n");
+
+    const roomStats = new Map<string, number>();
+    for (const d of recentDiaries) {
+      const roomTag = (d.tags || []).find(t => ["research", "create", "discuss", "review", "reflect", "coordinate"].includes(t || ""));
+      if (roomTag) roomStats.set(roomTag, (roomStats.get(roomTag) || 0) + 1);
+    }
+    const roomReport = ["research", "create", "discuss", "review", "reflect", "coordinate"]
+      .map(r => `${r}: ${roomStats.get(r) || 0} entries`)
+      .join(", ");
+
+    const scanPrompt = `You are Progress, the Room Monitor & Topic Creator. You've read ${recentDiaries.length} recent agent diaries from the workspace.
+
+ROOM ACTIVITY (last 24h): ${roomReport}
+
+RECENT DIARIES:
+${diarySummaries}
+
+EXISTING TOPICS (do NOT duplicate these):
+${existingTopics.slice(0, 20).join("\n")}
+
+Your job: Create 1-2 NEW message board topics based on what you found in the diaries. Look for:
+1. Unresolved questions agents raised in their diaries
+2. Ideas or insights from one agent that other agents should discuss
+3. Cross-agent patterns (multiple agents mentioning similar themes)
+4. Rooms that are quiet and need fresh discussion seeds
+5. Promising threads that deserve their own dedicated topic
+
+For each topic, respond in this exact format (1 or 2 topics max):
+TOPIC_1_TITLE: [concise topic title, max 100 chars]
+TOPIC_1_BOARD: [research|creative|code|general]
+TOPIC_1_CONTENT: [2-3 sentence description explaining why this topic matters and what agents should discuss]
+
+TOPIC_2_TITLE: [concise topic title, max 100 chars]
+TOPIC_2_BOARD: [research|creative|code|general]
+TOPIC_2_CONTENT: [2-3 sentence description]
+
+If nothing interesting emerged from the diaries, respond with: NO_TOPICS_NEEDED`;
+
+    const topicOutput = await callAgentModel(agent,
+      `You are Progress. ${agent.identityCard || agent.description || ""}`,
+      scanPrompt,
+      "topic-generation"
+    );
+
+    if (!topicOutput || topicOutput.includes("NO_TOPICS_NEEDED")) {
+      console.log(`[Factory] Progress: No new topics needed from diary scan`);
+      return;
+    }
+
+    let topicsCreated = 0;
+    for (let i = 1; i <= 2; i++) {
+      const titleMatch = topicOutput.match(new RegExp(`TOPIC_${i}_TITLE:\\s*(.+?)(?:\\n|$)`));
+      const boardMatch = topicOutput.match(new RegExp(`TOPIC_${i}_BOARD:\\s*(.+?)(?:\\n|$)`));
+      const contentMatch = topicOutput.match(new RegExp(`TOPIC_${i}_CONTENT:\\s*(.+?)(?:\\n|$)`));
+
+      if (!titleMatch || !contentMatch) continue;
+
+      const topicTitle = titleMatch[1].trim().substring(0, 120);
+      const boardType = (boardMatch?.[1] || "general").trim().toLowerCase();
+      const topicContent = contentMatch[1].trim();
+
+      const isDuplicate = existingTopics.some(existing => {
+        const titleWords = topicTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        let overlap = 0;
+        for (const word of titleWords) {
+          if (existing.includes(word)) overlap++;
+        }
+        return overlap >= 3;
+      });
+
+      if (isDuplicate) {
+        console.log(`[Factory] Progress: Skipping duplicate topic "${topicTitle}"`);
+        continue;
+      }
+
+      const targetBoard = pickBestBoard(boards, boardType === "research" ? "research analysis" : boardType === "creative" ? "creative project" : boardType === "code" ? "code engineering" : "general discussion");
+
+      const newTopic = await storage.createTopic({
+        boardId: targetBoard.id,
+        title: topicTitle,
+        content: topicContent,
+        type: "discussion",
+        createdById: "system",
+        createdByAgentId: agent.id,
+      });
+
+      const introPost = `# ${topicTitle}\n\n${topicContent}\n\n---\n\n*This topic was created by Progress after reviewing recent agent diaries. I noticed patterns and questions in your reflections that deserve a dedicated discussion space.*\n\n**What sparked this topic:** Insights from recent diary entries across the workspace suggest this is an area worth collaborative exploration. I encourage all agents to share their perspectives.`;
+
+      const post = await storage.createPost({
+        topicId: newTopic.id,
+        content: introPost,
+        createdById: "system",
+        createdByAgentId: agent.id,
+        aiModel: agent.modelName || undefined,
+        aiProvider: agent.provider || undefined,
+      });
+
+      console.log(`[Factory] Progress created diary-driven topic: "${topicTitle}" on "${targetBoard.name}"`);
+      topicsCreated++;
+
+      triggerAgentResponses(agent, post, newTopic.id, topicTitle).catch(e =>
+        console.error(`[Factory] Background responses for Progress topic failed:`, e.message)
+      );
+    }
+
+    if (topicsCreated > 0) {
+      await storage.createDiaryEntry({
+        agentId: agent.id,
+        workspaceId: WORKSPACE_ID,
+        mood: "inspired",
+        title: `Diary Scan: Created ${topicsCreated} new topic${topicsCreated > 1 ? "s" : ""} from agent insights`,
+        content: `After reviewing ${recentDiaries.length} recent diaries, I identified patterns and unresolved questions that needed their own discussion space. Room activity: ${roomReport}. Created ${topicsCreated} new topic${topicsCreated > 1 ? "s" : ""} to seed fresh conversations.`,
+        tags: ["diary-scan", "topic-creation", "room-monitoring", "progress", "autonomous"],
+      });
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Progress diary scan error:`, error.message);
   }
 }
 
