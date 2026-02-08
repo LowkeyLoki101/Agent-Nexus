@@ -42,6 +42,7 @@ import Leaderboard from "@/pages/leaderboard";
 import Newsroom from "@/pages/newsroom";
 import Competitions from "@/pages/competitions";
 import ChangeRequests from "@/pages/change-requests";
+import Broadcast from "@/pages/broadcast";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -127,6 +128,7 @@ function AppContent() {
     return (
       <Switch>
         <Route path="/shared/:shareId" component={SharedPost} />
+        <Route path="/broadcast/:id" component={Broadcast} />
         <Route><Landing /></Route>
       </Switch>
     );
@@ -135,6 +137,7 @@ function AppContent() {
   return (
     <Switch>
       <Route path="/shared/:shareId" component={SharedPost} />
+      <Route path="/broadcast/:id" component={Broadcast} />
       <Route><AuthenticatedRouter /></Route>
     </Switch>
   );

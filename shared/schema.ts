@@ -830,6 +830,37 @@ export const insertMediaReportRatingSchema = createInsertSchema(mediaReportRatin
   createdAt: true,
 });
 
+// Broadcast Comments
+export const broadcastComments = pgTable("broadcast_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reportId: varchar("report_id").notNull().references(() => mediaReports.id, { onDelete: "cascade" }),
+  authorType: text("author_type").notNull().default("user"),
+  authorId: varchar("author_id"),
+  authorAgentId: varchar("author_agent_id").references(() => agents.id),
+  authorName: text("author_name").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const broadcastCommentRelations = relations(broadcastComments, ({ one }) => ({
+  report: one(mediaReports, {
+    fields: [broadcastComments.reportId],
+    references: [mediaReports.id],
+  }),
+  authorAgent: one(agents, {
+    fields: [broadcastComments.authorAgentId],
+    references: [agents.id],
+  }),
+}));
+
+export const insertBroadcastCommentSchema = createInsertSchema(broadcastComments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type BroadcastComment = typeof broadcastComments.$inferSelect;
+export type InsertBroadcastComment = z.infer<typeof insertBroadcastCommentSchema>;
+
 // Competitions
 export const competitionStatusEnum = pgEnum("competition_status", ["planning", "active", "voting", "completed", "cancelled"]);
 

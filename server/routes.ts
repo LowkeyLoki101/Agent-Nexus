@@ -2771,6 +2771,84 @@ export async function registerRoutes(
     }
   });
 
+  // ============ PUBLIC BROADCAST ENDPOINTS ============
+
+  app.get("/api/broadcasts/:id", async (req: any, res) => {
+    try {
+      const report = await storage.getMediaReport(req.params.id);
+      if (!report) return res.status(404).json({ message: "Broadcast not found" });
+
+      const agents = await storage.getAgentsByWorkspace(report.workspaceId);
+      const agentMap = new Map(agents.map(a => [a.id, a]));
+      const workspace = await storage.getWorkspace(report.workspaceId);
+      const comments = await storage.getBroadcastCommentsByReport(report.id);
+      const ratings = await storage.getMediaReportRatings(report.id);
+
+      res.json({
+        ...report,
+        workspaceName: workspace?.name || "Creative Intelligence",
+        createdByAgentName: agentMap.get(report.createdByAgentId || "")?.name || "Herald",
+        createdByAgent: report.createdByAgentId ? {
+          name: agentMap.get(report.createdByAgentId)?.name,
+          description: agentMap.get(report.createdByAgentId)?.description,
+          roleMetaphor: agentMap.get(report.createdByAgentId)?.roleMetaphor,
+          avatar: agentMap.get(report.createdByAgentId)?.avatar,
+        } : null,
+        mentionedAgents: (report.mentionedAgentIds || []).map(id => ({
+          id,
+          name: agentMap.get(id)?.name || "Unknown",
+          roleMetaphor: agentMap.get(id)?.roleMetaphor,
+        })),
+        comments,
+        ratings: ratings.map(r => ({
+          ...r,
+          raterAgentName: agentMap.get(r.raterAgentId || "")?.name || "User",
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching public broadcast:", error);
+      res.status(500).json({ message: "Failed to fetch broadcast" });
+    }
+  });
+
+  const broadcastCommentSchema = z.object({
+    authorName: z.string().min(1, "Name is required").max(100, "Name too long"),
+    content: z.string().min(1, "Comment is required").max(2000, "Comment too long"),
+    authorType: z.enum(["user", "agent"]).default("user"),
+    authorAgentId: z.string().nullish(),
+  });
+
+  app.post("/api/broadcasts/:id/comments", async (req: any, res) => {
+    try {
+      const report = await storage.getMediaReport(req.params.id);
+      if (!report) return res.status(404).json({ message: "Broadcast not found" });
+
+      const parsed = broadcastCommentSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid input" });
+
+      const { authorName, content, authorType, authorAgentId } = parsed.data;
+
+      let userId: string | null = null;
+      if (req.isAuthenticated && req.isAuthenticated() && req.user?.claims?.sub) {
+        userId = req.user.claims.sub;
+      }
+
+      const comment = await storage.createBroadcastComment({
+        reportId: report.id,
+        authorType: authorType || "user",
+        authorId: userId,
+        authorAgentId: authorAgentId || null,
+        authorName,
+        content,
+      });
+
+      res.status(201).json(comment);
+    } catch (error) {
+      console.error("Error creating broadcast comment:", error);
+      res.status(500).json({ message: "Failed to create comment" });
+    }
+  });
+
   app.post("/api/media-reports/:id/ratings", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
