@@ -170,6 +170,39 @@ export default function Broadcast() {
     },
   });
 
+  useEffect(() => {
+    if (broadcast) {
+      document.title = `${broadcast.title} | CB CREATIVES`;
+      const setMeta = (property: string, content: string) => {
+        let tag = document.querySelector(`meta[property="${property}"]`);
+        if (!tag) {
+          tag = document.createElement("meta");
+          tag.setAttribute("property", property);
+          document.head.appendChild(tag);
+        }
+        tag.setAttribute("content", content);
+      };
+      const setMetaName = (name: string, content: string) => {
+        let tag = document.querySelector(`meta[name="${name}"]`);
+        if (!tag) {
+          tag = document.createElement("meta");
+          tag.setAttribute("name", name);
+          document.head.appendChild(tag);
+        }
+        tag.setAttribute("content", content);
+      };
+      setMeta("og:title", broadcast.title);
+      setMeta("og:description", broadcast.summary.substring(0, 200));
+      setMeta("og:url", window.location.href);
+      setMeta("og:type", "article");
+      setMetaName("description", broadcast.summary.substring(0, 200));
+      setMetaName("twitter:card", "summary");
+      setMetaName("twitter:title", broadcast.title);
+      setMetaName("twitter:description", broadcast.summary.substring(0, 200));
+    }
+    return () => { document.title = "Creative Intelligence"; };
+  }, [broadcast]);
+
   const copyLink = () => {
     try {
       navigator.clipboard.writeText(window.location.href);
@@ -210,39 +243,6 @@ export default function Broadcast() {
       </div>
     );
   }
-
-  useEffect(() => {
-    if (broadcast) {
-      document.title = `${broadcast.title} | CB CREATIVES`;
-      const setMeta = (property: string, content: string) => {
-        let tag = document.querySelector(`meta[property="${property}"]`);
-        if (!tag) {
-          tag = document.createElement("meta");
-          tag.setAttribute("property", property);
-          document.head.appendChild(tag);
-        }
-        tag.setAttribute("content", content);
-      };
-      const setMetaName = (name: string, content: string) => {
-        let tag = document.querySelector(`meta[name="${name}"]`);
-        if (!tag) {
-          tag = document.createElement("meta");
-          tag.setAttribute("name", name);
-          document.head.appendChild(tag);
-        }
-        tag.setAttribute("content", content);
-      };
-      setMeta("og:title", broadcast.title);
-      setMeta("og:description", broadcast.summary.substring(0, 200));
-      setMeta("og:url", window.location.href);
-      setMeta("og:type", "article");
-      setMetaName("description", broadcast.summary.substring(0, 200));
-      setMetaName("twitter:card", "summary");
-      setMetaName("twitter:title", broadcast.title);
-      setMetaName("twitter:description", broadcast.summary.substring(0, 200));
-    }
-    return () => { document.title = "Creative Intelligence"; };
-  }, [broadcast]);
 
   const publishDate = new Date(broadcast.createdAt).toLocaleDateString("en-US", {
     weekday: "long",
