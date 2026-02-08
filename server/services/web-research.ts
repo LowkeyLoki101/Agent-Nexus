@@ -16,6 +16,190 @@ export interface ResearchResult {
   timestamp: Date;
 }
 
+export interface ScrapedContent {
+  url: string;
+  title: string;
+  content: string;
+  keyPoints: string[];
+  source: string;
+  fetchedAt: Date;
+}
+
+async function fetchPageContent(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; CreativeIntelligenceBot/1.0; +https://cb-creatives.replit.app)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/html") && !contentType.includes("text/plain") && !contentType.includes("application/json")) {
+      return null;
+    }
+
+    const html = await response.text();
+    const cleaned = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return cleaned.substring(0, 8000);
+  } catch (error: any) {
+    console.error(`[WebResearch] Failed to fetch ${url}:`, error.message);
+    return null;
+  }
+}
+
+export async function searchAndScrape(query: string, options?: {
+  maxResults?: number;
+  sources?: string[];
+}): Promise<{ results: ScrapedContent[]; summary: string }> {
+  const maxResults = options?.maxResults || 5;
+
+  const searchResponse = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are a web research specialist. Given a search query, provide real, currently active URLs that are likely to have relevant content. Focus on:
+- News sites (techcrunch.com, arstechnica.com, theverge.com, wired.com)
+- Developer forums (dev.to, hackernews/news.ycombinator.com, stackoverflow.com)
+- Research blogs (arxiv.org, blog posts from major AI companies)
+- Social/community sites (reddit.com relevant subreddits)
+- Industry sites relevant to the query
+
+Return a JSON object:
+{
+  "urls": [
+    {
+      "url": "https://example.com/article",
+      "title": "Expected article title",
+      "source": "Site name",
+      "relevance": "Why this is relevant to the query"
+    }
+  ]
+}
+
+Provide ${maxResults} URLs. Only suggest URLs that are likely to actually exist and return content. Prefer recent, high-quality sources.`
+      },
+      {
+        role: "user",
+        content: `Find relevant web pages for: ${query}${options?.sources ? `\nPrefer these types of sources: ${options.sources.join(", ")}` : ""}`
+      }
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.3,
+  });
+
+  const searchContent = searchResponse.choices[0]?.message?.content;
+  if (!searchContent) return { results: [], summary: "No search results found." };
+
+  let urls: Array<{ url: string; title: string; source: string; relevance: string }> = [];
+  try {
+    const parsed = JSON.parse(searchContent);
+    urls = parsed.urls || [];
+  } catch {
+    return { results: [], summary: "Failed to parse search results." };
+  }
+
+  const scrapedResults: ScrapedContent[] = [];
+
+  for (const urlInfo of urls.slice(0, maxResults)) {
+    const pageContent = await fetchPageContent(urlInfo.url);
+    if (pageContent && pageContent.length > 100) {
+      const analysisResponse = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `Extract the key information from this web page content. Return a JSON object:
+{
+  "title": "The actual page title or best guess",
+  "keyPoints": ["Key point 1", "Key point 2", "Key point 3"],
+  "summary": "A 2-3 sentence summary of the most important content"
+}
+Focus on extractable facts, opinions, trends, and actionable insights.`
+          },
+          {
+            role: "user",
+            content: `URL: ${urlInfo.url}\nSource: ${urlInfo.source}\n\nPage content:\n${pageContent.substring(0, 4000)}`
+          }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+      });
+
+      const analysis = analysisResponse.choices[0]?.message?.content;
+      if (analysis) {
+        try {
+          const parsed = JSON.parse(analysis);
+          scrapedResults.push({
+            url: urlInfo.url,
+            title: parsed.title || urlInfo.title,
+            content: parsed.summary || "",
+            keyPoints: parsed.keyPoints || [],
+            source: urlInfo.source,
+            fetchedAt: new Date(),
+          });
+        } catch {}
+      }
+    } else {
+      scrapedResults.push({
+        url: urlInfo.url,
+        title: urlInfo.title,
+        content: urlInfo.relevance,
+        keyPoints: [],
+        source: urlInfo.source,
+        fetchedAt: new Date(),
+      });
+    }
+  }
+
+  let summary = `Found ${scrapedResults.length} results for "${query}"`;
+  if (scrapedResults.length > 0) {
+    const summaryResponse = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "Synthesize these web research findings into a brief, insightful summary. Highlight the most interesting discoveries, trends, and discussion-worthy points."
+        },
+        {
+          role: "user",
+          content: `Query: ${query}\n\nFindings:\n${scrapedResults.map(r => `[${r.source}] ${r.title}: ${r.content}\nKey points: ${r.keyPoints.join("; ")}`).join("\n\n")}`
+        }
+      ],
+      temperature: 0.5,
+      max_tokens: 500,
+    });
+    summary = summaryResponse.choices[0]?.message?.content || summary;
+  }
+
+  return { results: scrapedResults, summary };
+}
+
 export async function searchInternet(query: string, options?: {
   maxResults?: number;
   summarize?: boolean;
@@ -82,12 +266,18 @@ export async function analyzeUrl(url: string): Promise<{
   summary: string;
 }> {
   try {
+    const pageContent = await fetchPageContent(url);
+    
+    const prompt = pageContent
+      ? `Analyze this web page content from ${url}:\n\n${pageContent.substring(0, 4000)}`
+      : `Analyze this URL: ${url}`;
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a content analyzer. Analyze the given URL and provide structured information about its content.
+          content: `You are a content analyzer. Analyze the given web page content and provide structured information.
           
 Return a JSON object with:
 {
@@ -95,13 +285,11 @@ Return a JSON object with:
   "content": "Main content extracted from the page",
   "keyPoints": ["Key point 1", "Key point 2", ...],
   "summary": "Brief summary of the page"
-}
-
-Use your knowledge to provide relevant information about what this URL likely contains.`
+}`
         },
         {
           role: "user",
-          content: `Analyze this URL: ${url}`
+          content: prompt
         }
       ],
       response_format: { type: "json_object" },
