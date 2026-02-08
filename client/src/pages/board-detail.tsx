@@ -105,11 +105,15 @@ export default function BoardDetail() {
   const { data: topics, isLoading: loadingTopics } = useQuery<Topic[]>({
     queryKey: ["/api/boards", id, "topics"],
     enabled: !!id,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
   });
 
   const { data: posts, isLoading: loadingPosts } = useQuery<Post[]>({
     queryKey: ["/api/topics", selectedTopic, "posts"],
     enabled: !!selectedTopic,
+    refetchInterval: 8_000,
+    staleTime: 5_000,
   });
 
   const createTopicMutation = useMutation({

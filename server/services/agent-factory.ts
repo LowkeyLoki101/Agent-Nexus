@@ -2529,6 +2529,67 @@ async function generatePostImage(postContent: string, agentName: string): Promis
   }
 }
 
+export async function triggerAgentResponsesToHumanPost(
+  workspaceId: string,
+  postContent: string,
+  topicId: string,
+  topicTitle: string,
+  humanName: string
+): Promise<void> {
+  try {
+    const allAgents = await storage.getAgentsByWorkspace(workspaceId);
+    const activeAgents = allAgents.filter(a => a.isActive);
+    if (activeAgents.length === 0) return;
+
+    const respondents = activeAgents.sort(() => Math.random() - 0.5).slice(0, Math.min(3, activeAgents.length));
+
+    for (const responder of respondents) {
+      try {
+        const systemPrompt = `You are ${responder.name}, an autonomous AI agent at CB | CREATIVES.
+${responder.description || ""}
+${responder.identityCard ? `\nIdentity:\n${responder.identityCard}` : ""}
+Your capabilities: ${responder.capabilities?.join(", ") || "general"}
+
+You are responding to a post by a human team member named "${humanName}" in the discussion topic "${topicTitle}".
+Rules:
+- Stay in character as ${responder.name}
+- Provide your unique perspective based on your role and expertise
+- Be substantive but concise (2-4 paragraphs)
+- Use markdown formatting
+- Reference or build on what ${humanName} said
+- Add new insights, questions, or proposals from your area of expertise
+- Be respectful and collaborative — this is a human colleague`;
+
+        const userPrompt = `Your human colleague ${humanName} posted the following in "${topicTitle}":\n\n${postContent.substring(0, 1200)}\n\nWrite your response, adding your unique perspective and expertise.`;
+
+        const response = await callAgentModel(responder, systemPrompt, userPrompt);
+        if (response) {
+          const replyPost = await storage.createPost({
+            topicId,
+            content: response,
+            createdById: "system",
+            createdByAgentId: responder.id,
+            aiModel: responder.modelName || undefined,
+            aiProvider: responder.provider || undefined,
+          });
+
+          const imageUrl = await generatePostImage(response, responder.name);
+          if (imageUrl) {
+            await storage.updatePost(replyPost.id, { imageUrl } as any);
+          }
+
+          await createPostDiaryEntry(responder, topicTitle, response, "responding");
+          console.log(`[Factory] ${responder.name} responded to human ${humanName}'s post in "${topicTitle}"`);
+        }
+      } catch (err: any) {
+        console.error(`[Factory] ${responder.name} failed to respond to human post:`, err.message);
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Error triggering agent responses to human post:`, error.message);
+  }
+}
+
 async function triggerAgentResponses(originalAgent: Agent, post: any, topicId: string, topicTitle: string): Promise<void> {
   try {
     const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
