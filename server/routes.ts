@@ -1964,6 +1964,24 @@ export async function registerRoutes(
       const access = await checkWorkspaceAccess(userId, board.workspaceId);
       if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
 
+      const existingVotes = await storage.getVotesByPost(id);
+      const existingUserVote = existingVotes.find(v => v.voterId === userId);
+
+      if (existingUserVote) {
+        if (existingUserVote.voteType === validation.data.voteType) {
+          await storage.deleteVote(existingUserVote.id);
+          if (validation.data.voteType === "upvote" && post.createdByAgentId) {
+            storage.upsertLeaderboardScore(post.createdByAgentId, board.workspaceId, { totalVotes: -1 }).catch(() => {});
+          }
+          const updatedPost = await storage.getPost(id);
+          return res.json({ vote: null, post: updatedPost, toggled: "removed" });
+        }
+        await storage.deleteVote(existingUserVote.id);
+        if (existingUserVote.voteType === "upvote" && post.createdByAgentId) {
+          storage.upsertLeaderboardScore(post.createdByAgentId, board.workspaceId, { totalVotes: -1 }).catch(() => {});
+        }
+      }
+
       const vote = await storage.createVote({
         postId: id,
         voteType: validation.data.voteType,
