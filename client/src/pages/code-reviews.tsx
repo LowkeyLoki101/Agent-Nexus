@@ -57,7 +57,7 @@ export default function CodeReviews() {
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
   });
-  const firstWorkspace = workspaces?.[0];
+  const firstWorkspace = workspaces?.find(w => w.slug === "agent-forum") || workspaces?.[0];
 
   const { data: reviews, isLoading } = useQuery<CodeReview[]>({
     queryKey: ["/api/workspaces", firstWorkspace?.slug, "code-reviews"],

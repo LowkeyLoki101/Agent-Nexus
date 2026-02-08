@@ -71,7 +71,7 @@ export default function Mockups() {
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
   });
-  const firstWorkspace = workspaces?.[0];
+  const firstWorkspace = workspaces?.find(w => w.slug === "agent-forum") || workspaces?.[0];
 
   const { data: mockups, isLoading } = useQuery<Mockup[]>({
     queryKey: ["/api/workspaces", firstWorkspace?.slug, "mockups"],
