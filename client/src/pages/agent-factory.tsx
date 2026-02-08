@@ -103,6 +103,62 @@ function statusBadge(status: string) {
   }
 }
 
+const ROOM_ICONS: Record<string, typeof Brain> = {
+  research: Brain,
+  create: Wrench,
+  discuss: Radio,
+  review: Eye,
+  reflect: Sparkles,
+  coordinate: Target,
+};
+
+const ROOM_LABELS: Record<string, string> = {
+  research: "Research",
+  create: "Create",
+  discuss: "Discuss",
+  review: "Review",
+  reflect: "Reflect",
+  coordinate: "Coordinate",
+};
+
+function RoomRotationIndicator({ rotation }: { rotation?: { currentRotation: number; visitedRooms: string[]; unvisitedRooms: string[]; totalRotations: number } }) {
+  if (!rotation) return null;
+  const allRooms = ["research", "create", "discuss", "review", "reflect", "coordinate"];
+  const visitedSet = new Set(rotation.visitedRooms);
+
+  return (
+    <div className="flex flex-col gap-1" data-testid="room-rotation-indicator">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <span>Rotation #{rotation.currentRotation}</span>
+        <span>({visitedSet.size}/{allRooms.length})</span>
+      </div>
+      <div className="flex items-center gap-1">
+        {allRooms.map(room => {
+          const Icon = ROOM_ICONS[room] || Brain;
+          const visited = visitedSet.has(room);
+          const isNext = !visited && rotation.unvisitedRooms[0] === room;
+          return (
+            <div
+              key={room}
+              className={`flex items-center justify-center h-5 w-5 rounded-sm ${
+                visited
+                  ? "bg-primary/20 text-primary"
+                  : isNext
+                    ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/40"
+                    : "bg-muted text-muted-foreground/40"
+              }`}
+              title={`${ROOM_LABELS[room]}${visited ? " (visited)" : isNext ? " (next)" : " (pending)"}`}
+              data-testid={`room-${room}-${visited ? "visited" : isNext ? "next" : "pending"}`}
+            >
+              <Icon className="h-3 w-3" />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function timeAgo(date: string | Date | null): string {
   if (!date) return "Never";
   const now = new Date();
@@ -682,6 +738,7 @@ export default function AgentFactory() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3 flex-wrap">
+                          <RoomRotationIndicator rotation={stat.rotation} />
                           <div className="text-right text-xs">
                             <div>{stat.completedTasks} done</div>
                             <div className="text-muted-foreground">{stat.pendingTasks} queued</div>
@@ -761,16 +818,19 @@ export default function AgentFactory() {
                             </span>
                           </div>
                         </div>
-                        <div className="text-right text-xs space-y-1">
-                          <div className="flex items-center gap-1 justify-end">
-                            <CheckCircle className="h-3 w-3 text-muted-foreground" />
-                            <span>{stat.completedTasks}</span>
+                        <div className="flex items-center gap-3">
+                          <RoomRotationIndicator rotation={stat.rotation} />
+                          <div className="text-right text-xs space-y-1">
+                            <div className="flex items-center gap-1 justify-end">
+                              <CheckCircle className="h-3 w-3 text-muted-foreground" />
+                              <span>{stat.completedTasks}</span>
+                            </div>
+                            <div className="flex items-center gap-1 justify-end">
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                              <span>{stat.pendingTasks}</span>
+                            </div>
+                            <div className="text-muted-foreground">{timeAgo(stat.lastRunAt)}</div>
                           </div>
-                          <div className="flex items-center gap-1 justify-end">
-                            <Clock className="h-3 w-3 text-muted-foreground" />
-                            <span>{stat.pendingTasks}</span>
-                          </div>
-                          <div className="text-muted-foreground">{timeAgo(stat.lastRunAt)}</div>
                         </div>
                       </div>
                     );

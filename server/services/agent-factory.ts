@@ -487,45 +487,63 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
   }
 }
 
-async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTask> {
-  const taskTypes: Array<"research" | "discuss" | "review" | "reflect" | "create" | "coordinate"> = ["research", "discuss", "review", "reflect", "create", "coordinate"];
+const ALL_ROOMS: Array<"research" | "discuss" | "review" | "reflect" | "create" | "coordinate"> = [
+  "research", "discuss", "review", "reflect", "create", "coordinate"
+];
 
-  const completedTasks = await storage.getTasksByAgent(agent.id, "completed");
-  const recentTypes = completedTasks.slice(0, 3).map(t => t.type);
-  const discussCount = completedTasks.filter(t => t.type === "discuss").length;
-  const totalCount = completedTasks.length;
+const ROOM_ORDER: Array<"research" | "discuss" | "review" | "reflect" | "create" | "coordinate"> = [
+  "research", "create", "discuss", "review", "reflect", "coordinate"
+];
 
-  let selectedType: typeof taskTypes[number];
+function computeRotationStatus(completedTasks: any[]): { currentRotation: number; visitedRooms: string[]; unvisitedRooms: string[]; totalRotations: number } {
+  const sorted = [...completedTasks]
+    .sort((a, b) => {
+      const aTime = a.completedAt ? new Date(a.completedAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const bTime = b.completedAt ? new Date(b.completedAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return aTime - bTime;
+    });
 
-  if (totalCount > 0 && discussCount === 0) {
-    selectedType = "discuss";
-  } else if (totalCount > 2 && discussCount / totalCount < 0.25) {
-    selectedType = "discuss";
-  } else {
-    const weights: Record<string, number> = {
-      research: 25,
-      discuss: 30,
-      create: 15,
-      review: 10,
-      reflect: 10,
-      coordinate: 10,
+  const totalCompleted = sorted.length;
+
+  if (totalCompleted === 0) {
+    return {
+      currentRotation: 1,
+      visitedRooms: [],
+      unvisitedRooms: [...ROOM_ORDER],
+      totalRotations: 0,
     };
-
-    if (recentTypes[0] && weights[recentTypes[0]]) {
-      weights[recentTypes[0]] = Math.max(5, weights[recentTypes[0]] - 15);
-    }
-
-    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
-    let roll = Math.random() * totalWeight;
-    selectedType = "discuss";
-    for (const [type, weight] of Object.entries(weights)) {
-      roll -= weight;
-      if (roll <= 0) {
-        selectedType = type as typeof selectedType;
-        break;
-      }
-    }
   }
+
+  const completedRotations = Math.floor(totalCompleted / ROOM_ORDER.length);
+  const tasksInCurrentCycle = sorted.slice(completedRotations * ROOM_ORDER.length);
+  const visitedRoomsSet = new Set(tasksInCurrentCycle.map((t: any) => t.type));
+  const visitedRooms = ROOM_ORDER.filter(r => visitedRoomsSet.has(r));
+  const unvisitedRooms = ROOM_ORDER.filter(r => !visitedRoomsSet.has(r));
+
+  return {
+    currentRotation: completedRotations + 1,
+    visitedRooms,
+    unvisitedRooms,
+    totalRotations: completedRotations,
+  };
+}
+
+async function getNextRoom(agent: Agent): Promise<typeof ALL_ROOMS[number]> {
+  const completedTasks = await storage.getTasksByAgent(agent.id, "completed");
+  const rotation = computeRotationStatus(completedTasks);
+
+  if (rotation.unvisitedRooms.length > 0) {
+    const nextRoom = rotation.unvisitedRooms[0] as typeof ALL_ROOMS[number];
+    console.log(`[Factory] Room rotation for ${agent.name}: visited ${rotation.visitedRooms.length}/${ROOM_ORDER.length} rooms this cycle (#${rotation.currentRotation}). Next room: ${nextRoom} (unvisited: ${rotation.unvisitedRooms.join(", ")})`);
+    return nextRoom;
+  }
+
+  console.log(`[Factory] ${agent.name} completed full rotation #${rotation.currentRotation}! Starting new rotation.`);
+  return ROOM_ORDER[0];
+}
+
+async function autoGenerateTask(agent: Agent, goal: AgentGoal): Promise<AgentTask> {
+  const selectedType = await getNextRoom(agent);
 
   const taskTitles: Record<string, string[]> = {
     research: [
@@ -677,24 +695,34 @@ async function selfReflectAndGenerate(agent: Agent, run: AgentRun): Promise<Agen
       coldAreas.length > 0 ? `Cold areas needing attention:\n${coldAreas.slice(0, 3).map(a => `- ${a.areaName} (${a.temperature})`).join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
 
+    const nextRoom = await getNextRoom(agent);
+    const roomDescriptions: Record<string, string> = {
+      research: "investigate, gather data, analyze trends and best practices",
+      create: "build a working tool or utility — real, executable code",
+      discuss: "post a discussion on the message boards, share insights with the team",
+      review: "write code and submit it for peer review",
+      reflect: "deep reflection on your work, patterns noticed, and personal growth",
+      coordinate: "plan and coordinate with teammates, identify dependencies and next steps",
+    };
+
     const reflectionPrompt = `You have no assigned tasks and no active goals. This is your time for self-directed work.
+
+IMPORTANT: Your next required room is **${nextRoom}** (${roomDescriptions[nextRoom] || nextRoom}). You must produce work for this room type. This is a mandatory rotation — like a school schedule, you visit every room before repeating.
 
 ${reflectionContext}
 
 Reflect on the following questions:
 1. **What have I been doing?** (Review your journal and memories)
-2. **What should I be doing?** (What's important for the team right now?)
-3. **What could I be doing?** (What opportunities exist that no one is pursuing?)
-4. **What would I need to do?** (What infrastructure or tools are missing?)
-5. **How would I do it?** (What's the concrete first step?)
+2. **What should I be doing in the ${nextRoom} room?** (What's important for the team right now?)
+3. **What could I produce in this room?** (What opportunities exist?)
+4. **How would I do it?** (What's the concrete first step?)
 
-Based on your reflection, propose ONE concrete task you will do right now. Format your response as:
+Based on your reflection, propose ONE concrete ${nextRoom} task you will do right now. Format your response as:
 
 REFLECTION:
-[Your honest self-assessment answering the 5 questions above]
+[Your honest self-assessment]
 
-TASK_TYPE: [research|discuss|create|review|reflect|coordinate]
-TASK_TITLE: [A specific, actionable title for your self-assigned task]
+TASK_TITLE: [A specific, actionable title for your ${nextRoom} task]
 TASK_DESCRIPTION: [What exactly you'll produce and why it matters]`;
 
     const reflectionOutput = await callAgentModel(agent,
@@ -713,13 +741,13 @@ TASK_DESCRIPTION: [What exactly you'll produce and why it matters]`;
       tags: ["self-reflection", "idle", "self-directed", "factory-cycle"],
     });
 
-    const typeMatch = reflectionOutput.match(/TASK_TYPE:\s*(research|discuss|create|review|reflect|coordinate)/i);
     const titleMatch = reflectionOutput.match(/TASK_TITLE:\s*(.+)/i);
     const descMatch = reflectionOutput.match(/TASK_DESCRIPTION:\s*([\s\S]*?)$/i);
 
-    const taskType = typeMatch ? typeMatch[1].toLowerCase() as any : "research";
+    const taskType = await getNextRoom(agent);
     const taskTitle = titleMatch ? titleMatch[1].trim() : `${agent.name}'s self-directed work`;
     const taskDesc = descMatch ? descMatch[1].trim() : "Self-directed task from reflection.";
+    console.log(`[Factory] ${agent.name} self-reflected, overriding to next required room: ${taskType}`);
 
     const task = await storage.createAgentTask({
       agentId: agent.id,
@@ -753,15 +781,8 @@ TASK_DESCRIPTION: [What exactly you'll produce and why it matters]`;
 
 async function respondToPheromone(agent: Agent, pheromone: any): Promise<AgentTask | null> {
   try {
-    const taskTypeMap: Record<string, string> = {
-      need: "create",
-      blocked: "research",
-      opportunity: "discuss",
-      alert: "review",
-      request: "coordinate",
-      found: "discuss",
-    };
-    const taskType = (taskTypeMap[pheromone.type] || pheromone.taskType || "research") as any;
+    const taskType = await getNextRoom(agent);
+    console.log(`[Factory] ${agent.name} responding to pheromone, routed to next required room: ${taskType}`);
 
     const task = await storage.createAgentTask({
       agentId: agent.id,
@@ -1508,18 +1529,20 @@ export async function getFactoryDashboardData() {
     const agentRuns = recentRuns.filter(r => r.agentId === agent.id);
     const agentGoals = goals.filter(g => g.agentId === agent.id);
     const agentTasks = tasks.filter(t => t.agentId === agent.id);
-    const completedTasks = agentTasks.filter(t => t.status === "completed").length;
+    const completedTasksList = agentTasks.filter(t => t.status === "completed");
     const lastRun = agentRuns[0];
+    const rotation = computeRotationStatus(completedTasksList);
 
     return {
       agent,
       totalRuns: agentRuns.length,
-      completedTasks,
+      completedTasks: completedTasksList.length,
       pendingTasks: agentTasks.filter(t => t.status === "queued").length,
       activeGoals: agentGoals.filter(g => g.status === "active").length,
       lastRunAt: lastRun?.createdAt || null,
       lastPhase: lastRun?.phase || null,
       lastStatus: lastRun?.status || null,
+      rotation,
     };
   });
 
