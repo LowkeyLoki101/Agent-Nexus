@@ -35,6 +35,7 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: true,
+      sameSite: "lax",
       maxAge: sessionTtl,
     },
   });
@@ -143,6 +144,7 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
+    console.log(`[Auth] Login initiated from hostname: ${req.hostname}`);
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
@@ -152,9 +154,22 @@ export async function setupAuth(app: Express) {
 
   app.get("/api/callback", (req, res, next) => {
     ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      successReturnToOrRedirect: "/",
-      failureRedirect: "/api/login",
+    passport.authenticate(`replitauth:${req.hostname}`, (err: any, user: any, info: any) => {
+      if (err) {
+        console.error("[Auth] OIDC callback error:", err);
+        return res.redirect("/?auth_error=callback_failed");
+      }
+      if (!user) {
+        console.error("[Auth] OIDC callback: no user returned. Info:", info);
+        return res.redirect("/?auth_error=no_user");
+      }
+      req.login(user, (loginErr) => {
+        if (loginErr) {
+          console.error("[Auth] OIDC session login error:", loginErr);
+          return res.redirect("/?auth_error=session_failed");
+        }
+        res.redirect("/");
+      });
     })(req, res, next);
   });
 
