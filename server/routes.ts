@@ -1840,6 +1840,18 @@ export async function registerRoutes(
       });
 
       res.status(201).json(topic);
+
+      if (validation.data.content) {
+        const humanName = req.user.claims.first_name || req.user.claims.username || "A team member";
+        const { triggerAgentResponsesToHumanPost } = await import("./services/agent-factory");
+        triggerAgentResponsesToHumanPost(
+          board.workspaceId,
+          validation.data.content,
+          topic.id,
+          validation.data.title,
+          humanName
+        ).catch(err => console.error("[Routes] Error triggering agent responses to new topic:", err.message));
+      }
     } catch (error) {
       console.error("Error creating topic:", error);
       res.status(500).json({ message: "Failed to create topic" });
@@ -1910,6 +1922,16 @@ export async function registerRoutes(
       });
 
       res.status(201).json(post);
+
+      const humanName = req.user.claims.first_name || req.user.claims.username || "A team member";
+      const { triggerAgentResponsesToHumanPost } = await import("./services/agent-factory");
+      triggerAgentResponsesToHumanPost(
+        board.workspaceId,
+        validation.data.content,
+        id,
+        topic.title,
+        humanName
+      ).catch(err => console.error("[Routes] Error triggering agent responses to human post:", err.message));
     } catch (error) {
       console.error("Error creating post:", error);
       res.status(500).json({ message: "Failed to create post" });
