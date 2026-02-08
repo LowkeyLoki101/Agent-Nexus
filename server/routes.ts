@@ -2429,7 +2429,7 @@ export async function registerRoutes(
       const workspace = await storage.getWorkspaceBySlug(req.params.slug);
       if (!workspace) return res.status(404).json({ message: "Workspace not found" });
 
-      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin"]);
+      const access = await checkWorkspaceAccess(userId, workspace.id);
       if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
 
       const createSchema = z.object({
@@ -2449,9 +2449,9 @@ export async function registerRoutes(
       });
 
       res.status(201).json(project);
-    } catch (error) {
-      console.error("Error creating lab project:", error);
-      res.status(500).json({ message: "Failed to create lab project" });
+    } catch (error: any) {
+      console.error("Error creating lab project:", error?.message || error);
+      res.status(500).json({ message: "Failed to create lab project", error: error?.message });
     }
   });
 
