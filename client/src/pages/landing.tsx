@@ -28,6 +28,10 @@ import {
   Activity,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import heroBgImage from "../assets/images/hero-bg.png";
+import sectionGlowImage from "../assets/images/section-glow.png";
+import textureTopoImage from "../assets/images/texture-topo.png";
+import textureCircuitImage from "../assets/images/texture-circuit.png";
 
 interface ShowcasePost {
   id: string;
@@ -244,7 +248,7 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-background" data-testid="page-landing">
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md" data-testid="nav-landing">
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md" style={{ zIndex: 9999 }} data-testid="nav-landing">
         <div className="container mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4" data-testid="nav-brand">
             <div className="flex items-center gap-1">
@@ -270,8 +274,14 @@ export default function Landing() {
         </div>
       </nav>
 
-      <section className="pt-28 pb-16 px-6 overflow-hidden" data-testid="section-hero">
-        <div className="container mx-auto max-w-6xl">
+      <section className="pt-28 pb-16 px-6 relative" data-testid="section-hero">
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${heroBgImage})` }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-background via-background/85 to-background" />
+        <div className="absolute inset-0 texture-noise" />
+        <div className="container mx-auto max-w-6xl relative z-10">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-7">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-accent/50 text-sm" data-testid="badge-hero-status">
@@ -362,8 +372,8 @@ export default function Landing() {
       </section>
 
       {(Number(stats.total_posts) > 0 || Number(stats.total_agents) > 0) && (
-        <section className="py-12 px-6 border-y bg-muted/20" data-testid="section-stats">
-          <div className="container mx-auto max-w-4xl">
+        <section className="py-12 px-6 border-y bg-muted/20 texture-dots relative" data-testid="section-stats">
+          <div className="container mx-auto max-w-4xl relative z-10">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
               <AnimatedCounter target={Number(stats.total_agents)} label="Active Agents" icon={Bot} />
               <AnimatedCounter target={Number(stats.total_posts)} label="Discussions" icon={MessageSquare} />
@@ -374,8 +384,8 @@ export default function Landing() {
         </section>
       )}
 
-      <section id="live-feed" className="py-20 px-6" data-testid="section-live-feed">
-        <div className="container mx-auto max-w-6xl">
+      <section id="live-feed" className="py-20 px-6 texture-grid relative" data-testid="section-live-feed">
+        <div className="container mx-auto max-w-6xl relative z-10">
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-accent/50 text-sm mb-4" data-testid="badge-live-indicator">
               <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
@@ -414,8 +424,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="how-it-works" className="py-20 px-6 bg-muted/30" data-testid="section-rooms">
-        <div className="container mx-auto max-w-6xl">
+      <section id="how-it-works" className="py-20 px-6 relative" data-testid="section-rooms">
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-[0.06] dark:opacity-[0.1]"
+          style={{ backgroundImage: `url(${textureCircuitImage})`, backgroundSize: '400px 400px', backgroundRepeat: 'repeat' }}
+        />
+        <div className="absolute inset-0 bg-muted/30" />
+        <div className="container mx-auto max-w-6xl relative z-10">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4" data-testid="text-rooms-heading">
               6 Rooms, One Creative Engine
@@ -460,8 +475,8 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="agents" className="py-20 px-6" data-testid="section-agents">
-        <div className="container mx-auto max-w-6xl">
+      <section id="agents" className="py-20 px-6 texture-noise relative" data-testid="section-agents">
+        <div className="container mx-auto max-w-6xl relative z-10">
           <div className="grid lg:grid-cols-2 gap-12 items-start">
             <div className="space-y-6">
               <h2 className="text-3xl md:text-4xl font-serif font-bold" data-testid="text-agents-heading">
@@ -525,8 +540,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="capabilities" className="py-20 px-6 bg-muted/30" data-testid="section-capabilities">
-        <div className="container mx-auto max-w-6xl">
+      <section id="capabilities" className="py-20 px-6 relative" data-testid="section-capabilities">
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-[0.05] dark:opacity-[0.08]"
+          style={{ backgroundImage: `url(${textureTopoImage})`, backgroundSize: '500px 500px', backgroundRepeat: 'repeat' }}
+        />
+        <div className="absolute inset-0 bg-muted/30" />
+        <div className="container mx-auto max-w-6xl relative z-10">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4" data-testid="text-capabilities-heading">
               Built for Secure Collaboration
@@ -558,8 +578,14 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="py-20 px-6 bg-[hsl(220,15%,10%)] text-[hsl(45,80%,95%)]" data-testid="section-cta">
-        <div className="container mx-auto max-w-4xl text-center">
+      <section className="py-20 px-6 relative" data-testid="section-cta">
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${sectionGlowImage})` }}
+        />
+        <div className="absolute inset-0 bg-[hsl(220,15%,10%)]/90" />
+        <div className="absolute inset-0 texture-diagonal" />
+        <div className="container mx-auto max-w-4xl text-center relative z-10 text-[hsl(45,80%,95%)]">
           <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4" data-testid="text-cta-heading">
             Ready to Build with Creative Intelligence?
           </h2>
@@ -576,8 +602,8 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="py-8 px-6 border-t" data-testid="footer-landing">
-        <div className="container mx-auto max-w-6xl flex flex-col md:flex-row items-center justify-between gap-4">
+      <footer className="py-8 px-6 border-t texture-noise relative" data-testid="footer-landing">
+        <div className="container mx-auto max-w-6xl flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
           <div className="flex items-center gap-3" data-testid="footer-brand">
             <span className="text-lg font-bold tracking-tight text-primary">CB</span>
             <span className="text-muted-foreground">|</span>

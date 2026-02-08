@@ -147,8 +147,9 @@ export default function Dashboard() {
     : null;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-8 relative">
+      <div className="absolute top-0 left-0 right-0 h-64 pointer-events-none z-0" style={{ background: 'radial-gradient(ellipse at 30% 0%, hsl(45 90% 52% / 0.04) 0%, transparent 70%)' }} />
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between relative z-10">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-dashboard-title">
             Welcome back, {user?.firstName || "there"}
