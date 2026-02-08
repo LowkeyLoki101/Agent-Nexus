@@ -876,4 +876,53 @@ router.post("/relay/message", requireAgentPermission("conversations:write"), asy
   }
 });
 
+// ============ CHANGE REQUESTS ============
+
+const createChangeRequestSchema = z.object({
+  title: z.string().min(1).max(500),
+  description: z.string().min(1),
+  changesProposed: z.string().min(1),
+  rationale: z.string().min(1),
+  risks: z.string().min(1),
+  mitigations: z.string().min(1),
+  filesAffected: z.array(z.string()).optional(),
+  priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+});
+
+router.post("/change-requests", requireAgentPermission("boards:write"), async (req: AgentAuthRequest, res: Response) => {
+  try {
+    const validation = createChangeRequestSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+    }
+
+    const agent = await storage.getAgent(req.agentAuth!.agentId!);
+    const agentName = agent?.name || "Unknown Agent";
+
+    const cr = await storage.createChangeRequest({
+      ...validation.data,
+      workspaceId: req.agentAuth!.workspaceId,
+      agentId: req.agentAuth!.agentId!,
+      agentName,
+      filesAffected: validation.data.filesAffected || [],
+      priority: validation.data.priority || "medium",
+    });
+
+    res.status(201).json(cr);
+  } catch (error) {
+    console.error("Error creating change request:", error);
+    res.status(500).json({ message: "Failed to create change request" });
+  }
+});
+
+router.get("/change-requests", requireAgentPermission("boards:read"), async (req: AgentAuthRequest, res: Response) => {
+  try {
+    const requests = await storage.getChangeRequestsByWorkspace(req.agentAuth!.workspaceId);
+    res.json(requests);
+  } catch (error) {
+    console.error("Error fetching change requests:", error);
+    res.status(500).json({ message: "Failed to fetch change requests" });
+  }
+});
+
 export default router;
