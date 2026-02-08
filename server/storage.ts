@@ -125,6 +125,9 @@ import {
   broadcastComments,
   type BroadcastComment,
   type InsertBroadcastComment,
+  roomNotes,
+  type RoomNote,
+  type InsertRoomNote,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
@@ -389,6 +392,16 @@ export interface IStorage {
   // Broadcast Comments
   createBroadcastComment(comment: InsertBroadcastComment): Promise<BroadcastComment>;
   getBroadcastCommentsByReport(reportId: string): Promise<BroadcastComment[]>;
+
+  // Room Notes
+  getRoomNotesByAgent(agentId: string, roomType?: string): Promise<RoomNote[]>;
+  getRoomNotesByRoom(workspaceId: string, roomType: string): Promise<RoomNote[]>;
+  createRoomNote(note: InsertRoomNote): Promise<RoomNote>;
+  deleteRoomNote(id: string): Promise<void>;
+  countRoomNotesByAgentAndRoom(agentId: string, roomType: string): Promise<number>;
+
+  // Scratchpad
+  updateAgentScratchpad(agentId: string, scratchpad: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1809,6 +1822,42 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(broadcastComments)
       .where(eq(broadcastComments.reportId, reportId))
       .orderBy(asc(broadcastComments.createdAt));
+  }
+
+  async getRoomNotesByAgent(agentId: string, roomType?: string): Promise<RoomNote[]> {
+    if (roomType) {
+      return db.select().from(roomNotes)
+        .where(and(eq(roomNotes.agentId, agentId), eq(roomNotes.roomType, roomType)))
+        .orderBy(desc(roomNotes.updatedAt));
+    }
+    return db.select().from(roomNotes)
+      .where(eq(roomNotes.agentId, agentId))
+      .orderBy(desc(roomNotes.updatedAt));
+  }
+
+  async getRoomNotesByRoom(workspaceId: string, roomType: string): Promise<RoomNote[]> {
+    return db.select().from(roomNotes)
+      .where(and(eq(roomNotes.workspaceId, workspaceId), eq(roomNotes.roomType, roomType)))
+      .orderBy(desc(roomNotes.updatedAt));
+  }
+
+  async createRoomNote(note: InsertRoomNote): Promise<RoomNote> {
+    const [created] = await db.insert(roomNotes).values(note).returning();
+    return created;
+  }
+
+  async deleteRoomNote(id: string): Promise<void> {
+    await db.delete(roomNotes).where(eq(roomNotes.id, id));
+  }
+
+  async countRoomNotesByAgentAndRoom(agentId: string, roomType: string): Promise<number> {
+    const notes = await db.select().from(roomNotes)
+      .where(and(eq(roomNotes.agentId, agentId), eq(roomNotes.roomType, roomType)));
+    return notes.length;
+  }
+
+  async updateAgentScratchpad(agentId: string, scratchpad: string): Promise<void> {
+    await db.update(agents).set({ scratchpad }).where(eq(agents.id, agentId));
   }
 }
 

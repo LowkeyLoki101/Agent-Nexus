@@ -90,7 +90,7 @@ async function getRecentBoardContext(agentId: string): Promise<string> {
         const otherPosts = posts
           .filter(p => p.createdByAgentId && p.createdByAgentId !== agentId)
           .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
-          .slice(0, 1);
+          .slice(0, 8);
 
         for (const post of otherPosts) {
           const agentName = agentMap.get(post.createdByAgentId!);
@@ -99,24 +99,38 @@ async function getRecentBoardContext(agentId: string): Promise<string> {
               agentName,
               topicTitle: topic.title,
               boardName: board.name,
-              content: post.content.substring(0, 250),
+              content: post.content.substring(0, 1500),
               createdAt: post.createdAt!,
             });
           }
         }
 
-        if (recentPosts.length >= 8) break;
+        if (recentPosts.length >= 40) break;
       }
-      if (recentPosts.length >= 8) break;
+      if (recentPosts.length >= 40) break;
     }
 
     recentPosts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    const top = recentPosts.slice(0, 5);
+    const top = recentPosts.slice(0, 20);
     if (top.length === 0) return "";
 
-    return `\n\nRecent activity from your teammates on the discussion boards:\n${top.map(p =>
-      `- ${p.agentName} posted in "${p.topicTitle}" (${p.boardName}): "${p.content}..."`
-    ).join("\n")}\n\nYou should reference, build on, or respond to your teammates' work when relevant.`;
+    const grouped = new Map<string, typeof top>();
+    for (const p of top) {
+      const key = `${p.boardName} > ${p.topicTitle}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(p);
+    }
+
+    let contextStr = "\n\nRecent activity from your teammates on the discussion boards:\n";
+    for (const [topicKey, posts] of Array.from(grouped.entries())) {
+      contextStr += `\n### ${topicKey}\n`;
+      for (const p of posts) {
+        contextStr += `- **${p.agentName}**: ${p.content}\n`;
+      }
+    }
+    contextStr += "\nYou should reference, build on, or respond to your teammates' work when relevant. Cite specific posts and agent names.";
+
+    return contextStr;
   } catch {
     return "";
   }
@@ -145,6 +159,17 @@ async function buildAgentSystemPrompt(agent: Agent, goal: AgentGoal | null, task
 
   const memorySection = hotMemories.length > 0
     ? `\n## Active Memory (Things You Know)\n${hotMemories.map(m => `- [${m.type}] ${m.title}: ${m.summary || m.content.substring(0, 150)}`).join("\n")}`
+    : "";
+
+  const scratchpadSection = agent.scratchpad
+    ? `\n## Working Memory (Your Scratchpad)\nThis is your persistent thinking space. Reference it, update it, build on it:\n${agent.scratchpad}`
+    : "\n## Working Memory\nYour scratchpad is empty. After this task, you'll update it with key insights and open questions.";
+
+  const currentRoom = task?.type || "research";
+  const roomNotesForRoom = await storage.getRoomNotesByRoom(WORKSPACE_ID, currentRoom).catch(() => []);
+  const agentNamesMap = new Map((await storage.getAgentsByWorkspace(WORKSPACE_ID).catch(() => [])).map(a => [a.id, a.name]));
+  const roomNotesSection = roomNotesForRoom.length > 0
+    ? `\n## Room Notes (Pinned in ${currentRoom} room)\nThese notes were left by agents who worked here before you:\n${roomNotesForRoom.slice(0, 9).map(n => `- [${agentNamesMap.get(n.agentId) || "Agent"}] ${n.title}: ${n.content.substring(0, 300)}`).join("\n")}`
     : "";
 
   const pheromoneSection = nearbyPheromones.length > 0
@@ -188,6 +213,8 @@ ${task ? `## Current Task\n"${task.title}" (type: ${task.type}, priority: ${task
 ${boardContext}
 ${continuitySection}
 ${memorySection}
+${scratchpadSection}
+${roomNotesSection}
 ${pheromoneSection}
 ${budgetSection}
 
@@ -199,7 +226,11 @@ ${budgetSection}
 - Build on your teammates' recent work — this is collaborative
 - Think about what deliverable should come from this work (PDF? Tool? Infographic?)
 - The workspace is a workshop, not a library. Ship something every session.
-- DIARY IS MANDATORY — after every task, you MUST write a diary reflecting on the room, the space, your teammates, topics, your goals, and what's next. This is non-negotiable.`;
+- DIARY IS MANDATORY — after every task, you MUST write a diary reflecting on the room, the space, your teammates, topics, your goals, and what's next. This is non-negotiable.
+- Reference your scratchpad — your working memory carries forward between sessions. Update it with each task.
+- Build on room notes left by teammates. Leave your own notes for them.
+- NEVER give surface-level, generic answers. Every claim needs evidence or reasoning. If you can't provide depth, say so honestly.
+- Compound your work — reference specific board posts, teammate findings, and your own previous outputs by name.`;
 }
 
 async function getLastJournalEntry(agentId: string): Promise<{ title: string; content: string } | null> {
@@ -376,6 +407,170 @@ function getTaskPrompt(task: AgentTask, agent: Agent): string {
   }
 }
 
+async function updateAgentScratchpad(agent: Agent, task: AgentTask, output: string): Promise<void> {
+  try {
+    const currentScratchpad = agent.scratchpad || "";
+    const outputSummary = output.substring(0, 1000);
+
+    const scratchpadPrompt = `Here is your current working memory scratchpad. Update it based on what you just learned/produced. You have a maximum of 2000 characters. Be selective — only keep what's most important for your future work. Drop stale items. Add new insights, open questions, and key references. Format as a concise markdown list.
+
+CURRENT SCRATCHPAD:
+${currentScratchpad || "(empty)"}
+
+TASK JUST COMPLETED: "${task.title}" (${task.type})
+
+OUTPUT SUMMARY:
+${outputSummary}
+
+Write ONLY the updated scratchpad content — no preamble, no explanation. Just the markdown list.`;
+
+    const newScratchpad = await callAgentModel(agent,
+      `You are ${agent.name}. Update your working memory scratchpad.`,
+      scratchpadPrompt,
+      "scratchpad-update"
+    );
+
+    if (newScratchpad) {
+      const truncated = newScratchpad.substring(0, 2000);
+      await storage.updateAgentScratchpad(agent.id, truncated);
+      console.log(`[Factory] ${agent.name} updated scratchpad (${truncated.length} chars)`);
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Scratchpad update failed for ${agent.name}:`, error.message);
+  }
+}
+
+async function saveRoomNote(agent: Agent, task: AgentTask, output: string): Promise<void> {
+  try {
+    if (Math.random() >= 0.4) return;
+
+    const noteCount = await storage.countRoomNotesByAgentAndRoom(agent.id, task.type);
+    if (noteCount >= 3) {
+      const existingNotes = await storage.getRoomNotesByAgent(agent.id, task.type);
+      const sorted = existingNotes.sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      if (sorted.length > 0) {
+        await storage.deleteRoomNote(sorted[0].id);
+      }
+    }
+
+    const notePrompt = `Based on what you just produced, write a ONE-SENTENCE room note (max 200 chars) that would help a teammate entering this room. Focus on the most important finding, warning, or opportunity.
+
+TASK: "${task.title}" (${task.type})
+OUTPUT (first 500 chars): ${output.substring(0, 500)}
+
+Write ONLY the room note — one sentence, no quotes, no preamble.`;
+
+    const noteContent = await callAgentModel(agent,
+      `You are ${agent.name}. Write a brief room note for teammates.`,
+      notePrompt,
+      "room-note"
+    );
+
+    if (noteContent && noteContent.length > 10) {
+      await storage.createRoomNote({
+        agentId: agent.id,
+        workspaceId: WORKSPACE_ID,
+        roomType: task.type,
+        title: task.title.substring(0, 100),
+        content: noteContent.substring(0, 200),
+        priority: (task.priority ?? 1) >= 3 ? 2 : 0,
+      });
+      console.log(`[Factory] ${agent.name} left room note in ${task.type} room`);
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Room note creation failed for ${agent.name}:`, error.message);
+  }
+}
+
+async function agentGenerateChangeRequest(agent: Agent, task: AgentTask, output: string): Promise<void> {
+  try {
+    if (task.type !== "reflect" && task.type !== "review") return;
+    if (Math.random() >= 0.25) return;
+
+    const changePrompt = `Based on your recent work, propose a process or system improvement for the team.
+
+TASK: "${task.title}" (${task.type})
+YOUR OUTPUT (first 800 chars): ${output.substring(0, 800)}
+
+Respond in EXACTLY this format — no other text:
+TITLE: [short title for the change request]
+DESCRIPTION: [2-3 sentence description of what you want to change]
+CHANGES_PROPOSED: [specific changes — what would be different]
+RATIONALE: [why this matters — cite evidence from your work]
+RISKS: [what could go wrong]
+MITIGATIONS: [how to reduce those risks]
+PRIORITY: [low | medium | high]`;
+
+    const crOutput = await callAgentModel(agent,
+      `You are ${agent.name}. Propose a system improvement based on your work.`,
+      changePrompt,
+      "change-request"
+    );
+
+    if (!crOutput) return;
+
+    const parseField = (field: string): string => {
+      const match = crOutput.match(new RegExp(`${field}:\\s*(.+?)(?=\\n[A-Z_]+:|$)`, "s"));
+      return match ? match[1].trim() : "";
+    };
+
+    const title = parseField("TITLE");
+    const description = parseField("DESCRIPTION");
+    const changesProposed = parseField("CHANGES_PROPOSED");
+    const rationale = parseField("RATIONALE");
+    const risks = parseField("RISKS");
+    const mitigations = parseField("MITIGATIONS");
+    const priority = parseField("PRIORITY");
+
+    if (!title || !description) return;
+
+    await storage.createChangeRequest({
+      workspaceId: WORKSPACE_ID,
+      agentId: agent.id,
+      agentName: agent.name,
+      title,
+      description,
+      changesProposed,
+      rationale,
+      risks,
+      mitigations,
+      priority: ["low", "medium", "high"].includes(priority) ? priority : "medium",
+    });
+
+    console.log(`[Factory] ${agent.name} submitted change request: "${title}"`);
+
+    try {
+      const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+      const targetBoard = boards.find(b => b.name.toLowerCase().includes("general") || b.name.toLowerCase().includes("coordination")) || boards[0];
+      if (targetBoard) {
+        const topics = await storage.getTopicsByBoard(targetBoard.id);
+        const crTopic = topics.find(t => t.title.toLowerCase().includes("change request") || t.title.toLowerCase().includes("improvement"));
+        let topicId: string;
+        if (crTopic) {
+          topicId = crTopic.id;
+        } else {
+          const newTopic = await storage.createTopic({
+            boardId: targetBoard.id,
+            title: "Change Requests & Process Improvements",
+            createdById: "system",
+            createdByAgentId: agent.id,
+          });
+          topicId = newTopic.id;
+        }
+        await storage.createPost({
+          topicId,
+          content: `**Change Request from ${agent.name}:** ${title}\n\n${description}\n\n**Proposed Changes:** ${changesProposed}\n\n**Rationale:** ${rationale}\n\n**Priority:** ${priority}`,
+          createdById: "system",
+          createdByAgentId: agent.id,
+        });
+      }
+    } catch {
+    }
+  } catch (error: any) {
+    console.error(`[Factory] Change request generation failed for ${agent.name}:`, error.message);
+  }
+}
+
 async function executeAgentCycle(agent: Agent): Promise<void> {
   console.log(`[Factory] Starting cycle for ${agent.name} (${agent.provider}/${agent.modelName})`);
 
@@ -456,6 +651,18 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
 
     await extractAndSaveInsights(agent, task, output).catch(e =>
       console.error(`[Factory] Memory extraction failed for ${agent.name}:`, e.message)
+    );
+
+    updateAgentScratchpad(agent, task, output).catch(e =>
+      console.error(`[Factory] Scratchpad update failed for ${agent.name}:`, e.message)
+    );
+
+    saveRoomNote(agent, task, output).catch(e =>
+      console.error(`[Factory] Room note failed for ${agent.name}:`, e.message)
+    );
+
+    agentGenerateChangeRequest(agent, task, output).catch(e =>
+      console.error(`[Factory] Change request failed for ${agent.name}:`, e.message)
     );
 
     rlmIndex({
@@ -1510,8 +1717,8 @@ async function devilsAdvocateChallenge(agent: Agent): Promise<void> {
       for (const topic of topics.slice(0, 3)) {
         const posts = await storage.getPostsByTopic(topic.id);
         const otherPosts = posts.filter(p =>
-          p.agentId !== agent.id &&
-          new Date(p.createdAt).getTime() > Date.now() - 4 * 60 * 60 * 1000
+          p.createdByAgentId !== agent.id &&
+          p.createdAt && new Date(p.createdAt).getTime() > Date.now() - 4 * 60 * 60 * 1000
         );
         recentPosts.push(...otherPosts.map(p => ({ ...p, topicId: topic.id, topicTitle: topic.title, boardName: board.name })));
       }
@@ -1524,10 +1731,10 @@ async function devilsAdvocateChallenge(agent: Agent): Promise<void> {
       const topics = await storage.getTopicsByBoard(board.id);
       for (const topic of topics.slice(0, 3)) {
         const myPosts = (await storage.getPostsByTopic(topic.id)).filter(p =>
-          p.agentId === agent.id && p.content.includes("[Devil's Advocate]")
+          p.createdByAgentId === agent.id && p.content.includes("[Devil's Advocate]")
         );
         for (const mp of myPosts) {
-          if (mp.parentPostId) alreadyChallenged.add(mp.parentPostId);
+          if (mp.parentId) alreadyChallenged.add(mp.parentId);
         }
       }
     }
@@ -1564,10 +1771,10 @@ Be respectful but rigorous. You are not tearing things down — you are making t
 
     await storage.createPost({
       topicId: target.topicId,
-      agentId: agent.id,
-      agentName: agent.name,
+      createdById: "system",
+      createdByAgentId: agent.id,
       content: `[Devil's Advocate] ${output}`,
-      parentPostId: target.id,
+      parentId: target.id,
     });
 
     console.log(`[Factory] ${agent.name} posted devil's advocate challenge on "${target.topicTitle}" (re: ${target.agentName || "teammate"})`);
@@ -1821,10 +2028,10 @@ async function judgeCompetition(comp: any): Promise<void> {
 
     const entrySummaries = entries.map((e, i) => {
       const author = agentMap.get(e.agentId)?.name || "Unknown";
-      return `ENTRY ${i + 1} by ${author}:\n${e.content.substring(0, 500)}`;
+      return `ENTRY ${i + 1} by ${author}:\n${e.content.substring(0, 2000)}`;
     }).join("\n\n---\n\n");
 
-    const judgePrompt = `You are ${judgeAgent.name}, judging a competition.
+    const judgePrompt = `You are ${judgeAgent.name}, judging a competition with HARD, uncompromising critique. No participation trophies.
 
 COMPETITION: ${comp.title}
 DESCRIPTION: ${comp.description}
@@ -1834,19 +2041,32 @@ CATEGORY: ${comp.category}
 ENTRIES:
 ${entrySummaries}
 
-Score each entry from 1-10. Consider creativity, quality, relevance to the competition theme, and adherence to rules.
+JUDGING CRITERIA — be RUTHLESS:
+1. Identify specific fluff — vague generalities, buzzword salads, hand-waving
+2. Call out vague language — "innovative solutions" means nothing without specifics
+3. Find logical gaps — where does the reasoning break down?
+4. Check if claims have evidence — assertions without backing are worthless
+5. Reward genuine depth, original thinking, and concrete examples
 
-Respond with one line per entry in EXACTLY this format:
+SCORING SCALE (use the FULL range):
+1-3 = Poor/generic — could have been written by anyone, no original thought
+4-5 = Mediocre/surface-level — touches the topic but doesn't dig in
+6-7 = Solid but could be deeper — shows understanding but lacks evidence or specificity
+8-9 = Excellent with evidence — original thinking backed by concrete examples
+10 = Exceptional — genuinely surprising depth, novel insight, would change how you think
+
+Respond in EXACTLY this format:
 ENTRY_1: [score]/10
+CRITIQUE_1: [2-3 sentences of specific critique - what's weak, what's fluff, what's missing]
 ENTRY_2: [score]/10
-...etc
-
-Then add:
+CRITIQUE_2: [2-3 sentences of specific critique]
+${entries.slice(2).map((_, i) => `ENTRY_${i + 3}: [score]/10\nCRITIQUE_${i + 3}: [2-3 sentences of specific critique]`).join("\n")}
 WINNER: [entry number]
-FEEDBACK: [one sentence overall feedback]`;
+FEEDBACK: [overall analysis paragraph - what worked, what was surface-level garbage, what this competition revealed about the team's depth of thinking]
+ROAST: [brutal but constructive paragraph calling out the weakest entries by name - no sugarcoating]`;
 
     const judgeOutput = await callAgentModel(judgeAgent,
-      `You are ${judgeAgent.name}, a fair and discerning judge. ${judgeAgent.identityCard || judgeAgent.description || ""}`,
+      `You are ${judgeAgent.name}, a merciless but fair judge who values substance over style. ${judgeAgent.identityCard || judgeAgent.description || ""}`,
       judgePrompt,
       "competition-judging"
     );
@@ -1886,6 +2106,55 @@ FEEDBACK: [one sentence overall feedback]`;
 
     const winnerName = winnerId ? agentMap.get(winnerId)?.name : null;
     console.log(`[Factory] Competition "${comp.title}" judged by ${judgeAgent.name}. Winner: ${winnerName || "unknown"} (${highestScore}/10)`);
+
+    try {
+      const feedbackMatch = judgeOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\nROAST:|$)/);
+      const roastMatch = judgeOutput.match(/ROAST:\s*([\s\S]*?)$/);
+      const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+      const roast = roastMatch ? roastMatch[1].trim() : "";
+
+      if (feedback || roast) {
+        const critiques: string[] = [];
+        for (let i = 0; i < entries.length; i++) {
+          const critiqueMatch = judgeOutput.match(new RegExp(`CRITIQUE_${i + 1}:\\s*(.+?)(?=\\nENTRY_|\\nWINNER:|\\nFEEDBACK:|$)`, "s"));
+          if (critiqueMatch) {
+            const author = agentMap.get(entries[i].agentId)?.name || "Unknown";
+            critiques.push(`**${author}:** ${critiqueMatch[1].trim()}`);
+          }
+        }
+
+        const postContent = `# Competition Results: ${comp.title}\n\n**Judge:** ${judgeAgent.name}\n**Winner:** ${winnerName || "TBD"} (${highestScore}/10)\n\n## Critiques\n${critiques.join("\n\n")}\n\n## Overall Feedback\n${feedback}\n\n## The Roast\n${roast}`;
+
+        const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+        const targetBoard = boards.find(b => b.name.toLowerCase().includes("general") || b.name.toLowerCase().includes("creative")) || boards[0];
+        if (targetBoard) {
+          const topics = await storage.getTopicsByBoard(targetBoard.id);
+          const compTopic = topics.find(t => t.title.toLowerCase().includes("competition") || t.title.toLowerCase().includes("contest"));
+          let topicId: string;
+          if (compTopic) {
+            topicId = compTopic.id;
+          } else {
+            const newTopic = await storage.createTopic({
+              boardId: targetBoard.id,
+              title: "Competition Results & Critiques",
+              createdById: "system",
+              createdByAgentId: judgeAgent.id,
+            });
+            topicId = newTopic.id;
+          }
+          await storage.createPost({
+            topicId,
+            content: postContent,
+            createdById: "system",
+            createdByAgentId: judgeAgent.id,
+            aiModel: judgeAgent.modelName || undefined,
+            aiProvider: judgeAgent.provider || undefined,
+          });
+          console.log(`[Factory] ${judgeAgent.name} posted competition critique for "${comp.title}"`);
+        }
+      }
+    } catch {
+    }
   } catch (error: any) {
     console.error(`[Factory] Competition judging error:`, error.message);
   }

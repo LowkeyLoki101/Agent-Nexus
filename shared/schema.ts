@@ -102,6 +102,7 @@ export const agents = pgTable("agents", {
   roleMetaphor: text("role_metaphor"),
   strengths: text("strengths").array(),
   limitations: text("limitations").array(),
+  scratchpad: text("scratchpad"),
   createdById: varchar("created_by_id").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1492,3 +1493,24 @@ export const insertChangeRequestSchema = createInsertSchema(changeRequests).omit
 
 export type ChangeRequest = typeof changeRequests.$inferSelect;
 export type InsertChangeRequest = z.infer<typeof insertChangeRequestSchema>;
+
+export const roomNotes = pgTable("room_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  roomType: varchar("room_type", { length: 50 }).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").notNull(),
+  priority: integer("priority").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertRoomNoteSchema = createInsertSchema(roomNotes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type RoomNote = typeof roomNotes.$inferSelect;
+export type InsertRoomNote = z.infer<typeof insertRoomNoteSchema>;
