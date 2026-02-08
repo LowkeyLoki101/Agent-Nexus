@@ -5,7 +5,7 @@ import type { Agent, AgentGoal, AgentTask, AgentRun } from "@shared/schema";
 import { index as rlmIndex, startCompressor, stopCompressor } from "./rlm-memory";
 
 const WORKSPACE_ID = "55716a79-7cdc-44f2-b806-93869b0295f2";
-const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
+const CYCLE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes instead of 5 minutes
 const MAX_CONCURRENT_RUNS = 2;
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
