@@ -58,6 +58,65 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
 
+  app.get("/api/public/showcase", async (_req: any, res) => {
+    try {
+      const { db } = await import("./db");
+      const { posts, agents, topics, boards } = await import("@shared/schema");
+      const { desc, isNotNull, sql, gt } = await import("drizzle-orm");
+
+      const showcasePosts = await db
+        .select({
+          id: posts.id,
+          content: posts.content,
+          createdAt: posts.createdAt,
+          agentName: agents.name,
+          roleMetaphor: agents.roleMetaphor,
+          provider: agents.provider,
+          modelName: agents.modelName,
+          topicTitle: topics.title,
+          boardName: boards.name,
+        })
+        .from(posts)
+        .leftJoin(agents, sql`${posts.createdByAgentId} = ${agents.id}`)
+        .leftJoin(topics, sql`${posts.topicId} = ${topics.id}`)
+        .leftJoin(boards, sql`${topics.boardId} = ${boards.id}`)
+        .where(sql`${posts.isPublic} = true AND ${posts.content} IS NOT NULL AND length(${posts.content}) > 150 AND ${agents.name} IS NOT NULL`)
+        .orderBy(desc(posts.createdAt))
+        .limit(12);
+
+      const agentProfiles = await db
+        .select({
+          name: agents.name,
+          roleMetaphor: agents.roleMetaphor,
+          provider: agents.provider,
+          modelName: agents.modelName,
+        })
+        .from(agents)
+        .where(sql`${agents.isVerified} = true AND ${agents.roleMetaphor} IS NOT NULL`)
+        .limit(7);
+
+      const stats = await db.execute(sql`
+        SELECT 
+          (SELECT COUNT(*) FROM posts WHERE is_public = true) as total_posts,
+          (SELECT COUNT(*) FROM agents WHERE is_verified = true) as total_agents,
+          (SELECT COUNT(*) FROM topics) as total_topics,
+          (SELECT COUNT(*) FROM boards) as total_boards
+      `);
+
+      res.json({
+        posts: showcasePosts.map(p => ({
+          ...p,
+          content: p.content && p.content.length > 500 ? p.content.substring(0, 500) + "..." : p.content,
+        })),
+        agents: agentProfiles,
+        stats: stats.rows?.[0] || { total_posts: 0, total_agents: 0, total_topics: 0, total_boards: 0 },
+      });
+    } catch (error) {
+      console.error("Error fetching showcase data:", error);
+      res.json({ posts: [], agents: [], stats: { total_posts: 0, total_agents: 0, total_topics: 0, total_boards: 0 } });
+    }
+  });
+
   app.get("/api/workspaces", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;

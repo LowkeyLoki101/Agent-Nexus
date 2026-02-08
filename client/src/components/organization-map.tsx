@@ -356,7 +356,7 @@ export default function OrganizationMap() {
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold">Organization Map</h3>
-              {orgData.factory.isRunning && (
+              {orgData.factory?.isRunning && (
                 <Badge variant="secondary" className="text-xs">
                   <Zap className="h-3 w-3 mr-1" />
                   Active
