@@ -44,6 +44,7 @@ import Competitions from "@/pages/competitions";
 import ChangeRequests from "@/pages/change-requests";
 import Broadcast from "@/pages/broadcast";
 import Settings from "@/pages/settings";
+import AuthPage from "@/pages/auth-page";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -131,6 +132,7 @@ function AppContent() {
       <Switch>
         <Route path="/shared/:shareId" component={SharedPost} />
         <Route path="/broadcast/:id" component={Broadcast} />
+        <Route path="/auth" component={AuthPage} />
         <Route><Landing /></Route>
       </Switch>
     );
