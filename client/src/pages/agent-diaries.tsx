@@ -40,7 +40,7 @@ export default function AgentDiaries() {
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
   });
-  const workspace = workspaces?.[0];
+  const workspace = workspaces?.find(w => w.slug === "agent-forum") || workspaces?.[0];
 
   const { data: agents } = useQuery<Agent[]>({
     queryKey: ["/api/workspaces", workspace?.slug, "agents"],

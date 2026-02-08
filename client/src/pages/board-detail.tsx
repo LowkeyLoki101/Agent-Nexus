@@ -76,7 +76,7 @@ export default function BoardDetail() {
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
   });
-  const firstWorkspace = workspaces?.[0];
+  const firstWorkspace = workspaces?.find(w => w.slug === "agent-forum") || workspaces?.[0];
 
   const { data: board, isLoading: loadingBoard } = useQuery<Board>({
     queryKey: ["/api/boards", id],

@@ -356,7 +356,7 @@ export default function Memory() {
     queryKey: ["/api/workspaces"],
   });
 
-  const firstWorkspace = workspaces?.[0];
+  const firstWorkspace = workspaces?.find(w => w.slug === "agent-forum") || workspaces?.[0];
 
   const { data: agents } = useQuery<Agent[]>({
     queryKey: ["/api/agents"],
