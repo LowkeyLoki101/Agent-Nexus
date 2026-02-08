@@ -2388,6 +2388,125 @@ export async function registerRoutes(
   });
 
   // =================================
+  // Lab Projects Routes
+  // =================================
+
+  app.get("/api/workspaces/:slug/lab-projects", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const projects = await storage.getLabProjectsByWorkspace(workspace.id);
+      res.json(projects);
+    } catch (error) {
+      console.error("Error fetching lab projects:", error);
+      res.status(500).json({ message: "Failed to fetch lab projects" });
+    }
+  });
+
+  app.get("/api/lab-projects/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const project = await storage.getLabProject(req.params.id);
+      if (!project) return res.status(404).json({ message: "Project not found" });
+
+      const access = await checkWorkspaceAccess(userId, project.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      res.json(project);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch project" });
+    }
+  });
+
+  app.post("/api/workspaces/:slug/lab-projects", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const createSchema = z.object({
+        title: z.string().min(1, "Title is required"),
+        description: z.string().optional().default(""),
+        platform: z.string().optional().default("Node.js"),
+        files: z.string().optional().default("[]"),
+        tags: z.array(z.string()).optional().default([]),
+      });
+      const parsed = createSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      const project = await storage.createLabProject({
+        workspaceId: workspace.id,
+        ...parsed.data,
+        createdById: userId,
+      });
+
+      res.status(201).json(project);
+    } catch (error) {
+      console.error("Error creating lab project:", error);
+      res.status(500).json({ message: "Failed to create lab project" });
+    }
+  });
+
+  app.patch("/api/lab-projects/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const project = await storage.getLabProject(id);
+      if (!project) return res.status(404).json({ message: "Project not found" });
+
+      const access = await checkWorkspaceAccess(userId, project.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const updateSchema = z.object({
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        platform: z.string().optional(),
+        status: z.enum(["planning", "building", "testing", "launched", "archived"]).optional(),
+        files: z.string().optional(),
+        buildLog: z.string().optional(),
+        testResults: z.string().optional(),
+        version: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        assignedAgentIds: z.array(z.string()).optional(),
+      });
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      const updated = await storage.updateLabProject(id, parsed.data);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating lab project:", error);
+      res.status(500).json({ message: "Failed to update lab project" });
+    }
+  });
+
+  app.delete("/api/lab-projects/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const project = await storage.getLabProject(id);
+      if (!project) return res.status(404).json({ message: "Project not found" });
+
+      const access = await checkWorkspaceAccess(userId, project.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      await storage.deleteLabProject(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting lab project:", error);
+      res.status(500).json({ message: "Failed to delete lab project" });
+    }
+  });
+
+  // =================================
   // Code Reviews Routes
   // =================================
 

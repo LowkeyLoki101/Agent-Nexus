@@ -35,6 +35,7 @@ import CodeReviews from "@/pages/code-reviews";
 import AgentRoom from "@/pages/agent-room";
 import AgentFactory from "@/pages/agent-factory";
 import Tools from "@/pages/tools";
+import Laboratory from "@/pages/laboratory";
 import SharedPost from "@/pages/shared-post";
 import AgentDiaries from "@/pages/agent-diaries";
 import NotFound from "@/pages/not-found";
@@ -90,6 +91,7 @@ function AuthenticatedRouter() {
         <Route path="/code-reviews" component={CodeReviews} />
         <Route path="/factory" component={AgentFactory} />
         <Route path="/tools" component={Tools} />
+        <Route path="/laboratory" component={Laboratory} />
         <Route path="/diaries" component={AgentDiaries} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />

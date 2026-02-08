@@ -13,6 +13,7 @@ import {
   memoryChunks,
   boards,
   topics,
+  labProjects,
   posts,
   votes,
   attachments,
@@ -74,6 +75,8 @@ import {
   type InsertMockup,
   type AgentTool,
   type InsertAgentTool,
+  type LabProject,
+  type InsertLabProject,
   type ExternalCache,
   type InsertExternalCache,
   type AgentRoom,
@@ -233,6 +236,13 @@ export interface IStorage {
   createAgentTool(tool: InsertAgentTool): Promise<AgentTool>;
   updateAgentTool(id: string, updates: Partial<InsertAgentTool>): Promise<AgentTool | undefined>;
   deleteAgentTool(id: string): Promise<void>;
+
+  // Lab Projects
+  getLabProject(id: string): Promise<LabProject | undefined>;
+  getLabProjectsByWorkspace(workspaceId: string): Promise<LabProject[]>;
+  createLabProject(project: InsertLabProject): Promise<LabProject>;
+  updateLabProject(id: string, updates: Partial<InsertLabProject>): Promise<LabProject | undefined>;
+  deleteLabProject(id: string): Promise<void>;
 
   // External Cache
   getExternalCache(id: string): Promise<ExternalCache | undefined>;
@@ -1120,6 +1130,30 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAgentTool(id: string): Promise<void> {
     await db.delete(agentTools).where(eq(agentTools.id, id));
+  }
+
+  // Lab Projects
+  async getLabProject(id: string): Promise<LabProject | undefined> {
+    const [project] = await db.select().from(labProjects).where(eq(labProjects.id, id));
+    return project;
+  }
+
+  async getLabProjectsByWorkspace(workspaceId: string): Promise<LabProject[]> {
+    return db.select().from(labProjects).where(eq(labProjects.workspaceId, workspaceId)).orderBy(desc(labProjects.createdAt));
+  }
+
+  async createLabProject(project: InsertLabProject): Promise<LabProject> {
+    const [created] = await db.insert(labProjects).values(project).returning();
+    return created;
+  }
+
+  async updateLabProject(id: string, updates: Partial<InsertLabProject>): Promise<LabProject | undefined> {
+    const [updated] = await db.update(labProjects).set({ ...updates, updatedAt: new Date() }).where(eq(labProjects.id, id)).returning();
+    return updated;
+  }
+
+  async deleteLabProject(id: string): Promise<void> {
+    await db.delete(labProjects).where(eq(labProjects.id, id));
   }
 
   // External Cache
