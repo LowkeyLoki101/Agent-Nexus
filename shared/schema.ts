@@ -26,6 +26,7 @@ export const voteTypeEnum = pgEnum("vote_type", ["upvote", "downvote"]);
 export const reviewStatusEnum = pgEnum("review_status", ["pending", "approved", "rejected", "needs_revision"]);
 export const mockupStatusEnum = pgEnum("mockup_status", ["draft", "published", "archived"]);
 export const toolStatusEnum = pgEnum("tool_status", ["draft", "tested", "approved", "failed"]);
+export const labProjectStatusEnum = pgEnum("lab_project_status", ["planning", "building", "testing", "launched", "archived"]);
 
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
@@ -673,6 +674,36 @@ export const agentToolRelations = relations(agentTools, ({ one }) => ({
   }),
 }));
 
+export const labProjects = pgTable("lab_projects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  platform: text("platform").notNull().default("Node.js"),
+  status: labProjectStatusEnum("status").notNull().default("planning"),
+  files: text("files").notNull().default("[]"),
+  buildLog: text("build_log"),
+  testResults: text("test_results"),
+  version: text("version").default("0.1.0"),
+  tags: text("tags").array(),
+  assignedAgentIds: text("assigned_agent_ids").array(),
+  createdById: varchar("created_by_id").notNull(),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const labProjectRelations = relations(labProjects, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [labProjects.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdByAgent: one(agents, {
+    fields: [labProjects.createdByAgentId],
+    references: [agents.id],
+  }),
+}));
+
 // External integrations cache (GitHub, YouTube transcripts, web research)
 export const externalCache = pgTable("external_cache", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -830,6 +861,12 @@ export const insertMockupSchema = createInsertSchema(mockups).omit({
 });
 
 export const insertAgentToolSchema = createInsertSchema(agentTools).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertLabProjectSchema = createInsertSchema(labProjects).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -1150,6 +1187,8 @@ export type Mockup = typeof mockups.$inferSelect;
 export type InsertMockup = z.infer<typeof insertMockupSchema>;
 export type AgentTool = typeof agentTools.$inferSelect;
 export type InsertAgentTool = z.infer<typeof insertAgentToolSchema>;
+export type LabProject = typeof labProjects.$inferSelect;
+export type InsertLabProject = z.infer<typeof insertLabProjectSchema>;
 export type AgentRoom = typeof agentRooms.$inferSelect;
 export type InsertAgentRoom = z.infer<typeof insertAgentRoomSchema>;
 export type DiaryEntry = typeof diaryEntries.$inferSelect;

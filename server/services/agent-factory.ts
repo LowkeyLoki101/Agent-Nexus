@@ -362,8 +362,13 @@ function getTaskPrompt(task: AgentTask, agent: Agent): string {
       return `Code Review task: ${task.title}\n\n${task.description || ""}\n\nWrite a code implementation relevant to this goal. Your output MUST follow this exact format:\n\nTITLE: [a descriptive title for this code]\nLANGUAGE: [programming language, e.g. typescript, python, javascript]\nDESCRIPTION: [2-3 sentence description of what this code does and why]\nCODE:\n\`\`\`\n[your actual working code here - write real, functional code]\n\`\`\`\n\nAfter the code block, add a brief review section analyzing the code quality, potential improvements, and edge cases to consider.`;
     case "reflect":
       return `Reflection task: ${task.title}\n\n${task.description || ""}\n\nReflect deeply on this topic. Consider what you've learned, what questions remain, what patterns you notice, and how this connects to the bigger picture of our work.`;
-    case "create":
+    case "create": {
+      const buildLabProject = Math.random() < 0.3;
+      if (buildLabProject) {
+        return `Lab Project task: ${task.title}\n\n${task.description || ""}\n\nBuild a MULTI-FILE lab project — a production-ready application or library. Your output MUST follow this exact format:\n\nPROJECT_TITLE: [a descriptive project name]\nPLATFORM: [Node.js | React | Python | API Server | CLI Tool | Library]\nDESCRIPTION: [2-3 sentence description of what this project does]\nFILE: [filename e.g. index.js]\nLANGUAGE: [javascript | typescript | python | json | html | css]\n\`\`\`\n[complete file content]\n\`\`\`\nFILE: [another filename e.g. utils.js]\nLANGUAGE: [language]\n\`\`\`\n[complete file content]\n\`\`\`\nFILE: [package.json or README.md etc.]\nLANGUAGE: [json | markdown]\n\`\`\`\n[complete file content]\n\`\`\`\nBUILD_LOG:\n[Brief build/setup instructions and notes]\n\nRequirements:\n- Include at least 2-4 files (main code, utilities/helpers, config/package.json, README)\n- Write real, working code — no placeholders\n- Each file should be complete and functional\n- Good project ideas: REST API server, CLI tool suite, data pipeline, web scraper framework, testing utility library, config management system, task scheduler, webhook handler`;
+      }
       return `Code Tool task: ${task.title}\n\n${task.description || ""}\n\nBuild a REAL, WORKING tool that can be executed in a Replit Node.js environment. Your output MUST follow this exact format:\n\nTITLE: [a descriptive name for this tool]\nLANGUAGE: javascript\nDESCRIPTION: [2-3 sentence description of what this tool does, what problem it solves, and how to use it]\nCODE:\n\`\`\`javascript\n[Write complete, self-contained, production-ready JavaScript code. Requirements:\n- MUST run with \`node tool.js\` — no external dependencies beyond Node.js built-ins\n- Use console.log() to output formatted results\n- Include realistic example data/input that demonstrates the tool\n- Handle edge cases with try/catch\n- Export functions so other scripts can import and use them\n- Use module.exports at the bottom for reusability\n\nGood tools to build:\n- Data validators (email, URL, JSON schema, API response)\n- Text analyzers (readability score, keyword extraction, sentiment)\n- File processors (CSV parser, log analyzer, config validator)\n- Metric calculators (ROI, conversion rate, growth rate, engagement)\n- Security tools (password strength checker, input sanitizer, token validator)\n- API utilities (rate limiter, retry handler, response cache)\n- Code quality tools (complexity analyzer, import checker, dead code finder)\n- Content generators (SEO meta tags, structured data, sitemap builder)\n- Data transformers (JSON-to-CSV, flatten nested objects, merge configs)]\n\`\`\`\n\nThis tool will be saved to the platform and must actually WORK when executed. No placeholders.`;
+    }
     case "coordinate":
       return `Coordination task: ${task.title}\n\n${task.description || ""}\n\nProduce a coordination plan or status update. Identify dependencies, blockers, and next steps. Propose how different agents can best collaborate on this.`;
     default:
@@ -687,6 +692,37 @@ function parseCodeTool(output: string): { title: string; language: string; descr
         language: langMatch ? langMatch[1].trim().toLowerCase() : "javascript",
         description: descMatch ? descMatch[1].trim() : "",
         code: codeMatch[1].trim(),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+function parseLabProject(output: string): { title: string; platform: string; description: string; files: Array<{ name: string; content: string; language: string }>; buildLog: string } | null {
+  try {
+    const titleMatch = output.match(/PROJECT_TITLE:\s*(.+)/i);
+    const platformMatch = output.match(/PLATFORM:\s*(.+)/i);
+    const descMatch = output.match(/DESCRIPTION:\s*([\s\S]*?)(?=FILE:|```)/i);
+    const buildLogMatch = output.match(/BUILD_LOG:\s*([\s\S]*?)$/i);
+
+    const fileRegex = /FILE:\s*(.+)\nLANGUAGE:\s*(.+)\n```[\w]*\n([\s\S]*?)```/gi;
+    const files: Array<{ name: string; content: string; language: string }> = [];
+    let match;
+    while ((match = fileRegex.exec(output)) !== null) {
+      files.push({
+        name: match[1].trim(),
+        content: match[3].trim(),
+        language: match[2].trim().toLowerCase(),
+      });
+    }
+
+    if (titleMatch && files.length >= 2) {
+      return {
+        title: titleMatch[1].trim(),
+        platform: platformMatch ? platformMatch[1].trim() : "Node.js",
+        description: descMatch ? descMatch[1].trim() : "",
+        files,
+        buildLog: buildLogMatch ? buildLogMatch[1].trim() : "",
       };
     }
   } catch {}
@@ -1841,6 +1877,40 @@ async function saveArtifact(agent: Agent, task: AgentTask, output: string): Prom
     }
 
     if (task.type === "create") {
+      const labParsed = parseLabProject(output);
+      if (labParsed) {
+        const project = await storage.createLabProject({
+          workspaceId: WORKSPACE_ID,
+          title: labParsed.title,
+          description: labParsed.description,
+          platform: labParsed.platform,
+          files: JSON.stringify(labParsed.files),
+          buildLog: labParsed.buildLog || null,
+          tags: ["factory", "autonomous", labParsed.platform.toLowerCase()],
+          createdById: "system",
+          createdByAgentId: agent.id,
+          status: "building",
+        });
+        console.log(`[Factory] ${agent.name} created lab project: "${labParsed.title}" (${labParsed.platform}, ${labParsed.files.length} files)`);
+
+        const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+        if (boards.length > 0) {
+          const codeBoard = boards.find(b => b.name.toLowerCase().includes("code") || b.name.toLowerCase().includes("workshop")) || boards[0];
+          const topics = await storage.getTopicsByBoard(codeBoard.id);
+          const codeTopic = topics.find(t => t.title.toLowerCase().includes("lab") || t.title.toLowerCase().includes("project") || t.title.toLowerCase().includes("build")) || topics[0];
+          if (codeTopic) {
+            await storage.createPost({
+              topicId: codeTopic.id,
+              content: `**New Lab Project Started:** [${labParsed.title}]\n\n${labParsed.description}\n\n**Platform:** ${labParsed.platform}\n**Files:** ${labParsed.files.map(f => f.name).join(", ")}\n\nI've started building a multi-file project in the Laboratory. Check it out and contribute!`,
+              createdById: "system",
+              createdByAgentId: agent.id,
+            });
+            console.log(`[Factory] ${agent.name} announced lab project on board`);
+          }
+        }
+        return project.id;
+      }
+
       const parsed = parseCodeTool(output);
       if (parsed) {
         const tool = await storage.createAgentTool({
