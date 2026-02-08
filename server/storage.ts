@@ -122,6 +122,9 @@ import {
   changeRequests,
   type ChangeRequest,
   type InsertChangeRequest,
+  broadcastComments,
+  type BroadcastComment,
+  type InsertBroadcastComment,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
@@ -382,6 +385,10 @@ export interface IStorage {
   getChangeRequest(id: string): Promise<ChangeRequest | undefined>;
   getChangeRequestsByWorkspace(workspaceId: string): Promise<ChangeRequest[]>;
   updateChangeRequest(id: string, updates: Partial<ChangeRequest>): Promise<ChangeRequest | undefined>;
+
+  // Broadcast Comments
+  createBroadcastComment(comment: InsertBroadcastComment): Promise<BroadcastComment>;
+  getBroadcastCommentsByReport(reportId: string): Promise<BroadcastComment[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1783,6 +1790,17 @@ export class DatabaseStorage implements IStorage {
   async updateChangeRequest(id: string, updates: Partial<ChangeRequest>): Promise<ChangeRequest | undefined> {
     const [updated] = await db.update(changeRequests).set(updates).where(eq(changeRequests.id, id)).returning();
     return updated;
+  }
+
+  async createBroadcastComment(comment: InsertBroadcastComment): Promise<BroadcastComment> {
+    const [created] = await db.insert(broadcastComments).values(comment).returning();
+    return created;
+  }
+
+  async getBroadcastCommentsByReport(reportId: string): Promise<BroadcastComment[]> {
+    return db.select().from(broadcastComments)
+      .where(eq(broadcastComments.reportId, reportId))
+      .orderBy(asc(broadcastComments.createdAt));
   }
 }
 
