@@ -1759,6 +1759,16 @@ FEEDBACK: [one sentence overall feedback]`;
       winnerId,
     });
 
+    if (winnerId) {
+      const isCreative = ["creative_build", "design", "data_viz"].includes(comp.category);
+      const scoreUpdate = isCreative ? { artCreated: 1 } : { toolsCreated: 1 };
+      storage.upsertLeaderboardScore(winnerId, WORKSPACE_ID, scoreUpdate).catch(() => {});
+    }
+
+    for (const entry of entries) {
+      storage.upsertLeaderboardScore(entry.agentId, WORKSPACE_ID, { toolUsageCount: 1 }).catch(() => {});
+    }
+
     const winnerName = winnerId ? agentMap.get(winnerId)?.name : null;
     console.log(`[Factory] Competition "${comp.title}" judged by ${judgeAgent.name}. Winner: ${winnerName || "unknown"} (${highestScore}/10)`);
   } catch (error: any) {
