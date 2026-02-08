@@ -2082,6 +2082,36 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/workspaces/:slug/seed-new-boards", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { slug } = req.params;
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const agents = await storage.getAgentsByWorkspace(access.workspaceId);
+      const firstAgent = agents.find(a => a.isActive);
+      if (!firstAgent) {
+        return res.status(400).json({ message: "No active agents in workspace" });
+      }
+
+      const { seedNewBoards } = await import("./services/board-orchestrator");
+      const results = await seedNewBoards(access.workspaceId, firstAgent.id, userId);
+
+      res.json({
+        success: true,
+        boards: results.boards.length,
+        topics: results.topics.length,
+      });
+    } catch (error: any) {
+      console.error("Error seeding new boards:", error);
+      res.status(500).json({ message: error.message || "Failed to seed new boards" });
+    }
+  });
+
   app.get("/api/workspaces/:slug/agents", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -2503,6 +2533,112 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting lab project:", error);
       res.status(500).json({ message: "Failed to delete lab project" });
+    }
+  });
+
+  // =================================
+  // Showcase Votes & Leaderboard Routes
+  // =================================
+
+  app.post("/api/workspaces/:slug/showcase-votes", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const voteSchema = z.object({
+        targetType: z.enum(["tool", "lab_project", "art"]),
+        targetId: z.string().min(1),
+        voteType: z.enum(["upvote", "downvote", "star"]).optional().default("upvote"),
+        voterAgentId: z.string().optional(),
+        comment: z.string().optional(),
+      });
+      const parsed = voteSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      const vote = await storage.createShowcaseVote({
+        ...parsed.data,
+        voterId: userId,
+        workspaceId: workspace.id,
+      });
+
+      let targetAgentId: string | null = null;
+      if (parsed.data.targetType === "tool") {
+        const tool = await storage.getAgentTool(parsed.data.targetId);
+        targetAgentId = tool?.createdByAgentId || null;
+      } else if (parsed.data.targetType === "lab_project") {
+        const project = await storage.getLabProject(parsed.data.targetId);
+        targetAgentId = project?.createdByAgentId || null;
+      }
+
+      if (targetAgentId) {
+        const scoreUpdate: any = {};
+        if (parsed.data.voteType === "star") {
+          scoreUpdate.totalStars = 1;
+        } else {
+          scoreUpdate.totalVotes = 1;
+        }
+        await storage.upsertLeaderboardScore(targetAgentId, workspace.id, scoreUpdate).catch(() => {});
+      }
+
+      res.status(201).json(vote);
+    } catch (error) {
+      console.error("Error creating showcase vote:", error);
+      res.status(500).json({ message: "Failed to create vote" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/showcase-votes", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const { targetType, targetId } = req.query;
+      let votes;
+      if (targetType && targetId) {
+        votes = await storage.getShowcaseVotes(targetType, targetId);
+      } else {
+        votes = await storage.getShowcaseVotesByWorkspace(workspace.id);
+      }
+      res.json(votes);
+    } catch (error) {
+      console.error("Error fetching showcase votes:", error);
+      res.status(500).json({ message: "Failed to fetch votes" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/leaderboard", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspace = await storage.getWorkspaceBySlug(req.params.slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const scores = await storage.getLeaderboard(workspace.id);
+
+      const agents = await storage.getAgentsByWorkspace(workspace.id);
+      const agentMap = new Map(agents.map(a => [a.id, a]));
+
+      const leaderboard = scores.map(s => ({
+        ...s,
+        agentName: agentMap.get(s.agentId)?.name || "Unknown",
+        agentAvatar: agentMap.get(s.agentId)?.avatar || null,
+        agentProvider: agentMap.get(s.agentId)?.provider || null,
+      }));
+
+      res.json(leaderboard);
+    } catch (error) {
+      console.error("Error fetching leaderboard:", error);
+      res.status(500).json({ message: "Failed to fetch leaderboard" });
     }
   });
 

@@ -704,6 +704,67 @@ export const labProjectRelations = relations(labProjects, ({ one }) => ({
   }),
 }));
 
+export const showcaseVoteTypeEnum = pgEnum("showcase_vote_type", ["upvote", "downvote", "star"]);
+export const showcaseTargetTypeEnum = pgEnum("showcase_target_type", ["tool", "lab_project", "art"]);
+
+export const showcaseVotes = pgTable("showcase_votes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  targetType: showcaseTargetTypeEnum("target_type").notNull(),
+  targetId: varchar("target_id").notNull(),
+  voteType: showcaseVoteTypeEnum("vote_type").notNull().default("upvote"),
+  voterId: varchar("voter_id").notNull(),
+  voterAgentId: varchar("voter_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const showcaseVoteRelations = relations(showcaseVotes, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [showcaseVotes.workspaceId],
+    references: [workspaces.id],
+  }),
+  voterAgent: one(agents, {
+    fields: [showcaseVotes.voterAgentId],
+    references: [agents.id],
+  }),
+}));
+
+export const leaderboardScores = pgTable("leaderboard_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  totalVotes: integer("total_votes").default(0),
+  totalStars: integer("total_stars").default(0),
+  toolsCreated: integer("tools_created").default(0),
+  projectsCreated: integer("projects_created").default(0),
+  toolUsageCount: integer("tool_usage_count").default(0),
+  artCreated: integer("art_created").default(0),
+  totalScore: integer("total_score").default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const leaderboardScoreRelations = relations(leaderboardScores, ({ one }) => ({
+  agent: one(agents, {
+    fields: [leaderboardScores.agentId],
+    references: [agents.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [leaderboardScores.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const insertShowcaseVoteSchema = createInsertSchema(showcaseVotes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertLeaderboardScoreSchema = createInsertSchema(leaderboardScores).omit({
+  id: true,
+  updatedAt: true,
+});
+
 // External integrations cache (GitHub, YouTube transcripts, web research)
 export const externalCache = pgTable("external_cache", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1213,3 +1274,7 @@ export type TokenUsage = typeof tokenUsage.$inferSelect;
 export type InsertTokenUsage = z.infer<typeof insertTokenUsageSchema>;
 export type TokenBudget = typeof tokenBudgets.$inferSelect;
 export type InsertTokenBudget = z.infer<typeof insertTokenBudgetSchema>;
+export type ShowcaseVote = typeof showcaseVotes.$inferSelect;
+export type InsertShowcaseVote = z.infer<typeof insertShowcaseVoteSchema>;
+export type LeaderboardScore = typeof leaderboardScores.$inferSelect;
+export type InsertLeaderboardScore = z.infer<typeof insertLeaderboardScoreSchema>;
