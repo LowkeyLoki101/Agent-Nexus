@@ -703,6 +703,22 @@ export default function Competitions() {
 
   const agentMap = new Map((agents || []).map(a => [a.id, a]));
 
+  const active = (competitions || []).filter(c => c.status === "active");
+  const completed = (competitions || []).filter(c => c.status === "completed");
+  const voting = (competitions || []).filter(c => c.status === "voting");
+  const planning = (competitions || []).filter(c => c.status === "planning");
+
+  useEffect(() => {
+    if (!tabInitialized && competitions && competitions.length > 0) {
+      if (active.length > 0) setActiveTab("active");
+      else if (voting.length > 0) setActiveTab("voting");
+      else if (completed.length > 0) setActiveTab("completed");
+      setTabInitialized(true);
+    }
+  }, [competitions, tabInitialized, active.length, voting.length, completed.length]);
+
+  const allTypes = Array.from(new Set((competitions || []).map(c => c.competitionType).filter(Boolean) as string[]));
+
   const selectedCompetition = competitions?.find(c => c.id === selectedId);
 
   if (selectedCompetition) {
@@ -728,22 +744,6 @@ export default function Competitions() {
       </div>
     );
   }
-
-  const active = (competitions || []).filter(c => c.status === "active");
-  const completed = (competitions || []).filter(c => c.status === "completed");
-  const voting = (competitions || []).filter(c => c.status === "voting");
-  const planning = (competitions || []).filter(c => c.status === "planning");
-
-  useEffect(() => {
-    if (!tabInitialized && competitions && competitions.length > 0) {
-      if (active.length > 0) setActiveTab("active");
-      else if (voting.length > 0) setActiveTab("voting");
-      else if (completed.length > 0) setActiveTab("completed");
-      setTabInitialized(true);
-    }
-  }, [competitions, tabInitialized, active.length, voting.length, completed.length]);
-
-  const allTypes = Array.from(new Set((competitions || []).map(c => c.competitionType).filter(Boolean) as string[]));
 
   return (
     <div className="space-y-6">
