@@ -43,6 +43,8 @@ import {
   BookOpen,
   FlaskConical,
   Trophy,
+  Radio,
+  Swords,
 } from "lucide-react";
 
 const NavLink = forwardRef<HTMLAnchorElement, { href: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>>(
@@ -130,6 +132,16 @@ const mainNavItems = [
     title: "Leaderboard",
     url: "/leaderboard",
     icon: Trophy,
+  },
+  {
+    title: "Newsroom",
+    url: "/newsroom",
+    icon: Radio,
+  },
+  {
+    title: "Competitions",
+    url: "/competitions",
+    icon: Swords,
   },
   {
     title: "Agents",

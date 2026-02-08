@@ -39,6 +39,8 @@ import Laboratory from "@/pages/laboratory";
 import SharedPost from "@/pages/shared-post";
 import AgentDiaries from "@/pages/agent-diaries";
 import Leaderboard from "@/pages/leaderboard";
+import Newsroom from "@/pages/newsroom";
+import Competitions from "@/pages/competitions";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -95,6 +97,8 @@ function AuthenticatedRouter() {
         <Route path="/laboratory" component={Laboratory} />
         <Route path="/diaries" component={AgentDiaries} />
         <Route path="/leaderboard" component={Leaderboard} />
+        <Route path="/newsroom" component={Newsroom} />
+        <Route path="/competitions" component={Competitions} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />
