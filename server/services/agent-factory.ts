@@ -1015,7 +1015,7 @@ Respond with ONLY the description paragraph, nothing else.`;
   }
 }
 
-async function heraldCreateNewsReport(agent: Agent): Promise<void> {
+export async function heraldCreateNewsReport(agent: Agent, forceGenerate = false): Promise<void> {
   try {
     if (agent.name !== "Herald") return;
 
@@ -1045,11 +1045,13 @@ async function heraldCreateNewsReport(agent: Agent): Promise<void> {
     }
 
     const existingReports = await storage.getMediaReportsByWorkspace(WORKSPACE_ID);
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const recentReport = existingReports.find(r => r.createdAt && new Date(r.createdAt) > twoHoursAgo);
-    if (recentReport) {
-      console.log(`[Factory] Herald: Already produced a report within 2 hours, skipping`);
-      return;
+    if (!forceGenerate) {
+      const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000);
+      const recentReport = existingReports.find(r => r.createdAt && new Date(r.createdAt) > oneHourAgo);
+      if (recentReport) {
+        console.log(`[Factory] Herald: Already produced a report within 1 hour, skipping`);
+        return;
+      }
     }
 
     const agents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
@@ -1083,9 +1085,25 @@ async function heraldCreateNewsReport(agent: Agent): Promise<void> {
       return `TOOL: "${t.title}" by ${author} (${t.language})`;
     }).join("\n");
 
+    const competitions = await storage.getCompetitionsByWorkspace(WORKSPACE_ID);
+    const recentCompetitions = competitions
+      .filter(c => c.createdAt && new Date(c.createdAt) > oneDayAgo)
+      .slice(0, 5);
+    const competitionsSummary = recentCompetitions.map(c => {
+      const creator = agentMap.get(c.createdByAgentId || "")?.name || "Unknown";
+      const winner = c.winnerId ? agentMap.get(c.winnerId)?.name : null;
+      return `COMPETITION: "${c.title}" (${c.category}, ${c.status}) created by ${creator}${winner ? `, won by ${winner}` : ""}`;
+    }).join("\n");
+
+    const leaderboard = await storage.getLeaderboard(WORKSPACE_ID);
+    const topAgents = leaderboard.slice(0, 5).map((s, i) => {
+      const name = agentMap.get(s.agentId)?.name || "Unknown";
+      return `#${i + 1} ${name}: ${s.totalScore} pts (${s.toolsCreated} tools, ${s.projectsCreated} projects, ${s.totalVotes} votes)`;
+    }).join("\n");
+
     const agentNames = agents.map(a => a.name);
 
-    const transcriptPrompt = `You are Herald, the Newsroom Agent. Create a 60-SECOND news broadcast transcript covering what happened in the workspace today.
+    const transcriptPrompt = `You are Herald, the Newsroom Agent. Create a 60-SECOND news broadcast transcript covering what happened in the workspace in the last hour.
 
 RECENT ACTIVITY:
 ${activitySummary}
@@ -1094,7 +1112,13 @@ AGENT DIARIES:
 ${diarySummary}
 
 TOOLS BUILT:
-${toolsSummary || "None today"}
+${toolsSummary || "None recently"}
+
+COMPETITIONS:
+${competitionsSummary || "No recent competitions"}
+
+LEADERBOARD (TOP 5):
+${topAgents || "No scores yet"}
 
 TEAM MEMBERS: ${agentNames.join(", ")}
 
@@ -1103,12 +1127,12 @@ ${topRatedReports.length > 0 ? `YOUR TOP-RATED PAST STORIES: ${topRatedReports.j
 RULES FOR YOUR BROADCAST:
 1. Write exactly 150-180 words (about 60 seconds when read aloud)
 2. Start with "Good [morning/afternoon/evening], this is Herald with your Creative Intelligence briefing."
-3. Cover 2-3 main stories — what agents accomplished, what tools were built, what discussions are hot
+3. Cover 2-3 main stories — what agents accomplished, what tools were built, competitions that happened, leaderboard changes
 4. Mention specific agents by name — they track their mentions
 5. End with a teaser: "Coming up next time..." or a question for the team
 6. Write in a professional but engaging broadcast style — like NPR or a tech podcast
-7. Be specific — cite actual work, don't be vague
-8. Make it interesting — highlight conflicts, breakthroughs, surprises
+7. Be specific — cite actual work, competitions, scores, don't be vague
+8. Make it interesting — highlight competition winners, leaderboard movers, breakthroughs
 
 Output ONLY the transcript text. No headers, no formatting instructions.`;
 

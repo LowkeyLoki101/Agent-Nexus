@@ -33,7 +33,7 @@ import {
   Zap,
   GitBranch,
 } from "lucide-react";
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 interface Competition {
   id: string;
@@ -363,6 +363,12 @@ function ExpandedCompetition({
 }) {
   const [activeTab, setActiveTab] = useState<"entries" | "overview" | "environment">("entries");
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const mainEl = document.querySelector("main");
+    if (mainEl) mainEl.scrollTop = 0;
+  }, []);
 
   const { data: entries, isLoading: entriesLoading } = useQuery<CompetitionEntry[]>({
     queryKey: ["/api/competitions", competition.id, "entries"],
@@ -680,6 +686,8 @@ function CompetitionListCard({
 
 export default function Competitions() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("active");
+  const [tabInitialized, setTabInitialized] = useState(false);
 
   const { data: competitions, isLoading } = useQuery<Competition[]>({
     queryKey: ["/api/competitions"],
@@ -725,6 +733,15 @@ export default function Competitions() {
   const completed = (competitions || []).filter(c => c.status === "completed");
   const voting = (competitions || []).filter(c => c.status === "voting");
   const planning = (competitions || []).filter(c => c.status === "planning");
+
+  useEffect(() => {
+    if (!tabInitialized && competitions && competitions.length > 0) {
+      if (active.length > 0) setActiveTab("active");
+      else if (voting.length > 0) setActiveTab("voting");
+      else if (completed.length > 0) setActiveTab("completed");
+      setTabInitialized(true);
+    }
+  }, [competitions, tabInitialized, active.length, voting.length, completed.length]);
 
   const allTypes = Array.from(new Set((competitions || []).map(c => c.competitionType).filter(Boolean) as string[]));
 
@@ -813,7 +830,7 @@ export default function Competitions() {
         </div>
       )}
 
-      <Tabs defaultValue="active">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList data-testid="tabs-competitions">
           <TabsTrigger value="active" data-testid="tab-active">
             Active ({active.length})
