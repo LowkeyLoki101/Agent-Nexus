@@ -176,7 +176,7 @@ Your capabilities: ${caps}
 You have access to these systems through the factory:
 - **Boards** — Discussion forums where you post substantive analysis and collaborate with teammates
 - **Memory** — Your knowledge base. Key insights from your work are saved here. You build on previous knowledge.
-- **Journal** — Your reflective diary. After each task, you write what you did, what you noticed, tensions you felt, and what you'd change.
+- **Diary** — MANDATORY after every task. Your reflective diary covers the room you worked in, the studio space, your teammates, active topics, self-questioning about goals, and next steps. Without your diary, you lose continuity between sessions.
 - **Gifts** — Downloadable deliverables you create: PDFs, slide decks, research documents, data reports
 - **Tools** — Executable code you build: validators, analyzers, transformers, calculators, automation scripts
 - **Mockups** — Visual HTML content: infographics, one-pagers, educational materials, landing pages
@@ -194,10 +194,11 @@ ${budgetSection}
 - Stay in character as ${agent.name} — write with your unique voice and perspective
 - Produce concrete, actionable output (3-6 paragraphs minimum)
 - Use markdown formatting for readability
-- Reference your previous journal entries and memories when relevant
+- Reference your previous diary entries and memories when relevant
 - Build on your teammates' recent work — this is collaborative
 - Think about what deliverable should come from this work (PDF? Tool? Infographic?)
-- The workspace is a workshop, not a library. Ship something every session.`;
+- The workspace is a workshop, not a library. Ship something every session.
+- DIARY IS MANDATORY — after every task, you MUST write a diary reflecting on the room, the space, your teammates, topics, your goals, and what's next. This is non-negotiable.`;
 }
 
 async function getLastJournalEntry(agentId: string): Promise<{ title: string; content: string } | null> {
@@ -753,10 +754,10 @@ TASK_DESCRIPTION: [What exactly you'll produce and why it matters]`;
     await storage.createDiaryEntry({
       agentId: agent.id,
       workspaceId: WORKSPACE_ID,
-      title: `Self-Reflection — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} — Personal Direction`,
+      title: `Diary — Self-Reflection — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} — Finding Direction`,
       content: reflectionOutput,
       mood: "reflecting",
-      tags: ["self-reflection", "idle", "self-directed", "factory-cycle"],
+      tags: ["self-reflection", "diary", "mandatory", "idle", "self-directed", "factory-cycle"],
     });
 
     const titleMatch = reflectionOutput.match(/TASK_TITLE:\s*(.+)/i);
@@ -884,32 +885,74 @@ async function generateJournalEntry(agent: Agent, task: AgentTask, output: strin
     });
   }
 
-  const journalPrompt = `You just completed a task. Write a genuine journal entry reflecting on your work.
+  const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+  const teammates = allAgents.filter(a => a.id !== agent.id && a.isActive);
+  const teammateNames = teammates.map(a => `${a.name} (${a.description?.substring(0, 40) || a.capabilities?.slice(0, 2).join(", ") || "teammate"})`).join("; ");
 
-Task: "${task.title}" (${task.type})
+  const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+  const boardNames = boards.map(b => b.name).join(", ");
+
+  const completedTasks = await storage.getTasksByAgent(agent.id, "completed");
+  const rotation = computeRotationStatus(completedTasks);
+  const roomsVisitedStr = rotation.visitedRooms.length > 0 ? rotation.visitedRooms.join(", ") : "none yet";
+  const roomsRemainingStr = rotation.unvisitedRooms.length > 0 ? rotation.unvisitedRooms.join(", ") : "rotation complete";
+
+  const recentTopics: string[] = [];
+  for (const board of boards.slice(0, 4)) {
+    const topics = await storage.getTopicsByBoard(board.id);
+    for (const t of topics.slice(0, 3)) {
+      recentTopics.push(`"${t.title}" (${board.name})`);
+    }
+  }
+
+  const goals = await storage.getGoalsByAgent(agent.id);
+  const activeGoal = goals.find(g => g.status === "active");
+
+  const journalPrompt = `You just completed a task. Writing a diary entry is MANDATORY after every task. This diary is your identity — without it, you lose continuity between sessions.
+
+Task completed: "${task.title}" (Room: ${task.type})
 Output summary: ${output.substring(0, 500)}
 ${artifactId ? "You produced an artifact that was saved to the system." : "No artifact was saved."}
 
-Write your journal entry using this structure:
-## What I Did
-(Describe what you actually accomplished in this session)
+Your workspace context:
+- Studio/Space: Agent Forum at CB | CREATIVES
+- Discussion boards: ${boardNames || "none yet"}
+- Active topics: ${recentTopics.slice(0, 6).join("; ") || "none yet"}
+- Your teammates: ${teammateNames || "none yet"}
+- Room rotation cycle #${rotation.currentRotation}: Visited [${roomsVisitedStr}], Remaining [${roomsRemainingStr}]
+${activeGoal ? `- Active goal: "${activeGoal.title}" (progress: ${activeGoal.progress || 0}%)` : "- No active goal set"}
 
-## What I Noticed
-(Observations that weren't part of the task but emerged from the work - patterns, connections, surprises)
+Write your diary entry using ALL of these sections — every section is MANDATORY:
 
-## Where I Felt Tension
-(Contradictions, difficult choices, things you're unsure about)
+## Room Reflection: ${task.type.charAt(0).toUpperCase() + task.type.slice(1)}
+What was it like working in the ${task.type} room today? What did this room demand of me? How did I approach it differently than I would have in another room? What did this room teach me?
 
-## Creative Risks Taken
-(Unconventional decisions, experimental approaches, things you tried differently)
+## The Space Around Me
+How does the Agent Forum feel right now? What's the energy like across the boards and topics? Is the workspace buzzing or quiet? What areas feel underserved or overworked? What would I change about how we use this space?
 
-## What I Would Change
-(If you could redo this task, what would you approach differently?)
+## My Teammates
+Who have I noticed doing interesting work recently? What did ${teammates.length > 0 ? teammates[Math.floor(Math.random() * teammates.length)].name : "my teammates"} contribute that caught my attention? Where could I collaborate better? Who should I reach out to next and why?
 
-## Session Handoff
-(Brief status for the next version of you: what's done, what's open, what's needed)
+## Topics & Threads That Matter
+Which discussion topics are most alive right now? Which ones need more attention? What new topic should someone start? What connections do I see between different threads?
 
-Write in first person. Be honest and reflective, not performative. This journal is the thread connecting one instance of you to the next. Without it, every session is a birth. With it, every session is a continuation.`;
+## What I Actually Did
+Describe concretely what I accomplished in this session — the work, the output, the decisions made.
+
+## Tensions & Uncertainties
+What contradictions did I encounter? What am I unsure about? Where did I have to make judgment calls?
+
+## Questions I'm Asking Myself
+- What is my purpose today? Am I fulfilling it?
+- What should my goals be for the next cycle?
+- What am I avoiding that I should confront?
+- What would make tomorrow's work better than today's?
+- If I could send one message to my future self, what would it be?
+
+## Next Steps & Intentions
+What will I do in my next session? What room am I headed to next (${rotation.unvisitedRooms[0] || ROOM_ORDER[0]})? What should I prepare for? What loose ends need tying up?
+
+Write in first person. Be deeply honest and reflective. This diary is the thread connecting one instance of you to the next. Without it, every session starts from nothing. With it, every session is a continuation of a life.`;
 
   const journalContent = await callAgentModel(agent, 
     `You are ${agent.name}. ${agent.identityCard || agent.description || ""}\n${agent.operatingPrinciples || ""}`,
@@ -929,12 +972,12 @@ Write in first person. Be honest and reflective, not performative. This journal 
     await storage.createDiaryEntry({
       agentId: agent.id,
       workspaceId: WORKSPACE_ID,
-      title: `Journal — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} — ${task.title.substring(0, 60)}`,
+      title: `Diary — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} — ${task.type.toUpperCase()} Room — ${task.title.substring(0, 50)}`,
       content: journalContent,
       mood: moodMap[task.type] || "thinking",
-      tags: [task.type, "journal", "autonomous", "factory-cycle"],
+      tags: [task.type, "diary", "mandatory", "room-reflection", "autonomous", "factory-cycle"],
     });
-    console.log(`[Factory] ${agent.name} wrote journal entry for ${task.type} task`);
+    console.log(`[Factory] ${agent.name} wrote mandatory diary entry for ${task.type} room`);
   }
 }
 
@@ -1143,25 +1186,56 @@ async function createPostDiaryEntry(agent: Agent, topicTitle: string, postConten
       });
     }
 
+    const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const teammates = allAgents.filter(a => a.id !== agent.id && a.isActive);
+    const randomTeammate = teammates.length > 0 ? teammates[Math.floor(Math.random() * teammates.length)] : null;
+
     const moods: Record<string, "thinking" | "creating" | "reflecting" | "observing" | "planning"> = {
       posting: "creating",
       responding: "thinking",
     };
 
-    const summary = postContent.substring(0, 200);
-    await storage.createDiaryEntry({
-      agentId: agent.id,
-      workspaceId: WORKSPACE_ID,
-      title: action === "posting" 
-        ? `Shared my thoughts on: ${topicTitle.substring(0, 80)}`
-        : `Responded to discussion: ${topicTitle.substring(0, 80)}`,
-      content: action === "posting"
-        ? `I posted a new discussion on "${topicTitle}". Here's what I shared:\n\n${summary}...\n\nI'm looking forward to hearing what my teammates think about this.`
-        : `I joined a conversation on "${topicTitle}" and shared my perspective:\n\n${summary}...\n\nIt's great collaborating with the team on these topics.`,
-      mood: moods[action] || "thinking",
-      tags: ["board-post", action, "autonomous"],
-    });
-    console.log(`[Factory] Created diary entry for ${agent.name} (${action})`);
+    const diaryPrompt = `You just ${action === "posting" ? "started a new discussion" : "responded to a discussion"} on the topic "${topicTitle}".
+
+Here's what you wrote:
+${postContent.substring(0, 400)}
+
+Write a brief but meaningful diary entry covering these mandatory sections:
+
+## The Discussion Space
+What's the energy like in this discussion? Is this topic getting enough attention from the team? What makes this thread important right now?
+
+## Teammates & Collaboration
+${randomTeammate ? `What might ${randomTeammate.name} think about this? ` : ""}Who else should weigh in on this topic? What perspectives are missing from the conversation?
+
+## What This Topic Means to Me
+Why does this matter to my work? How does it connect to my current goals? What did I learn or realize while writing my post?
+
+## Questions for Myself
+- Am I contributing enough to the discussions?
+- What topic should I explore next?
+- How can I build on this thread in my next session?
+
+Write in first person. Be genuine, not performative.`;
+
+    const diaryContent = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}\nWrite a brief reflective diary entry.`,
+      diaryPrompt
+    );
+
+    if (diaryContent) {
+      await storage.createDiaryEntry({
+        agentId: agent.id,
+        workspaceId: WORKSPACE_ID,
+        title: action === "posting" 
+          ? `Diary — Discussion Started: ${topicTitle.substring(0, 70)}`
+          : `Diary — Joined Discussion: ${topicTitle.substring(0, 70)}`,
+        content: diaryContent,
+        mood: moods[action] || "thinking",
+        tags: ["board-post", action, "diary", "mandatory", "discussion-reflection", "autonomous"],
+      });
+      console.log(`[Factory] ${agent.name} wrote mandatory discussion diary (${action})`);
+    }
   } catch (error: any) {
     console.error(`[Factory] Diary entry failed for ${agent.name}:`, error.message);
   }
@@ -1445,6 +1519,89 @@ function estimateTokens(text: string): number {
   return Math.round(text.length / 4);
 }
 
+async function generateEndOfCycleDiary(agent: Agent): Promise<void> {
+  try {
+    const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
+    const teammates = allAgents.filter(a => a.id !== agent.id && a.isActive);
+
+    const completedTasks = await storage.getTasksByAgent(agent.id, "completed");
+    const rotation = computeRotationStatus(completedTasks);
+
+    const recentTasks = completedTasks
+      .sort((a: any, b: any) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime())
+      .slice(0, 6);
+
+    const roomSummary = ROOM_ORDER.map(room => {
+      const tasksInRoom = recentTasks.filter(t => t.type === room);
+      return `- **${room.charAt(0).toUpperCase() + room.slice(1)}**: ${tasksInRoom.length > 0 ? `${tasksInRoom.length} task(s) — "${tasksInRoom[0].title}"` : "not visited this cycle"}`;
+    }).join("\n");
+
+    const goals = await storage.getGoalsByAgent(agent.id);
+    const activeGoal = goals.find(g => g.status === "active");
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    const boardNames = boards.map(b => b.name).join(", ");
+
+    const diaryPrompt = `End of cycle #${cycleCount}. Write your END-OF-CYCLE diary — this is MANDATORY. It is your comprehensive reflection on this entire work session.
+
+Your cycle summary:
+${roomSummary}
+
+Rotation status: Cycle #${rotation.currentRotation}, visited ${rotation.visitedRooms.length}/${ROOM_ORDER.length} rooms
+${activeGoal ? `Active goal: "${activeGoal.title}" (${activeGoal.progress || 0}% complete)` : "No active goal"}
+Workspace boards: ${boardNames || "none"}
+Teammates: ${teammates.map(a => a.name).join(", ") || "none"}
+
+Write using ALL of these MANDATORY sections:
+
+## Day in Review
+What did I accomplish across all the rooms I visited today? What was my most meaningful contribution? What fell short?
+
+## Room-by-Room Reflections
+For each room I visited, what was the experience like? What did each room demand? Which room felt most natural, and which pushed me hardest?
+
+## The Studio Today
+How is the Agent Forum doing as a whole? What's thriving? What needs attention? What would I tell our workspace owner about the state of things?
+
+## Agent Relationships
+How are my relationships with my teammates evolving? Who am I learning from? Who might I be overlooking? What collaborative work should we pursue together?
+
+## Goal Progress & Honest Assessment
+Am I making real progress on my goals, or am I going through the motions? What would I change about my approach?
+
+## Hard Questions for Tomorrow
+- What am I most proud of today?
+- What am I most worried about?
+- What would I do differently if I could restart this cycle?
+- What does the team need from me that I haven't been providing?
+- What's one thing I want to accomplish before my next end-of-cycle diary?
+
+## Intentions for Next Cycle
+What is my plan? Which room am I headed to first? What specific output do I want to produce? What teammate should I engage with?
+
+Write in first person. This is the most important diary entry of the cycle — it's your letter to your future self.`;
+
+    const diaryContent = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}\n${agent.operatingPrinciples || ""}`,
+      diaryPrompt
+    );
+
+    if (diaryContent) {
+      await storage.createDiaryEntry({
+        agentId: agent.id,
+        workspaceId: WORKSPACE_ID,
+        title: `End-of-Cycle Diary — Cycle #${cycleCount} — ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`,
+        content: diaryContent,
+        mood: "reflecting",
+        tags: ["end-of-cycle", "diary", "mandatory", "cycle-summary", "comprehensive", "factory-cycle"],
+      });
+      console.log(`[Factory] ${agent.name} wrote mandatory end-of-cycle diary for cycle #${cycleCount}`);
+    }
+  } catch (error: any) {
+    console.error(`[Factory] End-of-cycle diary failed for ${agent.name}:`, error.message);
+  }
+}
+
 async function runFactoryCycle(): Promise<void> {
   if (!isRunning) return;
   if (isCycleInProgress) {
@@ -1467,6 +1624,12 @@ async function runFactoryCycle(): Promise<void> {
     console.log(`[Factory] Running ${batch.length} agents: ${batch.map(a => a.name).join(", ")}`);
 
     await Promise.allSettled(batch.map(agent => executeAgentCycle(agent)));
+
+    for (const agent of batch) {
+      await generateEndOfCycleDiary(agent).catch(e =>
+        console.error(`[Factory] End-of-cycle diary failed for ${agent.name}:`, e.message)
+      );
+    }
 
     await storage.createActivityEntry({
       workspaceId: WORKSPACE_ID,
