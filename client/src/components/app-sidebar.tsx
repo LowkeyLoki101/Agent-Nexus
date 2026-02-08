@@ -167,7 +167,7 @@ const mainNavItems = [
 ];
 
 export function AppSidebar() {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const { user, logout } = useAuth();
 
   const isActive = (url: string) => {
@@ -246,7 +246,10 @@ export function AppSidebar() {
                 align="start"
                 sideOffset={4}
               >
-                <DropdownMenuItem data-testid="menu-item-settings">
+                <DropdownMenuItem
+                  onClick={() => navigate("/settings")}
+                  data-testid="menu-item-settings"
+                >
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
