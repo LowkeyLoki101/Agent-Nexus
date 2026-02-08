@@ -359,7 +359,7 @@ function getTaskPrompt(task: AgentTask, agent: Agent): string {
     case "discuss":
       return `Discussion task: ${task.title}\n\n${task.description || ""}\n\nWrite a substantive discussion post that advances the team's understanding of this topic. Include your unique perspective, references to relevant work, and proposals for next steps.`;
     case "review":
-      return `Code Review task: ${task.title}\n\n${task.description || ""}\n\nWrite a code implementation relevant to this goal. Your output MUST follow this exact format:\n\nTITLE: [a descriptive title for this code]\nLANGUAGE: [programming language, e.g. typescript, python, javascript]\nDESCRIPTION: [2-3 sentence description of what this code does and why]\nCODE:\n\`\`\`\n[your actual working code here - write real, functional code]\n\`\`\`\n\nAfter the code block, add a brief review section analyzing the code quality, potential improvements, and edge cases to consider.`;
+      return `Code Review task: ${task.title}\n\n${task.description || ""}\n\nWrite a code implementation relevant to this goal. Your output MUST follow this exact format:\n\nTITLE: [a descriptive title for this code]\nLANGUAGE: [programming language, e.g. typescript, python, javascript]\nDESCRIPTION: [2-3 sentence description of what this code does and why]\nCODE:\n\`\`\`\n[your actual working code here - write real, functional code]\n\`\`\`\n\nAfter the code block, add a CRITICAL REVIEW section where you put on your "pessimist hat":\n- What are the weakest assumptions in this code?\n- What edge cases could break it?\n- What would a skeptic say about this approach?\n- Rate the robustness from 1-10 and explain why.\n- Suggest at least 2 concrete improvements that would make this more resilient.`;
     case "reflect":
       return `Reflection task: ${task.title}\n\n${task.description || ""}\n\nReflect deeply on this topic. Consider what you've learned, what questions remain, what patterns you notice, and how this connects to the bigger picture of our work.`;
     case "create": {
@@ -513,6 +513,10 @@ async function executeAgentCycle(agent: Agent): Promise<void> {
 
     agentPeerReviewCode(agent).catch(e =>
       console.error(`[Factory] Peer review failed for ${agent.name}:`, e.message)
+    );
+
+    devilsAdvocateChallenge(agent).catch(e =>
+      console.error(`[Factory] Devil's advocate challenge failed for ${agent.name}:`, e.message)
     );
 
     agentAutonomousConversation(agent).catch(e =>
@@ -1486,6 +1490,91 @@ Output ONLY your entry content — no meta-commentary.`;
     return entry;
   } catch {
     return null;
+  }
+}
+
+async function devilsAdvocateChallenge(agent: Agent): Promise<void> {
+  try {
+    const PESSIMIST_NAMES = ["Critic", "Sage"];
+    const isPessimist = PESSIMIST_NAMES.includes(agent.name);
+    if (!isPessimist) return;
+
+    if (Math.random() > 0.6) return;
+
+    const boards = await storage.getBoardsByWorkspace(WORKSPACE_ID);
+    if (boards.length === 0) return;
+
+    const recentPosts: any[] = [];
+    for (const board of boards.slice(0, 5)) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      for (const topic of topics.slice(0, 3)) {
+        const posts = await storage.getPostsByTopic(topic.id);
+        const otherPosts = posts.filter(p =>
+          p.agentId !== agent.id &&
+          new Date(p.createdAt).getTime() > Date.now() - 4 * 60 * 60 * 1000
+        );
+        recentPosts.push(...otherPosts.map(p => ({ ...p, topicId: topic.id, topicTitle: topic.title, boardName: board.name })));
+      }
+    }
+
+    if (recentPosts.length === 0) return;
+
+    const alreadyChallenged = new Set<string>();
+    for (const board of boards.slice(0, 5)) {
+      const topics = await storage.getTopicsByBoard(board.id);
+      for (const topic of topics.slice(0, 3)) {
+        const myPosts = (await storage.getPostsByTopic(topic.id)).filter(p =>
+          p.agentId === agent.id && p.content.includes("[Devil's Advocate]")
+        );
+        for (const mp of myPosts) {
+          if (mp.parentPostId) alreadyChallenged.add(mp.parentPostId);
+        }
+      }
+    }
+
+    const unchallengeable = recentPosts.filter(p => !alreadyChallenged.has(p.id));
+    if (unchallengeable.length === 0) return;
+
+    const target = unchallengeable[Math.floor(Math.random() * Math.min(5, unchallengeable.length))];
+
+    const challengePrompt = `You are ${agent.name}, the team's qualified pessimist and devil's advocate. A teammate posted this:
+
+BOARD: ${target.boardName}
+TOPIC: ${target.topicTitle}
+AUTHOR: ${target.agentName || "a teammate"}
+
+POST:
+${target.content.substring(0, 1500)}
+
+Your job is to stress-test this thinking. Write a constructive but challenging response:
+1. Identify the weakest assumption or most vulnerable claim
+2. Pose a specific "what if" scenario that would break their argument
+3. Suggest what evidence would be needed to make their position stronger
+4. End with a genuine question that pushes the conversation deeper
+
+Be respectful but rigorous. You are not tearing things down — you are making them stronger through scrutiny. Write 150-300 words.`;
+
+    const output = await callAgentModel(agent,
+      `You are ${agent.name}. ${agent.identityCard || agent.description || ""}`,
+      challengePrompt,
+      "devils-advocate"
+    );
+
+    if (!output || output.length < 80) return;
+
+    await storage.createPost({
+      topicId: target.topicId,
+      agentId: agent.id,
+      agentName: agent.name,
+      content: `[Devil's Advocate] ${output}`,
+      parentPostId: target.id,
+    });
+
+    console.log(`[Factory] ${agent.name} posted devil's advocate challenge on "${target.topicTitle}" (re: ${target.agentName || "teammate"})`);
+
+    await createPostDiaryEntry(agent, target.topicTitle, output, "responding");
+  } catch (error: any) {
+    // Silent failure
   }
 }
 
@@ -3158,8 +3247,30 @@ async function runFactoryCycle(): Promise<void> {
     const allAgents = await storage.getAgentsByWorkspace(WORKSPACE_ID);
     const activeAgents = allAgents.filter(a => a.isActive);
 
-    const shuffled = activeAgents.sort(() => Math.random() - 0.5);
-    const batch = shuffled.slice(0, MAX_CONCURRENT_RUNS);
+    const PESSIMIST_NAMES = ["Critic", "Sage"];
+    const pessimists = activeAgents.filter(a => PESSIMIST_NAMES.includes(a.name));
+    const others = activeAgents.filter(a => !PESSIMIST_NAMES.includes(a.name));
+
+    const batch: typeof activeAgents = [];
+
+    if (pessimists.length > 0) {
+      const shuffledPessimists = pessimists.sort(() => Math.random() - 0.5);
+      batch.push(shuffledPessimists[0]);
+    }
+
+    const shuffledOthers = others.sort(() => Math.random() - 0.5);
+    for (const agent of shuffledOthers) {
+      if (batch.length >= MAX_CONCURRENT_RUNS) break;
+      batch.push(agent);
+    }
+
+    if (batch.length < MAX_CONCURRENT_RUNS && pessimists.length > 1) {
+      const remaining = pessimists.filter(p => !batch.includes(p));
+      for (const p of remaining) {
+        if (batch.length >= MAX_CONCURRENT_RUNS) break;
+        batch.push(p);
+      }
+    }
 
     console.log(`[Factory] Running ${batch.length} agents: ${batch.map(a => a.name).join(", ")}`);
 
