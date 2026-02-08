@@ -101,26 +101,28 @@ function timeAgo(dateStr: string | null): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function AgentAvatar({ agent, onClick, isPaused }: { agent: AgentMapData; onClick: () => void; isPaused: boolean }) {
+function AgentAvatar({ agent, onClick }: { agent: AgentMapData; onClick: () => void }) {
   const initials = agent.name.split(" ").map(w => w[0]).join("").substring(0, 2);
   const isActive = agent.currentTask?.status === "in_progress";
 
   return (
     <button
-      onClick={isPaused ? onClick : undefined}
-      className={`relative group transition-transform duration-300 ${isPaused ? "cursor-pointer" : "cursor-default"}`}
+      onClick={onClick}
+      className="flex flex-col items-center gap-1 cursor-pointer w-14"
       data-testid={`avatar-agent-${agent.id}`}
-      title={isPaused ? `Click to inspect ${agent.name}` : agent.name}
+      title={`Click to inspect ${agent.name}`}
     >
-      <Avatar className={`h-9 w-9 border-2 transition-all duration-300 ${isActive ? "border-primary ring-2 ring-primary/30" : "border-border"} ${isPaused ? "hover-elevate" : ""}`}>
-        <AvatarFallback className="text-xs font-semibold bg-muted">
-          {initials}
-        </AvatarFallback>
-      </Avatar>
-      {isActive && (
-        <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-primary border-2 border-background animate-pulse" />
-      )}
-      <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[10px] font-medium text-muted-foreground whitespace-nowrap">
+      <div className="relative">
+        <Avatar className={`h-9 w-9 border-2 transition-all duration-300 hover-elevate ${isActive ? "border-primary ring-2 ring-primary/30" : "border-border"}`}>
+          <AvatarFallback className="text-xs font-semibold bg-muted">
+            {initials}
+          </AvatarFallback>
+        </Avatar>
+        {isActive && (
+          <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-primary border-2 border-background animate-pulse" />
+        )}
+      </div>
+      <span className="text-[10px] font-medium text-muted-foreground truncate w-full text-center leading-tight">
         {agent.name}
       </span>
     </button>
@@ -323,11 +325,9 @@ export default function OrganizationMap() {
   });
 
   const handleAgentClick = useCallback((agent: AgentMapData) => {
-    if (isPaused) {
-      setSelectedAgent(agent);
-      setDialogOpen(true);
-    }
-  }, [isPaused]);
+    setSelectedAgent(agent);
+    setDialogOpen(true);
+  }, []);
 
   const handleCloseDialog = useCallback(() => {
     setDialogOpen(false);
@@ -364,7 +364,7 @@ export default function OrganizationMap() {
               )}
               {isPaused && (
                 <Badge variant="outline" className="text-xs">
-                  Paused - click an agent to inspect
+                  Auto-refresh paused
                 </Badge>
               )}
             </div>
@@ -383,7 +383,7 @@ export default function OrganizationMap() {
               <Button
                 size="icon"
                 variant={isPaused ? "default" : "outline"}
-                onClick={() => { setIsPaused(p => !p); if (!isPaused) { setDialogOpen(false); setSelectedAgent(null); } }}
+                onClick={() => setIsPaused(p => !p)}
                 data-testid="button-pause-map"
               >
                 {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
@@ -416,13 +416,12 @@ export default function OrganizationMap() {
                     {agentsInRoom.length === 0 ? (
                       <span className="text-xs text-muted-foreground italic">Empty</span>
                     ) : (
-                      <div className="flex flex-wrap gap-2 justify-start pb-5">
+                      <div className="flex flex-wrap gap-3 justify-start">
                         {agentsInRoom.map(agent => (
                           <AgentAvatar
                             key={agent.id}
                             agent={agent}
                             onClick={() => handleAgentClick(agent)}
-                            isPaused={isPaused}
                           />
                         ))}
                       </div>
@@ -434,15 +433,14 @@ export default function OrganizationMap() {
           </div>
 
           {unassignedCount > 0 && (
-            <div className="mt-3 flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-muted-foreground">Not yet active:</span>
-              <div className="flex gap-2 flex-wrap pb-5">
+            <div className="mt-3">
+              <span className="text-xs text-muted-foreground mb-2 block">Awaiting first rotation:</span>
+              <div className="flex gap-3 flex-wrap">
                 {agentsWithNoRoom.map(agent => (
                   <AgentAvatar
                     key={agent.id}
                     agent={agent}
                     onClick={() => handleAgentClick(agent)}
-                    isPaused={isPaused}
                   />
                 ))}
               </div>
