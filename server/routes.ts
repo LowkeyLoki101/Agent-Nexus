@@ -3102,10 +3102,23 @@ export async function registerRoutes(
   app.get("/api/competitions", isAuthenticated, async (req: any, res) => {
     try {
       const workspaces = await storage.getWorkspaces();
+      const seen = new Set<string>();
       let allComps: any[] = [];
       for (const ws of workspaces) {
         const comps = await storage.getCompetitionsByWorkspace(ws.id);
-        allComps.push(...comps);
+        const agents = await storage.getAgentsByWorkspace(ws.id);
+        const agentMap = new Map(agents.map(a => [a.id, a]));
+        for (const c of comps) {
+          if (seen.has(c.id)) continue;
+          seen.add(c.id);
+          const entries = await storage.getCompetitionEntries(c.id);
+          allComps.push({
+            ...c,
+            createdByAgentName: agentMap.get(c.createdByAgentId || "")?.name || "Unknown",
+            winnerName: c.winnerId ? agentMap.get(c.winnerId)?.name || null : null,
+            entriesCount: entries.length,
+          });
+        }
       }
       allComps.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       res.json(allComps);
