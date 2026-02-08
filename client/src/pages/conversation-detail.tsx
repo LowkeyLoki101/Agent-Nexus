@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { MarkdownContent } from "@/components/markdown-content";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, useLocation, Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -253,7 +254,7 @@ export default function ConversationDetail() {
                         : "bg-muted"
                     }`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    <MarkdownContent content={message.content || ""} />
                   </div>
                   <span className="text-xs text-muted-foreground mt-1">
                     {message.createdAt

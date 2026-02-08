@@ -119,6 +119,9 @@ import {
   type InsertCompetition,
   type CompetitionEntry,
   type InsertCompetitionEntry,
+  changeRequests,
+  type ChangeRequest,
+  type InsertChangeRequest,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, or, ne, lt, ilike, inArray, sql } from "drizzle-orm";
@@ -373,6 +376,12 @@ export interface IStorage {
   createCompetitionEntry(entry: InsertCompetitionEntry): Promise<CompetitionEntry>;
   getCompetitionEntries(competitionId: string): Promise<CompetitionEntry[]>;
   updateCompetitionEntry(id: string, updates: Partial<InsertCompetitionEntry>): Promise<CompetitionEntry | undefined>;
+
+  // Change Requests
+  createChangeRequest(request: InsertChangeRequest): Promise<ChangeRequest>;
+  getChangeRequest(id: string): Promise<ChangeRequest | undefined>;
+  getChangeRequestsByWorkspace(workspaceId: string): Promise<ChangeRequest[]>;
+  updateChangeRequest(id: string, updates: Partial<ChangeRequest>): Promise<ChangeRequest | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1752,6 +1761,27 @@ export class DatabaseStorage implements IStorage {
 
   async updateCompetitionEntry(id: string, updates: Partial<InsertCompetitionEntry>): Promise<CompetitionEntry | undefined> {
     const [updated] = await db.update(competitionEntries).set(updates).where(eq(competitionEntries.id, id)).returning();
+    return updated;
+  }
+
+  async createChangeRequest(request: InsertChangeRequest): Promise<ChangeRequest> {
+    const [created] = await db.insert(changeRequests).values(request).returning();
+    return created;
+  }
+
+  async getChangeRequest(id: string): Promise<ChangeRequest | undefined> {
+    const [cr] = await db.select().from(changeRequests).where(eq(changeRequests.id, id));
+    return cr;
+  }
+
+  async getChangeRequestsByWorkspace(workspaceId: string): Promise<ChangeRequest[]> {
+    return db.select().from(changeRequests)
+      .where(eq(changeRequests.workspaceId, workspaceId))
+      .orderBy(desc(changeRequests.createdAt));
+  }
+
+  async updateChangeRequest(id: string, updates: Partial<ChangeRequest>): Promise<ChangeRequest | undefined> {
+    const [updated] = await db.update(changeRequests).set(updates).where(eq(changeRequests.id, id)).returning();
     return updated;
   }
 }

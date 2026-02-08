@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { MarkdownContent } from "@/components/markdown-content";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -289,7 +290,9 @@ function CompetitionCard({ competition, agentMap }: { competition: Competition; 
                           <Badge variant="secondary" className="text-xs">{entry.score}/10</Badge>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground line-clamp-4">{entry.content}</p>
+                      <div className="text-xs text-muted-foreground line-clamp-4">
+                        <MarkdownContent content={entry.content || ""} compact />
+                      </div>
                     </div>
                   );
                 })

@@ -1,4 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { MarkdownContent } from "@/components/markdown-content";
 import { useRoute, useLocation, Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -188,9 +189,7 @@ export default function BriefingDetail() {
           <CardTitle className="text-base">Content</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
-            {briefing.content}
-          </div>
+          <MarkdownContent content={briefing.content || ""} />
         </CardContent>
       </Card>
 

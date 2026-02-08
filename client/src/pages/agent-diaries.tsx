@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { InlineMarkdown } from "@/components/markdown-content";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -237,9 +238,9 @@ export default function AgentDiaries() {
                               </span>
                             </div>
                           </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">
-                            {entry.content}
-                          </p>
+                          <div className="text-sm text-muted-foreground line-clamp-2">
+                            <InlineMarkdown content={entry.content || ""} />
+                          </div>
                           {entry.tags && entry.tags.length > 0 && (
                             <div className="flex items-center gap-1 mt-2 flex-wrap">
                               {entry.tags.map((tag: string) => (
