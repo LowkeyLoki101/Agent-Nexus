@@ -1,6 +1,7 @@
 import {
   workspaces,
   workspaceMembers,
+  memberRoleEnum,
   agents,
   apiTokens,
   auditLogs,
@@ -19,8 +20,10 @@ import {
   type InsertBriefing
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or, inArray } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
+
+type MemberRole = (typeof memberRoleEnum.enumValues)[number];
 
 export interface IStorage {
   getWorkspace(id: string): Promise<Workspace | undefined>;
@@ -32,7 +35,7 @@ export interface IStorage {
   getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]>;
   addWorkspaceMember(member: InsertWorkspaceMember): Promise<WorkspaceMember>;
   removeWorkspaceMember(id: string): Promise<void>;
-  updateMemberRole(id: string, role: string): Promise<WorkspaceMember | undefined>;
+  updateMemberRole(id: string, role: MemberRole): Promise<WorkspaceMember | undefined>;
   
   getAgent(id: string): Promise<Agent | undefined>;
   getAgentsByWorkspace(workspaceId: string): Promise<Agent[]>;
@@ -75,7 +78,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getWorkspacesByUser(userId: string): Promise<Workspace[]> {
-    return db.select().from(workspaces).where(eq(workspaces.ownerId, userId));
+    const memberRows = await db
+      .select({ workspaceId: workspaceMembers.workspaceId })
+      .from(workspaceMembers)
+      .where(eq(workspaceMembers.userId, userId));
+
+    const memberWorkspaceIds = memberRows.map((r) => r.workspaceId);
+
+    if (memberWorkspaceIds.length === 0) {
+      return db.select().from(workspaces).where(eq(workspaces.ownerId, userId));
+    }
+
+    return db
+      .select()
+      .from(workspaces)
+      .where(
+        or(
+          eq(workspaces.ownerId, userId),
+          inArray(workspaces.id, memberWorkspaceIds)
+        )
+      );
   }
 
   async createWorkspace(workspace: InsertWorkspace): Promise<Workspace> {
@@ -105,10 +127,10 @@ export class DatabaseStorage implements IStorage {
     await db.delete(workspaceMembers).where(eq(workspaceMembers.id, id));
   }
 
-  async updateMemberRole(id: string, role: string): Promise<WorkspaceMember | undefined> {
+  async updateMemberRole(id: string, role: MemberRole): Promise<WorkspaceMember | undefined> {
     const [updated] = await db
       .update(workspaceMembers)
-      .set({ role: role as any })
+      .set({ role })
       .where(eq(workspaceMembers.id, id))
       .returning();
     return updated;
