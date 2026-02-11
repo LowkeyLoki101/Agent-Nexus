@@ -17,6 +17,10 @@ import WorkspaceNew from "@/pages/workspace-new";
 import WorkspaceDetail from "@/pages/workspace-detail";
 import Agents from "@/pages/agents";
 import AgentNew from "@/pages/agent-new";
+import AgentDetail from "@/pages/agent-detail";
+import Rooms from "@/pages/rooms";
+import RoomDetail from "@/pages/room-detail";
+import NewsFeed from "@/pages/news-feed";
 import Briefings from "@/pages/briefings";
 import BriefingNew from "@/pages/briefing-new";
 import BriefingDetail from "@/pages/briefing-detail";
@@ -59,6 +63,10 @@ function AuthenticatedRouter() {
         <Route path="/workspaces/:slug/agents/new" component={AgentNew} />
         <Route path="/agents" component={Agents} />
         <Route path="/agents/new" component={AgentNew} />
+        <Route path="/agents/:id" component={AgentDetail} />
+        <Route path="/rooms" component={Rooms} />
+        <Route path="/rooms/:roomId" component={RoomDetail} />
+        <Route path="/news" component={NewsFeed} />
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />

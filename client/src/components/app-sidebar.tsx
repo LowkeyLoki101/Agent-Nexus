@@ -31,6 +31,11 @@ import {
   LogOut,
   ChevronUp,
   User,
+  DoorOpen,
+  Newspaper,
+  Swords,
+  Zap,
+  BookOpen,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -38,6 +43,21 @@ const mainNavItems = [
     title: "Dashboard",
     url: "/",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Agents",
+    url: "/agents",
+    icon: Bot,
+  },
+  {
+    title: "Rooms",
+    url: "/rooms",
+    icon: DoorOpen,
+  },
+  {
+    title: "News Feed",
+    url: "/news",
+    icon: Newspaper,
   },
   {
     title: "Studios",
@@ -48,11 +68,6 @@ const mainNavItems = [
     title: "Briefings",
     url: "/briefings",
     icon: ClipboardList,
-  },
-  {
-    title: "Agents",
-    url: "/agents",
-    icon: Bot,
   },
   {
     title: "API Tokens",
