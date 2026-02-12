@@ -43,6 +43,12 @@ import {
   Info,
   Palette,
   Search,
+  Wrench,
+  Activity,
+  Dumbbell,
+  ScanLine,
+  Flame,
+  Trophy,
 } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -56,6 +62,8 @@ import type {
   DiaryEntry,
   DiceRollLogEntry,
   Room,
+  AgentToolProficiency,
+  Tool,
 } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
@@ -319,7 +327,79 @@ export default function AgentDetail() {
     enabled: !!agentId,
   });
 
+  // Tool/Body system
+  type EnrichedToolProficiency = AgentToolProficiency & {
+    tool: { name: string; description: string | null; category: string; tier: number | null; synergyTools: string[] | null; associatedActions: string[] | null } | null;
+  };
+
+  const { data: agentTools } = useQuery<EnrichedToolProficiency[]>({
+    queryKey: ["/api/agents", agentId, "tools"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agents/${agentId}/tools`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch tools");
+      return res.json();
+    },
+    enabled: !!agentId,
+  });
+
+  const { data: toolHealth } = useQuery<{
+    overallHealth: number;
+    toolCount: number;
+    pristine: number;
+    sharp: number;
+    functional: number;
+    dull: number;
+    broken: number;
+    criticalTools: string[];
+    recommendations: string[];
+  }>({
+    queryKey: ["/api/agents", agentId, "tools", "health"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agents/${agentId}/tools/health`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch tool health");
+      return res.json();
+    },
+    enabled: !!agentId,
+  });
+
   // --- Mutations ---
+
+  const practiceMutation = useMutation({
+    mutationFn: async (toolId: string) => {
+      return apiRequest("POST", `/api/agents/${agentId}/tools/${toolId}/practice`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "tools"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "tools", "health"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "state"] });
+      toast({ title: "Practice complete", description: "Tool proficiency improved." });
+    },
+  });
+
+  const calibrateMutation = useMutation({
+    mutationFn: async (toolId: string) => {
+      return apiRequest("POST", `/api/agents/${agentId}/tools/${toolId}/calibrate`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "tools"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "tools", "health"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "state"] });
+      toast({ title: "Calibration complete", description: "Tool fine-tuned." });
+    },
+  });
+
+  const diagnoseMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/agents/${agentId}/diagnose`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "tools"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "tools", "health"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "state"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agentId, "diary"] });
+      toast({ title: "Diagnostic complete", description: "Body checkup finished." });
+    },
+  });
 
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
@@ -1102,6 +1182,240 @@ export default function AgentDetail() {
           </Card>
         </div>
       </div>
+
+      {/* === TOOL / BODY SYSTEM === */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Wrench className="h-4 w-4 text-primary" />
+              Body &amp; Instruments
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              {toolHealth && (
+                <div className="flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium">Readiness:</span>
+                  <span className={`text-xs font-bold ${
+                    toolHealth.overallHealth >= 80 ? "text-emerald-500" :
+                    toolHealth.overallHealth >= 50 ? "text-amber-500" :
+                    "text-red-500"
+                  }`}>
+                    {toolHealth.overallHealth}%
+                  </span>
+                </div>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={() => diagnoseMutation.mutate()}
+                disabled={diagnoseMutation.isPending}
+              >
+                <ScanLine className="h-3.5 w-3.5" />
+                {diagnoseMutation.isPending ? "Running..." : "Run Diagnostic"}
+              </Button>
+            </div>
+          </div>
+          <CardDescription className="text-xs">
+            Tools are the agent's body. Proficiency decays without practice. Keep instruments sharp.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {/* Health Summary Bar */}
+          {toolHealth && toolHealth.toolCount > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex-1 h-3 bg-muted rounded-full overflow-hidden flex">
+                  {toolHealth.pristine > 0 && (
+                    <div
+                      className="h-full bg-emerald-500 transition-all"
+                      style={{ width: `${(toolHealth.pristine / toolHealth.toolCount) * 100}%` }}
+                      title={`${toolHealth.pristine} pristine`}
+                    />
+                  )}
+                  {toolHealth.sharp > 0 && (
+                    <div
+                      className="h-full bg-blue-500 transition-all"
+                      style={{ width: `${(toolHealth.sharp / toolHealth.toolCount) * 100}%` }}
+                      title={`${toolHealth.sharp} sharp`}
+                    />
+                  )}
+                  {toolHealth.functional > 0 && (
+                    <div
+                      className="h-full bg-amber-500 transition-all"
+                      style={{ width: `${(toolHealth.functional / toolHealth.toolCount) * 100}%` }}
+                      title={`${toolHealth.functional} functional`}
+                    />
+                  )}
+                  {toolHealth.dull > 0 && (
+                    <div
+                      className="h-full bg-orange-500 transition-all"
+                      style={{ width: `${(toolHealth.dull / toolHealth.toolCount) * 100}%` }}
+                      title={`${toolHealth.dull} dull`}
+                    />
+                  )}
+                  {toolHealth.broken > 0 && (
+                    <div
+                      className="h-full bg-red-500 transition-all"
+                      style={{ width: `${(toolHealth.broken / toolHealth.toolCount) * 100}%` }}
+                      title={`${toolHealth.broken} broken`}
+                    />
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-[10px] text-muted-foreground flex-wrap">
+                {toolHealth.pristine > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />{toolHealth.pristine} pristine</span>}
+                {toolHealth.sharp > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-500" />{toolHealth.sharp} sharp</span>}
+                {toolHealth.functional > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" />{toolHealth.functional} functional</span>}
+                {toolHealth.dull > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-500" />{toolHealth.dull} dull</span>}
+                {toolHealth.broken > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />{toolHealth.broken} broken</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Tool Grid */}
+          {agentTools && agentTools.length > 0 ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {agentTools.map((tp) => {
+                const profValue = tp.proficiency ?? 50;
+                const condColor =
+                  profValue >= 80 ? "border-emerald-500/30 bg-emerald-500/5" :
+                  profValue >= 60 ? "border-blue-500/30 bg-blue-500/5" :
+                  profValue >= 40 ? "border-amber-500/30 bg-amber-500/5" :
+                  profValue >= 20 ? "border-orange-500/30 bg-orange-500/5" :
+                  "border-red-500/30 bg-red-500/5";
+                const profColor =
+                  profValue >= 80 ? "bg-emerald-500" :
+                  profValue >= 60 ? "bg-blue-500" :
+                  profValue >= 40 ? "bg-amber-500" :
+                  profValue >= 20 ? "bg-orange-500" :
+                  "bg-red-500";
+
+                const categoryIcon: Record<string, React.ReactNode> = {
+                  analysis: <Search className="h-3.5 w-3.5" />,
+                  synthesis: <Sparkles className="h-3.5 w-3.5" />,
+                  communication: <MessageSquare className="h-3.5 w-3.5" />,
+                  investigation: <Eye className="h-3.5 w-3.5" />,
+                  creation: <Palette className="h-3.5 w-3.5" />,
+                  navigation: <MapPin className="h-3.5 w-3.5" />,
+                  combat: <Swords className="h-3.5 w-3.5" />,
+                  perception: <Eye className="h-3.5 w-3.5" />,
+                };
+
+                return (
+                  <div key={tp.id} className={`rounded-lg border p-3 ${condColor} transition-all`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="text-muted-foreground shrink-0">
+                          {categoryIcon[tp.tool?.category ?? ""] || <Wrench className="h-3.5 w-3.5" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate">{tp.tool?.name ?? "Unknown"}</p>
+                          <p className="text-[10px] text-muted-foreground capitalize">{tp.tool?.category}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {tp.tool?.tier && tp.tool.tier > 1 && (
+                          <span className="text-[10px] text-amber-500">{"*".repeat(tp.tool.tier)}</span>
+                        )}
+                        {tp.advancedUnlocked && (
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Trophy className="h-3 w-3 text-amber-400" />
+                            </TooltipTrigger>
+                            <TooltipContent>Advanced uses unlocked</TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Proficiency bar */}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${profColor} rounded-full transition-all`}
+                          style={{ width: `${profValue}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono font-medium w-8 text-right">{profValue}%</span>
+                    </div>
+
+                    {/* Stats row */}
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-2">
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 capitalize">
+                        {tp.condition}
+                      </Badge>
+                      {(tp.streakDays ?? 0) > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          <Flame className="h-2.5 w-2.5 text-orange-400" />
+                          {tp.streakDays}d streak
+                        </span>
+                      )}
+                      {tp.peakProficiency != null && tp.peakProficiency > profValue && (
+                        <span className="flex items-center gap-0.5">
+                          <TrendingUp className="h-2.5 w-2.5" />
+                          peak {tp.peakProficiency}%
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[10px] px-2 gap-1"
+                        onClick={() => practiceMutation.mutate(tp.toolId)}
+                        disabled={practiceMutation.isPending}
+                      >
+                        <Dumbbell className="h-3 w-3" />
+                        Practice
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[10px] px-2 gap-1"
+                        onClick={() => calibrateMutation.mutate(tp.toolId)}
+                        disabled={calibrateMutation.isPending}
+                      >
+                        <ScanLine className="h-3 w-3" />
+                        Calibrate
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <Wrench className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+              <p className="text-xs text-muted-foreground">No tools registered yet.</p>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Run a diagnostic to discover available instruments.
+              </p>
+            </div>
+          )}
+
+          {/* Recommendations */}
+          {toolHealth && toolHealth.recommendations.length > 0 && (
+            <div className="mt-4 rounded-lg border border-dashed p-3 bg-muted/30">
+              <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5">
+                <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                Recommendations
+              </p>
+              <ul className="space-y-0.5">
+                {toolHealth.recommendations.slice(0, 4).map((rec, i) => (
+                  <li key={i} className="text-[10px] text-muted-foreground flex items-start gap-1">
+                    <span className="text-muted-foreground/60 shrink-0 mt-px">-</span>
+                    <span>{rec}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

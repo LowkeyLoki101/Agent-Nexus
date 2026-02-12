@@ -22,6 +22,9 @@ import {
   chaosEvents,
   simulationState,
   informationInjections,
+  toolRegistry,
+  agentToolProficiency,
+  diagnosticLog,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -66,6 +69,12 @@ import {
   type InsertSimulationState,
   type InformationInjection,
   type InsertInformationInjection,
+  type Tool,
+  type InsertTool,
+  type AgentToolProficiency,
+  type InsertAgentToolProficiency,
+  type DiagnosticLogEntry,
+  type InsertDiagnosticLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, or, inArray, sql } from "drizzle-orm";
@@ -196,6 +205,20 @@ export interface IStorage {
   getPendingInjections(workspaceId: string): Promise<InformationInjection[]>;
   createInformationInjection(injection: InsertInformationInjection): Promise<InformationInjection>;
   updateInformationInjection(id: string, updates: Partial<InformationInjection>): Promise<InformationInjection | undefined>;
+
+  // --- Tool/Body System ---
+  getToolsByWorkspace(workspaceId: string): Promise<Tool[]>;
+  getTool(id: string): Promise<Tool | undefined>;
+  createTool(tool: InsertTool): Promise<Tool>;
+  updateTool(id: string, updates: Partial<InsertTool>): Promise<Tool | undefined>;
+  deleteTool(id: string): Promise<void>;
+  getAgentTools(agentId: string): Promise<AgentToolProficiency[]>;
+  getAgentToolProficiency(agentId: string, toolId: string): Promise<AgentToolProficiency | undefined>;
+  upsertAgentToolProficiency(data: InsertAgentToolProficiency): Promise<AgentToolProficiency>;
+  updateAgentToolProficiency(id: string, updates: Partial<AgentToolProficiency>): Promise<AgentToolProficiency | undefined>;
+  decayToolProficiencies(workspaceId: string, decayAmount: number): Promise<void>;
+  getDiagnosticLogs(agentId: string, limit?: number): Promise<DiagnosticLogEntry[]>;
+  createDiagnosticLog(log: InsertDiagnosticLog): Promise<DiagnosticLogEntry>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -731,6 +754,93 @@ export class DatabaseStorage implements IStorage {
   async updateInformationInjection(id: string, updates: Partial<InformationInjection>): Promise<InformationInjection | undefined> {
     const [updated] = await db.update(informationInjections).set({ ...updates, updatedAt: new Date() }).where(eq(informationInjections.id, id)).returning();
     return updated;
+  }
+
+  // =============================================
+  // TOOL/BODY SYSTEM
+  // =============================================
+
+  async getToolsByWorkspace(workspaceId: string): Promise<Tool[]> {
+    return db.select().from(toolRegistry).where(
+      and(eq(toolRegistry.workspaceId, workspaceId), eq(toolRegistry.isActive, true))
+    ).orderBy(toolRegistry.category, toolRegistry.name);
+  }
+
+  async getTool(id: string): Promise<Tool | undefined> {
+    const [tool] = await db.select().from(toolRegistry).where(eq(toolRegistry.id, id));
+    return tool;
+  }
+
+  async createTool(tool: InsertTool): Promise<Tool> {
+    const [created] = await db.insert(toolRegistry).values(tool as any).returning();
+    return created;
+  }
+
+  async updateTool(id: string, updates: Partial<InsertTool>): Promise<Tool | undefined> {
+    const [updated] = await db.update(toolRegistry).set({ ...updates, updatedAt: new Date() }).where(eq(toolRegistry.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTool(id: string): Promise<void> {
+    await db.delete(toolRegistry).where(eq(toolRegistry.id, id));
+  }
+
+  async getAgentTools(agentId: string): Promise<AgentToolProficiency[]> {
+    return db.select().from(agentToolProficiency).where(eq(agentToolProficiency.agentId, agentId)).orderBy(desc(agentToolProficiency.proficiency));
+  }
+
+  async getAgentToolProficiency(agentId: string, toolId: string): Promise<AgentToolProficiency | undefined> {
+    const [prof] = await db.select().from(agentToolProficiency).where(
+      and(eq(agentToolProficiency.agentId, agentId), eq(agentToolProficiency.toolId, toolId))
+    );
+    return prof;
+  }
+
+  async upsertAgentToolProficiency(data: InsertAgentToolProficiency): Promise<AgentToolProficiency> {
+    // Check if exists
+    const existing = await this.getAgentToolProficiency(data.agentId, data.toolId);
+    if (existing) {
+      const [updated] = await db.update(agentToolProficiency)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(agentToolProficiency.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(agentToolProficiency).values(data as any).returning();
+    return created;
+  }
+
+  async updateAgentToolProficiency(id: string, updates: Partial<AgentToolProficiency>): Promise<AgentToolProficiency | undefined> {
+    const [updated] = await db.update(agentToolProficiency).set({ ...updates, updatedAt: new Date() }).where(eq(agentToolProficiency.id, id)).returning();
+    return updated;
+  }
+
+  async decayToolProficiencies(workspaceId: string, decayAmount: number): Promise<void> {
+    // Decay all tool proficiencies for agents in this workspace
+    // Join through agents to filter by workspace
+    await db.execute(sql`
+      UPDATE agent_tool_proficiency atp
+      SET proficiency = GREATEST(0, atp.proficiency - ${decayAmount}),
+          condition = CASE
+            WHEN GREATEST(0, atp.proficiency - ${decayAmount}) >= 80 THEN 'pristine'
+            WHEN GREATEST(0, atp.proficiency - ${decayAmount}) >= 60 THEN 'sharp'
+            WHEN GREATEST(0, atp.proficiency - ${decayAmount}) >= 40 THEN 'functional'
+            WHEN GREATEST(0, atp.proficiency - ${decayAmount}) >= 20 THEN 'dull'
+            ELSE 'broken'
+          END,
+          updated_at = NOW()
+      FROM agents a
+      WHERE atp.agent_id = a.id AND a.workspace_id = ${workspaceId}
+    `);
+  }
+
+  async getDiagnosticLogs(agentId: string, limit = 20): Promise<DiagnosticLogEntry[]> {
+    return db.select().from(diagnosticLog).where(eq(diagnosticLog.agentId, agentId)).orderBy(desc(diagnosticLog.createdAt)).limit(limit);
+  }
+
+  async createDiagnosticLog(log: InsertDiagnosticLog): Promise<DiagnosticLogEntry> {
+    const [created] = await db.insert(diagnosticLog).values(log as any).returning();
+    return created;
   }
 }
 

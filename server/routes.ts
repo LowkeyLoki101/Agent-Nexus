@@ -4,6 +4,10 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import type { AuthenticatedRequest } from "./replit_integrations/auth";
 import { z } from "zod";
+import {
+  practiceTool, calibrateTool, runDiagnostic,
+  calculateToolHealth, getConditionFromProficiency
+} from "./simulation-engine";
 
 function getUserId(req: AuthenticatedRequest): string {
   return req.user.claims.sub;
@@ -2251,6 +2255,338 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching recent board posts:", error);
       res.status(500).json({ message: "Failed to fetch recent board posts" });
+    }
+  });
+
+  // =============================================
+  // --- Tool/Body System routes ---
+  // =============================================
+
+  // Get all tools in a workspace
+  app.get("/api/workspaces/:slug/tools", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const tools = await storage.getToolsByWorkspace(workspace.id);
+      res.json(tools);
+    } catch (error) {
+      console.error("Error fetching tools:", error);
+      res.status(500).json({ message: "Failed to fetch tools" });
+    }
+  });
+
+  // Create a new tool
+  const createToolSchema = z.object({
+    name: z.string().min(1).max(200),
+    description: z.string().optional(),
+    category: z.enum(["analysis", "synthesis", "communication", "investigation", "creation", "navigation", "combat", "perception"]),
+    decayRate: z.number().min(0).max(10).optional(),
+    practiceGain: z.number().min(0).max(100).optional(),
+    calibrationThreshold: z.number().min(0).max(100).optional(),
+    requiredTraits: z.record(z.number()).optional(),
+    synergyTools: z.array(z.string()).optional(),
+    associatedActions: z.array(z.string()).optional(),
+    tier: z.number().min(1).max(5).optional(),
+    isDiscoverable: z.boolean().optional(),
+  });
+
+  app.post("/api/workspaces/:slug/tools", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+      const workspace = await storage.getWorkspaceBySlug(slug);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const access = await checkWorkspaceAccess(userId, workspace.id, ["owner", "admin"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const validation = createToolSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const tool = await storage.createTool({
+        workspaceId: workspace.id,
+        ...validation.data,
+      });
+      res.status(201).json(tool);
+    } catch (error) {
+      console.error("Error creating tool:", error);
+      res.status(500).json({ message: "Failed to create tool" });
+    }
+  });
+
+  // Get an agent's tool proficiencies
+  app.get("/api/agents/:id/tools", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = param(req.params.id);
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const proficiencies = await storage.getAgentTools(agentId);
+      const tools = await storage.getToolsByWorkspace(agent.workspaceId);
+
+      // Enrich proficiencies with tool data
+      const enriched = proficiencies.map(prof => {
+        const tool = tools.find(t => t.id === prof.toolId);
+        return {
+          ...prof,
+          tool: tool ? {
+            name: tool.name,
+            description: tool.description,
+            category: tool.category,
+            tier: tool.tier,
+            synergyTools: tool.synergyTools,
+            associatedActions: tool.associatedActions,
+          } : null,
+        };
+      });
+
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching agent tools:", error);
+      res.status(500).json({ message: "Failed to fetch agent tools" });
+    }
+  });
+
+  // Get an agent's tool health summary
+  app.get("/api/agents/:id/tools/health", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = param(req.params.id);
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const proficiencies = await storage.getAgentTools(agentId);
+      const tools = await storage.getToolsByWorkspace(agent.workspaceId);
+
+      const health = calculateToolHealth(proficiencies, tools);
+      res.json(health);
+    } catch (error) {
+      console.error("Error fetching tool health:", error);
+      res.status(500).json({ message: "Failed to fetch tool health" });
+    }
+  });
+
+  // Practice a tool
+  app.post("/api/agents/:id/tools/:toolId/practice", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = param(req.params.id);
+      const toolId = param(req.params.toolId);
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const tool = await storage.getTool(toolId);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const state = await storage.getAgentState(agentId);
+      if (!state) return res.status(404).json({ message: "Agent state not found" });
+
+      let proficiency = await storage.getAgentToolProficiency(agentId, toolId);
+      if (!proficiency) {
+        // First time using this tool — create initial proficiency
+        proficiency = await storage.upsertAgentToolProficiency({
+          agentId,
+          toolId,
+          proficiency: 30,
+          peakProficiency: 30,
+          condition: "dull",
+        });
+      }
+
+      const allProficiencies = await storage.getAgentTools(agentId);
+      const result = practiceTool(proficiency, tool, state, allProficiencies);
+
+      // Update proficiency
+      await storage.updateAgentToolProficiency(proficiency.id, {
+        proficiency: result.newProficiency,
+        condition: result.newCondition as any,
+        peakProficiency: result.personalBest ? result.newProficiency : proficiency.peakProficiency,
+        lastPracticed: new Date(),
+        lastUsed: new Date(),
+        practiceCount: (proficiency.practiceCount ?? 0) + 1,
+        useCount: (proficiency.useCount ?? 0) + 1,
+        streakDays: result.streakDays,
+        bestStreakDays: Math.max(result.streakDays, proficiency.bestStreakDays ?? 0),
+        lastStreakDate: new Date(),
+      });
+
+      // Recalculate overall tool readiness
+      const updatedProfs = await storage.getAgentTools(agentId);
+      const tools = await storage.getToolsByWorkspace(agent.workspaceId);
+      const health = calculateToolHealth(updatedProfs, tools);
+      await storage.updateAgentState(agentId, { toolReadiness: health.overallHealth });
+
+      res.json({ result, toolReadiness: health.overallHealth });
+    } catch (error) {
+      console.error("Error practicing tool:", error);
+      res.status(500).json({ message: "Failed to practice tool" });
+    }
+  });
+
+  // Calibrate a tool
+  app.post("/api/agents/:id/tools/:toolId/calibrate", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = param(req.params.id);
+      const toolId = param(req.params.toolId);
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const tool = await storage.getTool(toolId);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const state = await storage.getAgentState(agentId);
+      if (!state) return res.status(404).json({ message: "Agent state not found" });
+
+      let proficiency = await storage.getAgentToolProficiency(agentId, toolId);
+      if (!proficiency) {
+        proficiency = await storage.upsertAgentToolProficiency({
+          agentId,
+          toolId,
+          proficiency: 30,
+          peakProficiency: 30,
+          condition: "dull",
+        });
+      }
+
+      const result = calibrateTool(proficiency, tool, state);
+
+      // Update proficiency
+      const newProf = Math.min(100, (proficiency.proficiency ?? 50) + result.proficiencyBoost);
+      await storage.updateAgentToolProficiency(proficiency.id, {
+        proficiency: newProf,
+        condition: result.newCondition as any,
+        lastCalibrated: new Date(),
+        lastUsed: new Date(),
+        calibrationCount: (proficiency.calibrationCount ?? 0) + 1,
+        useCount: (proficiency.useCount ?? 0) + 1,
+        advancedUnlocked: result.discoveredAdvanced || proficiency.advancedUnlocked,
+      });
+
+      // Recalculate overall tool readiness
+      const updatedProfs = await storage.getAgentTools(agentId);
+      const tools = await storage.getToolsByWorkspace(agent.workspaceId);
+      const health = calculateToolHealth(updatedProfs, tools);
+      await storage.updateAgentState(agentId, { toolReadiness: health.overallHealth });
+
+      res.json({ result, toolReadiness: health.overallHealth });
+    } catch (error) {
+      console.error("Error calibrating tool:", error);
+      res.status(500).json({ message: "Failed to calibrate tool" });
+    }
+  });
+
+  // Run diagnostic
+  app.post("/api/agents/:id/diagnose", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = param(req.params.id);
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const state = await storage.getAgentState(agentId);
+      if (!state) return res.status(404).json({ message: "Agent state not found" });
+
+      const proficiencies = await storage.getAgentTools(agentId);
+      const allTools = await storage.getToolsByWorkspace(agent.workspaceId);
+      const knownTools = allTools.filter(t => proficiencies.some(p => p.toolId === t.id));
+
+      const diagnostic = runDiagnostic(proficiencies, knownTools, allTools, state);
+
+      // Create discovered tool proficiencies (starting at 0 — they need to build up)
+      for (const toolId of diagnostic.discoveredTools) {
+        await storage.upsertAgentToolProficiency({
+          agentId,
+          toolId,
+          proficiency: 10,
+          peakProficiency: 10,
+          condition: "broken",
+          notes: "Newly discovered during diagnostic",
+        });
+      }
+
+      // Save diagnostic log
+      const log = await storage.createDiagnosticLog({
+        agentId,
+        workspaceId: agent.workspaceId,
+        overallHealth: diagnostic.overallHealth,
+        triggerType: "manual",
+        findings: diagnostic.findings,
+        recommendations: diagnostic.recommendations,
+        discoveredTools: diagnostic.discoveredTools,
+        actionCost: 2,
+        narrative: diagnostic.narrative,
+      });
+
+      // Update agent state
+      await storage.updateAgentState(agentId, {
+        toolReadiness: diagnostic.overallHealth,
+        lastDiagnostic: new Date(),
+      });
+
+      // Also create a diary entry for the diagnostic (it's a significant event)
+      await storage.createDiaryEntry({
+        agentId,
+        content: diagnostic.narrative,
+        triggerType: "diagnostic",
+        mood: diagnostic.overallHealth >= 70 ? "confident" : diagnostic.overallHealth >= 40 ? "concerned" : "anxious",
+        strategicNotes: diagnostic.recommendations.join("; "),
+      });
+
+      res.json({ diagnostic, log });
+    } catch (error) {
+      console.error("Error running diagnostic:", error);
+      res.status(500).json({ message: "Failed to run diagnostic" });
+    }
+  });
+
+  // Get diagnostic history
+  app.get("/api/agents/:id/diagnostics", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = param(req.params.id);
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const limit = req.query.limit ? parseInt(param(req.query.limit as string), 10) : 20;
+      const logs = await storage.getDiagnosticLogs(agentId, limit);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching diagnostics:", error);
+      res.status(500).json({ message: "Failed to fetch diagnostics" });
     }
   });
 

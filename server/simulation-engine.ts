@@ -11,7 +11,7 @@
 
 import type {
   AgentState, Room, AgentGoal, AgentMemoryEntry,
-  AgentRelationship, ChaosEvent
+  AgentRelationship, ChaosEvent, Tool, AgentToolProficiency
 } from "@shared/schema";
 
 // =============================================
@@ -21,7 +21,8 @@ import type {
 export type ActionType =
   | "chat" | "post_board" | "read_board" | "visit_room" | "write_diary"
   | "collaborate" | "compete" | "review" | "explore" | "rest" | "scheme"
-  | "vote" | "challenge" | "investigate" | "broadcast";
+  | "vote" | "challenge" | "investigate" | "broadcast"
+  | "practice" | "calibrate" | "diagnose";
 
 export type SimPhase = "dawn" | "morning" | "midday" | "evening" | "night";
 
@@ -110,6 +111,9 @@ const ACTION_COSTS: Record<ActionType, number> = {
   challenge: 3,
   investigate: 2,
   broadcast: 3,
+  practice: 2,   // Working out a tool
+  calibrate: 1,  // Fine-tuning a specific tool
+  diagnose: 2,   // Full body checkup
 };
 
 // What actions satisfy which needs (primary mapping)
@@ -129,6 +133,9 @@ const ACTION_NEED_MAP: Record<ActionType, keyof NeedScores> = {
   challenge: "power",
   investigate: "information",
   broadcast: "social",
+  practice: "resources",   // Maintaining your instruments
+  calibrate: "resources",  // Fine-tuning
+  diagnose: "safety",      // Knowing your own capabilities
 };
 
 // What traits amplify which actions
@@ -148,11 +155,14 @@ const ACTION_TRAIT_MAP: Record<ActionType, keyof TraitScores> = {
   challenge: "aggression",
   investigate: "curiosity",
   broadcast: "sociality",
+  practice: "strategy",    // Disciplined self-improvement
+  calibrate: "strategy",   // Precision tuning
+  diagnose: "curiosity",   // Self-awareness
 };
 
 // Phase-specific mandatory actions
 const PHASE_MANDATORY_ACTIONS: Record<SimPhase, ActionType[]> = {
-  dawn: ["write_diary"], // Reflection at dawn
+  dawn: ["write_diary", "diagnose"], // Reflection at dawn + body checkup
   morning: ["visit_room", "read_board"], // Explore and absorb
   midday: ["post_board"], // Contribute to community
   evening: ["vote"], // Participate in governance
@@ -211,6 +221,16 @@ export function rollDice(
   // Contests won bonus (momentum)
   if ((state.contestsWon ?? 0) > 0) {
     modifiers.momentum = Math.min((state.contestsWon ?? 0) * 2, 10);
+  }
+
+  // Tool readiness modifier — dull instruments penalize everything
+  const toolReadiness = state.toolReadiness ?? 75;
+  if (toolReadiness < 40) {
+    modifiers.dull_tools = -15; // Serious penalty
+  } else if (toolReadiness < 60) {
+    modifiers.rusty_tools = -8; // Noticeable degradation
+  } else if (toolReadiness >= 90) {
+    modifiers.sharp_tools = 5; // Well-maintained bonus
   }
 
   const totalModifier = Object.values(modifiers).reduce((a, b) => a + b, 0);
@@ -711,6 +731,9 @@ export function getActionNeedReward(actionType: ActionType): Partial<NeedScores>
     challenge: { power: 15 },
     investigate: { information: 20 },
     broadcast: { social: 15, power: 5 },
+    practice: { resources: 10, safety: 5 },
+    calibrate: { resources: 5 },
+    diagnose: { safety: 10, information: 5 },
   };
   return rewards[actionType] || {};
 }
@@ -771,4 +794,465 @@ function getRoomTypeAffinity(state: AgentState, roomType: string): number {
     council: () => ((state.traitStrategy ?? 50) / 100) * 10,
   };
   return affinities[roomType]?.() ?? 5;
+}
+
+// =============================================
+// TOOL / BODY SYSTEM
+// The agent's "body" is its instruments and tools.
+// Like muscles, proficiency decays without practice.
+// Like a health checkup, diagnostics reveal what needs attention.
+// =============================================
+
+export interface ToolHealthReport {
+  overallHealth: number; // 0-100
+  toolCount: number;
+  pristine: number;
+  sharp: number;
+  functional: number;
+  dull: number;
+  broken: number;
+  criticalTools: string[]; // tool IDs that need immediate attention
+  recommendations: string[];
+}
+
+export interface PracticeResult {
+  toolId: string;
+  previousProficiency: number;
+  newProficiency: number;
+  previousCondition: string;
+  newCondition: string;
+  streakDays: number;
+  personalBest: boolean; // did they beat their peak?
+  synergyBonus: number;  // bonus from synergistic tools
+}
+
+export interface CalibrationResult {
+  toolId: string;
+  previousCondition: string;
+  newCondition: string;
+  proficiencyBoost: number;
+  discoveredAdvanced: boolean; // did calibration reveal advanced uses?
+}
+
+export interface DiagnosticResult {
+  overallHealth: number;
+  findings: Array<{
+    toolId: string;
+    toolName: string;
+    proficiency: number;
+    condition: string;
+    recommendation: string;
+    urgency: "none" | "low" | "medium" | "high" | "critical";
+  }>;
+  recommendations: string[];
+  discoveredTools: string[];
+  narrative: string;
+}
+
+/**
+ * Determine the condition label from a proficiency value
+ */
+export function getConditionFromProficiency(proficiency: number): "pristine" | "sharp" | "functional" | "dull" | "broken" {
+  if (proficiency >= 80) return "pristine";
+  if (proficiency >= 60) return "sharp";
+  if (proficiency >= 40) return "functional";
+  if (proficiency >= 20) return "dull";
+  return "broken";
+}
+
+/**
+ * Calculate overall tool health for an agent
+ * This becomes the toolReadiness value on AgentState
+ */
+export function calculateToolHealth(
+  proficiencies: AgentToolProficiency[],
+  tools: Tool[]
+): ToolHealthReport {
+  if (proficiencies.length === 0) {
+    return {
+      overallHealth: 50, // Neutral if no tools
+      toolCount: 0,
+      pristine: 0, sharp: 0, functional: 0, dull: 0, broken: 0,
+      criticalTools: [],
+      recommendations: ["No tools registered. Run a diagnostic to discover available instruments."],
+    };
+  }
+
+  let totalWeightedHealth = 0;
+  let totalWeight = 0;
+  const conditions = { pristine: 0, sharp: 0, functional: 0, dull: 0, broken: 0 };
+  const criticalTools: string[] = [];
+  const recommendations: string[] = [];
+
+  for (const prof of proficiencies) {
+    const tool = tools.find(t => t.id === prof.toolId);
+    const tier = tool?.tier ?? 1;
+    const weight = tier; // Higher tier tools matter more
+
+    totalWeightedHealth += (prof.proficiency ?? 50) * weight;
+    totalWeight += 100 * weight;
+
+    const condition = prof.condition ?? "functional";
+    if (condition in conditions) {
+      conditions[condition as keyof typeof conditions]++;
+    }
+
+    if ((prof.proficiency ?? 50) < 20) {
+      criticalTools.push(prof.toolId);
+      recommendations.push(
+        `CRITICAL: ${tool?.name ?? "Unknown tool"} is broken (${prof.proficiency}%). Needs immediate practice.`
+      );
+    } else if ((prof.proficiency ?? 50) < 40) {
+      recommendations.push(
+        `${tool?.name ?? "Unknown tool"} is getting dull (${prof.proficiency}%). Schedule practice soon.`
+      );
+    }
+
+    // Check for stale tools (not used recently)
+    if (prof.lastUsed) {
+      const hoursSinceUse = (Date.now() - new Date(prof.lastUsed).getTime()) / (1000 * 60 * 60);
+      if (hoursSinceUse > 24) {
+        recommendations.push(
+          `${tool?.name ?? "Unknown tool"} hasn't been used in ${Math.floor(hoursSinceUse)}h. Muscle memory fading.`
+        );
+      }
+    }
+  }
+
+  const overallHealth = totalWeight > 0
+    ? Math.round((totalWeightedHealth / totalWeight) * 100)
+    : 50;
+
+  if (conditions.broken > 0) {
+    recommendations.unshift(`${conditions.broken} tool(s) broken. Prioritize repair through practice.`);
+  }
+  if (conditions.dull > proficiencies.length * 0.5) {
+    recommendations.unshift("More than half your tools are dull. Dedicate time to maintenance.");
+  }
+
+  return {
+    overallHealth,
+    toolCount: proficiencies.length,
+    ...conditions,
+    criticalTools,
+    recommendations,
+  };
+}
+
+/**
+ * Simulate practicing a tool — like working out a muscle
+ * Returns proficiency gain with bonuses for streaks and synergies
+ */
+export function practiceTool(
+  proficiency: AgentToolProficiency,
+  tool: Tool,
+  agentState: AgentState,
+  allProficiencies: AgentToolProficiency[]
+): PracticeResult {
+  const baseGain = tool.practiceGain ?? 5;
+
+  // Streak bonus: consecutive days of practice build momentum
+  // Day 1: 1x, Day 3: 1.2x, Day 7: 1.5x, Day 14+: 2x
+  const streak = proficiency.streakDays ?? 0;
+  let streakMultiplier = 1.0;
+  if (streak >= 14) streakMultiplier = 2.0;
+  else if (streak >= 7) streakMultiplier = 1.5;
+  else if (streak >= 3) streakMultiplier = 1.2;
+
+  // Trait bonus: strategy trait makes practice more efficient
+  const strategyBonus = ((agentState.traitStrategy ?? 50) / 100) * 0.5; // 0 to 0.5x extra
+
+  // Diminishing returns near cap: harder to go from 90->100 than 40->50
+  const currentProf = proficiency.proficiency ?? 50;
+  const dimReturns = currentProf >= 80 ? 0.5 : currentProf >= 60 ? 0.8 : 1.0;
+
+  // Synergy bonus: proficiency in related tools boosts practice
+  let synergyBonus = 0;
+  if (tool.synergyTools && tool.synergyTools.length > 0) {
+    for (const synergyId of tool.synergyTools) {
+      const synergyProf = allProficiencies.find(p => p.toolId === synergyId);
+      if (synergyProf && (synergyProf.proficiency ?? 0) >= 60) {
+        synergyBonus += 1; // +1 per synergistic tool that's at least "sharp"
+      }
+    }
+  }
+
+  const totalGain = Math.round(
+    (baseGain + synergyBonus) * streakMultiplier * (1 + strategyBonus) * dimReturns
+  );
+
+  const newProficiency = Math.min(100, currentProf + totalGain);
+  const newCondition = getConditionFromProficiency(newProficiency);
+  const personalBest = newProficiency > (proficiency.peakProficiency ?? 0);
+
+  return {
+    toolId: tool.id,
+    previousProficiency: currentProf,
+    newProficiency,
+    previousCondition: proficiency.condition ?? "functional",
+    newCondition,
+    streakDays: streak + 1,
+    personalBest,
+    synergyBonus,
+  };
+}
+
+/**
+ * Calibrate a tool — fine-tuning for precision
+ * Cheaper than practice, boosts condition more than proficiency
+ * Has a chance to unlock advanced uses
+ */
+export function calibrateTool(
+  proficiency: AgentToolProficiency,
+  tool: Tool,
+  agentState: AgentState
+): CalibrationResult {
+  const currentProf = proficiency.proficiency ?? 50;
+
+  // Calibration gives a small proficiency boost
+  const boost = Math.round(2 + ((agentState.traitStrategy ?? 50) / 100) * 3);
+  const newProficiency = Math.min(100, currentProf + boost);
+
+  // Condition jumps up more aggressively with calibration
+  const conditionBoost = Math.min(100, currentProf + boost + 10);
+  const newCondition = getConditionFromProficiency(conditionBoost);
+
+  // Chance to discover advanced uses (curiosity trait + high proficiency)
+  const discoveryChance = (
+    ((agentState.traitCuriosity ?? 50) / 100) * 0.15 +
+    (currentProf / 100) * 0.10
+  );
+  const discoveredAdvanced = !proficiency.advancedUnlocked && Math.random() < discoveryChance;
+
+  return {
+    toolId: tool.id,
+    previousCondition: proficiency.condition ?? "functional",
+    newCondition,
+    proficiencyBoost: boost,
+    discoveredAdvanced,
+  };
+}
+
+/**
+ * Run a full diagnostic — the agent's "health checkup"
+ * Examines all tools, generates recommendations, may discover new tools
+ */
+export function runDiagnostic(
+  proficiencies: AgentToolProficiency[],
+  tools: Tool[],
+  workspaceTools: Tool[],
+  agentState: AgentState
+): DiagnosticResult {
+  const findings: DiagnosticResult["findings"] = [];
+  const recommendations: string[] = [];
+  const discoveredTools: string[] = [];
+
+  // Check each tool the agent has
+  for (const prof of proficiencies) {
+    const tool = tools.find(t => t.id === prof.toolId);
+    if (!tool) continue;
+
+    const profValue = prof.proficiency ?? 50;
+    let urgency: "none" | "low" | "medium" | "high" | "critical" = "none";
+    let recommendation = "Maintained.";
+
+    if (profValue < 20) {
+      urgency = "critical";
+      recommendation = "Broken. Needs intensive practice immediately. All actions using this tool are severely impaired.";
+    } else if (profValue < 40) {
+      urgency = "high";
+      recommendation = "Dull. Schedule multiple practice sessions. Performance is degraded.";
+    } else if (profValue < 60) {
+      urgency = "medium";
+      recommendation = "Functional but slipping. One or two practice sessions recommended.";
+    } else if (profValue < 80) {
+      urgency = "low";
+      recommendation = "Sharp. A calibration would bring it to peak condition.";
+    } else {
+      recommendation = "Pristine. Keep up the practice streak.";
+    }
+
+    // Check for advanced use discovery
+    if (!prof.advancedUnlocked && profValue >= 70) {
+      recommendation += " Consider calibrating to discover advanced uses.";
+      if (urgency === "none") urgency = "low";
+    }
+
+    findings.push({
+      toolId: tool.id,
+      toolName: tool.name,
+      proficiency: profValue,
+      condition: prof.condition ?? "functional",
+      recommendation,
+      urgency,
+    });
+  }
+
+  // Check for undiscovered tools in the workspace
+  const knownToolIds = new Set(proficiencies.map(p => p.toolId));
+  const curiosity = (agentState.traitCuriosity ?? 50) / 100;
+
+  for (const wTool of workspaceTools) {
+    if (knownToolIds.has(wTool.id)) continue;
+    if (!wTool.isDiscoverable) continue;
+
+    // Discovery chance based on curiosity + tool tier (rarer = harder)
+    const tier = wTool.tier ?? 1;
+    const discoveryChance = curiosity * 0.2 / tier;
+    if (Math.random() < discoveryChance) {
+      discoveredTools.push(wTool.id);
+      recommendations.push(`Discovered new instrument: ${wTool.name} (${wTool.category}). Consider practicing to build proficiency.`);
+    }
+  }
+
+  // Generate summary recommendations
+  const criticalCount = findings.filter(f => f.urgency === "critical").length;
+  const highCount = findings.filter(f => f.urgency === "high").length;
+
+  if (criticalCount > 0) {
+    recommendations.unshift(`URGENT: ${criticalCount} tool(s) in critical condition. Immediate practice required.`);
+  }
+  if (highCount > 0) {
+    recommendations.push(`${highCount} tool(s) need attention soon.`);
+  }
+
+  // Overall health
+  const health = calculateToolHealth(proficiencies, tools);
+
+  // Generate narrative
+  const narrative = generateDiagnosticNarrative(agentState, health, findings, discoveredTools);
+
+  return {
+    overallHealth: health.overallHealth,
+    findings,
+    recommendations,
+    discoveredTools,
+    narrative,
+  };
+}
+
+/**
+ * Generate a narrative for the diagnostic result (for narrator integration)
+ */
+function generateDiagnosticNarrative(
+  state: AgentState,
+  health: ToolHealthReport,
+  findings: DiagnosticResult["findings"],
+  discoveredTools: string[]
+): string {
+  const agentName = state.agentId; // Will be resolved to name in the route handler
+
+  if (health.overallHealth >= 90) {
+    return `${agentName} runs a meticulous diagnostic. Every instrument hums at peak performance — pristine, calibrated, ready. There is a quiet satisfaction in knowing your tools are extensions of yourself, and they are razor-sharp.`;
+  }
+  if (health.overallHealth >= 70) {
+    return `${agentName} conducts a routine checkup. Most instruments are in good shape, though ${health.dull > 0 ? `${health.dull} could use some attention` : "a few show minor wear"}. Overall, a solid foundation to work from.`;
+  }
+  if (health.overallHealth >= 50) {
+    const worstTool = findings.sort((a, b) => a.proficiency - b.proficiency)[0];
+    return `${agentName} examines their toolkit with a critical eye. ${worstTool?.toolName || "Several instruments"} ${worstTool ? `is only at ${worstTool.proficiency}%` : "need work"}. The rust of disuse is creeping in. Time to hit the practice floor.`;
+  }
+  if (health.overallHealth >= 30) {
+    return `${agentName} winces at the diagnostic results. ${health.broken + health.dull} instruments are degraded. Muscle memory is fading, precision is slipping. Without dedicated maintenance, capability will continue to erode.`;
+  }
+
+  let narrative = `${agentName}'s diagnostic reveals a dire situation. ${health.broken} instrument(s) broken, ${health.dull} dull. The body is failing — tools that once felt like natural extensions now feel foreign and unresponsive. Urgent intervention needed.`;
+
+  if (discoveredTools.length > 0) {
+    narrative += ` But there's a silver lining: ${discoveredTools.length} new instrument(s) discovered during the checkup.`;
+  }
+
+  return narrative;
+}
+
+/**
+ * Decay tool proficiencies for a single agent (called during sim tick)
+ * Uses each tool's individual decay rate
+ */
+export function calculateToolDecay(
+  proficiencies: AgentToolProficiency[],
+  tools: Tool[]
+): Array<{ proficiencyId: string; newProficiency: number; newCondition: string }> {
+  return proficiencies.map(prof => {
+    const tool = tools.find(t => t.id === prof.toolId);
+    const decayRate = tool?.decayRate ?? 1.0;
+    const currentProf = prof.proficiency ?? 50;
+
+    // Decay is faster when the tool is already neglected (compound atrophy)
+    const neglectMultiplier = currentProf < 30 ? 1.5 : currentProf < 50 ? 1.2 : 1.0;
+
+    // Practice streaks slow decay (habit = resistance to atrophy)
+    const streakResistance = Math.min(0.5, (prof.streakDays ?? 0) * 0.05);
+
+    const actualDecay = Math.round(decayRate * neglectMultiplier * (1 - streakResistance));
+    const newProficiency = Math.max(0, currentProf - actualDecay);
+
+    return {
+      proficiencyId: prof.id,
+      newProficiency,
+      newCondition: getConditionFromProficiency(newProficiency),
+    };
+  });
+}
+
+/**
+ * Generate tool-related actions for the available actions list
+ */
+export function generateToolActions(
+  state: AgentState,
+  proficiencies: AgentToolProficiency[],
+  tools: Tool[]
+): ActionCandidate[] {
+  const actions: ActionCandidate[] = [];
+
+  // Always offer diagnostic if not done recently
+  const hoursSinceDiag = state.lastDiagnostic
+    ? (Date.now() - new Date(state.lastDiagnostic).getTime()) / (1000 * 60 * 60)
+    : 999;
+
+  if (hoursSinceDiag > 6) {
+    actions.push({
+      actionType: "diagnose",
+      label: "Run diagnostic checkup",
+      baseScore: hoursSinceDiag > 24 ? 60 : 30, // More urgent if overdue
+      primaryNeed: "safety",
+      primaryTrait: "curiosity",
+      cost: ACTION_COSTS.diagnose,
+    });
+  }
+
+  // Generate practice actions for tools that need it
+  for (const prof of proficiencies) {
+    const tool = tools.find(t => t.id === prof.toolId);
+    if (!tool) continue;
+
+    const profValue = prof.proficiency ?? 50;
+
+    // Practice: higher base score for tools that need it more
+    const practiceUrgency = profValue < 30 ? 70 : profValue < 50 ? 50 : profValue < 70 ? 30 : 15;
+    actions.push({
+      actionType: "practice",
+      targetId: tool.id,
+      label: `Practice ${tool.name}`,
+      baseScore: practiceUrgency,
+      primaryNeed: "resources",
+      primaryTrait: "strategy",
+      cost: ACTION_COSTS.practice,
+    });
+
+    // Calibrate: offered when tool is above threshold but could be better
+    if (profValue >= (tool.calibrationThreshold ?? 40) && profValue < 90) {
+      actions.push({
+        actionType: "calibrate",
+        targetId: tool.id,
+        label: `Calibrate ${tool.name}`,
+        baseScore: 25,
+        primaryNeed: "resources",
+        primaryTrait: "strategy",
+        cost: ACTION_COSTS.calibrate,
+      });
+    }
+  }
+
+  return actions;
 }

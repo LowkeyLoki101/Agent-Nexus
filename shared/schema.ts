@@ -266,6 +266,12 @@ export const agentState = pgTable("agent_state", {
   mood: text("mood").default("neutral"),
   energy: integer("energy").default(100),
 
+  // Tool readiness (0-100) — aggregate health of all tools
+  // Affects dice rolls: low readiness = penalty on everything
+  toolReadiness: integer("tool_readiness").default(75),
+  // Last time this agent ran a full diagnostic
+  lastDiagnostic: timestamp("last_diagnostic"),
+
   // What the agent is currently focused on
   currentFocus: text("current_focus"),
 
@@ -671,6 +677,132 @@ export const informationInjections = pgTable("information_injections", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// =============================================
+// --- Simulation: Tool/Body System ---
+// Tools = the agent's body/instruments
+// Proficiency = muscle memory, decays without practice
+// Diagnostics = health checkups
+// =============================================
+
+export const toolCategoryEnum = pgEnum("tool_category", [
+  "analysis", "synthesis", "communication", "investigation",
+  "creation", "navigation", "combat", "perception"
+]);
+
+export const toolConditionEnum = pgEnum("tool_condition", [
+  "pristine", "sharp", "functional", "dull", "broken"
+]);
+
+export const toolRegistry = pgTable("tool_registry", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description"),
+  category: toolCategoryEnum("category").notNull(),
+
+  // How fast proficiency degrades per simulation tick (0-10, higher = faster atrophy)
+  decayRate: real("decay_rate").default(1.0),
+  // How much proficiency restored per practice session (0-100)
+  practiceGain: real("practice_gain").default(5.0),
+  // Proficiency below which the tool is considered "needs calibration"
+  calibrationThreshold: integer("calibration_threshold").default(40),
+
+  // Traits that amplify effectiveness when using this tool
+  requiredTraits: jsonb("required_traits").$type<Record<string, number>>().default({}),
+  // Other tools that synergize with this one (bonuses when both proficient)
+  synergyTools: text("synergy_tools").array().default(sql`'{}'::text[]`),
+
+  // Can agents discover this tool themselves, or must it be assigned?
+  isDiscoverable: boolean("is_discoverable").default(true),
+  // Who first discovered this tool (null if assigned)
+  discoveredByAgentId: varchar("discovered_by_agent_id"),
+
+  // Action types this tool is used for (e.g. "analysis" tool helps with "investigate" actions)
+  associatedActions: text("associated_actions").array().default(sql`'{}'::text[]`),
+
+  // How rare/powerful this tool is (1-5, affects discovery chance and bonus magnitude)
+  tier: integer("tier").default(1),
+
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const agentToolProficiency = pgTable("agent_tool_proficiency", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  toolId: varchar("tool_id").notNull().references(() => toolRegistry.id, { onDelete: "cascade" }),
+
+  // Current proficiency (0-100) — the "muscle strength"
+  proficiency: integer("proficiency").default(50),
+  // Highest proficiency ever achieved — "personal best"
+  peakProficiency: integer("peak_proficiency").default(50),
+
+  // Timestamps for tracking usage patterns
+  lastUsed: timestamp("last_used"),
+  lastPracticed: timestamp("last_practiced"),
+  lastCalibrated: timestamp("last_calibrated"),
+
+  // Usage counters
+  useCount: integer("use_count").default(0),
+  practiceCount: integer("practice_count").default(0),
+  calibrationCount: integer("calibration_count").default(0),
+
+  // Current tool condition (degrades with use, improves with calibration)
+  condition: toolConditionEnum("condition").default("functional"),
+
+  // Practice streak tracking — building habits
+  streakDays: integer("streak_days").default(0),
+  bestStreakDays: integer("best_streak_days").default(0),
+  lastStreakDate: timestamp("last_streak_date"),
+
+  // Agent's personal notes about this tool
+  notes: text("notes"),
+
+  // Whether the agent has "discovered" advanced uses
+  advancedUnlocked: boolean("advanced_unlocked").default(false),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const diagnosticLog = pgTable("diagnostic_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+
+  // Overall health score (0-100) — aggregate of all tool proficiencies
+  overallHealth: integer("overall_health").notNull(),
+
+  // What triggered the diagnostic: scheduled, manual, event, low_performance
+  triggerType: text("trigger_type").default("manual"),
+
+  // Per-tool findings
+  findings: jsonb("findings").$type<Array<{
+    toolId: string;
+    toolName: string;
+    proficiency: number;
+    condition: string;
+    recommendation: string;
+    urgency: "none" | "low" | "medium" | "high" | "critical";
+  }>>(),
+
+  // Recommendations generated from the diagnostic
+  recommendations: text("recommendations").array().default(sql`'{}'::text[]`),
+
+  // Tools that were discovered during this diagnostic
+  discoveredTools: text("discovered_tools").array().default(sql`'{}'::text[]`),
+
+  // How many AP it cost to run this diagnostic
+  actionCost: integer("action_cost").default(2),
+
+  // Summary narrative (for narrator integration)
+  narrative: text("narrative"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,
   createdAt: true,
@@ -792,6 +924,23 @@ export const insertInformationInjectionSchema = createInsertSchema(informationIn
   updatedAt: true,
 });
 
+export const insertToolRegistrySchema = createInsertSchema(toolRegistry).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAgentToolProficiencySchema = createInsertSchema(agentToolProficiency).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDiagnosticLogSchema = createInsertSchema(diagnosticLog).omit({
+  id: true,
+  createdAt: true,
+});
+
 // --- Types ---
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
@@ -839,3 +988,11 @@ export type SimulationStateRecord = typeof simulationState.$inferSelect;
 export type InsertSimulationState = z.infer<typeof insertSimulationStateSchema>;
 export type InformationInjection = typeof informationInjections.$inferSelect;
 export type InsertInformationInjection = z.infer<typeof insertInformationInjectionSchema>;
+
+// Tool/Body system types
+export type Tool = typeof toolRegistry.$inferSelect;
+export type InsertTool = z.infer<typeof insertToolRegistrySchema>;
+export type AgentToolProficiency = typeof agentToolProficiency.$inferSelect;
+export type InsertAgentToolProficiency = z.infer<typeof insertAgentToolProficiencySchema>;
+export type DiagnosticLogEntry = typeof diagnosticLog.$inferSelect;
+export type InsertDiagnosticLog = z.infer<typeof insertDiagnosticLogSchema>;
