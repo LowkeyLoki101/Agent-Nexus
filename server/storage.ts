@@ -6,6 +6,11 @@ import {
   apiTokens,
   auditLogs,
   briefings,
+  gameProfiles,
+  gameTasks,
+  gameTaskCompletions,
+  gameCycles,
+  gameForgeAccess,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -17,7 +22,17 @@ import {
   type AuditLog,
   type InsertAuditLog,
   type Briefing,
-  type InsertBriefing
+  type InsertBriefing,
+  type GameProfile,
+  type InsertGameProfile,
+  type GameTask,
+  type InsertGameTask,
+  type GameTaskCompletion,
+  type InsertGameTaskCompletion,
+  type GameCycle,
+  type InsertGameCycle,
+  type GameForgeAccess,
+  type InsertGameForgeAccess,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, or, inArray } from "drizzle-orm";
@@ -64,6 +79,25 @@ export interface IStorage {
   createBriefing(briefing: InsertBriefing): Promise<Briefing>;
   updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined>;
   deleteBriefing(id: string): Promise<void>;
+
+  // Game system
+  getGameProfile(userId: string): Promise<GameProfile | undefined>;
+  createGameProfile(profile: InsertGameProfile): Promise<GameProfile>;
+  updateGameProfile(userId: string, updates: Partial<InsertGameProfile>): Promise<GameProfile | undefined>;
+  getGameTasks(room?: string): Promise<GameTask[]>;
+  getGameTask(id: string): Promise<GameTask | undefined>;
+  createGameTask(task: InsertGameTask): Promise<GameTask>;
+  getTaskCompletionsByUserCycle(userId: string, cycleNumber: number): Promise<GameTaskCompletion[]>;
+  createTaskCompletion(completion: InsertGameTaskCompletion): Promise<GameTaskCompletion>;
+  getGameCycle(userId: string, cycleNumber: number): Promise<GameCycle | undefined>;
+  getCurrentGameCycle(userId: string): Promise<GameCycle | undefined>;
+  createGameCycle(cycle: InsertGameCycle): Promise<GameCycle>;
+  updateGameCycle(id: string, updates: Partial<InsertGameCycle>): Promise<GameCycle | undefined>;
+  getGameCycleHistory(userId: string, limit?: number): Promise<GameCycle[]>;
+  createForgeAccess(access: InsertGameForgeAccess): Promise<GameForgeAccess>;
+  getActiveForgeAccess(userId: string): Promise<GameForgeAccess | undefined>;
+  updateForgeAccess(id: string, updates: Partial<InsertGameForgeAccess>): Promise<GameForgeAccess | undefined>;
+  getForgeAccessHistory(userId: string, limit?: number): Promise<GameForgeAccess[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -304,6 +338,135 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBriefing(id: string): Promise<void> {
     await db.delete(briefings).where(eq(briefings.id, id));
+  }
+
+  // --- Game System ---
+
+  async getGameProfile(userId: string): Promise<GameProfile | undefined> {
+    const [profile] = await db.select().from(gameProfiles).where(eq(gameProfiles.userId, userId));
+    return profile;
+  }
+
+  async createGameProfile(profile: InsertGameProfile): Promise<GameProfile> {
+    const [created] = await db.insert(gameProfiles).values(profile).returning();
+    return created;
+  }
+
+  async updateGameProfile(userId: string, updates: Partial<InsertGameProfile>): Promise<GameProfile | undefined> {
+    const [updated] = await db
+      .update(gameProfiles)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(gameProfiles.userId, userId))
+      .returning();
+    return updated;
+  }
+
+  async getGameTasks(room?: string): Promise<GameTask[]> {
+    if (room) {
+      return db.select().from(gameTasks)
+        .where(and(eq(gameTasks.isActive, true), eq(gameTasks.room, room as any)))
+        .orderBy(gameTasks.sortOrder);
+    }
+    return db.select().from(gameTasks)
+      .where(eq(gameTasks.isActive, true))
+      .orderBy(gameTasks.sortOrder);
+  }
+
+  async getGameTask(id: string): Promise<GameTask | undefined> {
+    const [task] = await db.select().from(gameTasks).where(eq(gameTasks.id, id));
+    return task;
+  }
+
+  async createGameTask(task: InsertGameTask): Promise<GameTask> {
+    const [created] = await db.insert(gameTasks).values(task).returning();
+    return created;
+  }
+
+  async getTaskCompletionsByUserCycle(userId: string, cycleNumber: number): Promise<GameTaskCompletion[]> {
+    return db.select().from(gameTaskCompletions)
+      .where(and(
+        eq(gameTaskCompletions.userId, userId),
+        eq(gameTaskCompletions.cycleNumber, cycleNumber)
+      ))
+      .orderBy(desc(gameTaskCompletions.completedAt));
+  }
+
+  async createTaskCompletion(completion: InsertGameTaskCompletion): Promise<GameTaskCompletion> {
+    const [created] = await db.insert(gameTaskCompletions).values(completion).returning();
+    return created;
+  }
+
+  async getGameCycle(userId: string, cycleNumber: number): Promise<GameCycle | undefined> {
+    const [cycle] = await db.select().from(gameCycles)
+      .where(and(
+        eq(gameCycles.userId, userId),
+        eq(gameCycles.cycleNumber, cycleNumber)
+      ));
+    return cycle;
+  }
+
+  async getCurrentGameCycle(userId: string): Promise<GameCycle | undefined> {
+    const profile = await this.getGameProfile(userId);
+    if (!profile) return undefined;
+    return this.getGameCycle(userId, profile.currentCycleNumber);
+  }
+
+  async createGameCycle(cycle: InsertGameCycle): Promise<GameCycle> {
+    const [created] = await db.insert(gameCycles).values(cycle).returning();
+    return created;
+  }
+
+  async updateGameCycle(id: string, updates: Partial<InsertGameCycle>): Promise<GameCycle | undefined> {
+    const [updated] = await db
+      .update(gameCycles)
+      .set(updates)
+      .where(eq(gameCycles.id, id))
+      .returning();
+    return updated;
+  }
+
+  async getGameCycleHistory(userId: string, limit = 20): Promise<GameCycle[]> {
+    return db.select().from(gameCycles)
+      .where(eq(gameCycles.userId, userId))
+      .orderBy(desc(gameCycles.cycleNumber))
+      .limit(limit);
+  }
+
+  async createForgeAccess(access: InsertGameForgeAccess): Promise<GameForgeAccess> {
+    const [created] = await db.insert(gameForgeAccess).values(access).returning();
+    return created;
+  }
+
+  async getActiveForgeAccess(userId: string): Promise<GameForgeAccess | undefined> {
+    const profile = await this.getGameProfile(userId);
+    if (!profile) return undefined;
+    const results = await db.select().from(gameForgeAccess)
+      .where(and(
+        eq(gameForgeAccess.userId, userId),
+        eq(gameForgeAccess.cycleNumber, profile.currentCycleNumber)
+      ))
+      .orderBy(desc(gameForgeAccess.enteredAt))
+      .limit(1);
+    const access = results[0];
+    if (!access) return undefined;
+    if (access.buildsUsed >= access.buildsAllowed) return undefined;
+    return access;
+  }
+
+  async updateForgeAccess(id: string, updates: Partial<InsertGameForgeAccess>): Promise<GameForgeAccess | undefined> {
+    const [updated] = await db
+      .update(gameForgeAccess)
+      .set(updates)
+      .where(eq(gameForgeAccess.id, id))
+      .returning();
+    return updated;
+  }
+
+  async getForgeAccessHistory(userId: string, limit = 20): Promise<GameForgeAccess[]> {
+    return db.select().from(gameForgeAccess)
+      .where(eq(gameForgeAccess.userId, userId))
+      .orderBy(desc(gameForgeAccess.enteredAt))
+      .limit(limit);
   }
 }
 

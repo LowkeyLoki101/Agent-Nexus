@@ -4,6 +4,17 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import type { AuthenticatedRequest } from "./replit_integrations/auth";
 import { z } from "zod";
+import {
+  calculateSparkReward,
+  calculatePathSwitch,
+  calculateForgeAccess,
+  analyzeStagnation,
+  projectCycleEarnings,
+  getAvailableTaskRooms,
+  canCompleteTask,
+  FORGE_COSTS,
+  FORGE_BUILD_LIMITS,
+} from "./game-engine";
 
 function getUserId(req: AuthenticatedRequest): string {
   return req.user.claims.sub;
@@ -899,6 +910,479 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching workspace briefings:", error);
       res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
+  // ===========================================
+  // === NEXUS PROTOCOL: Game System Routes ===
+  // ===========================================
+
+  // Get or initialize game profile
+  app.get("/api/game/profile", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      let profile = await storage.getGameProfile(userId);
+
+      if (!profile) {
+        profile = await storage.createGameProfile({
+          userId,
+          sparkBalance: 0,
+          totalSparkEarned: 0,
+          totalSparkSpent: 0,
+          currentPath: null,
+          pathMomentum: 0,
+          currentCycleNumber: 1,
+          versatilityPoints: 0,
+          stagnationLevel: 0,
+          totalForgeEntries: 0,
+          totalTasksCompleted: 0,
+        });
+      }
+
+      const currentCycle = await storage.getCurrentGameCycle(userId);
+      const rooms = getAvailableTaskRooms(profile);
+      const projection = projectCycleEarnings(profile);
+      const stagnation = analyzeStagnation(profile, currentCycle ? {
+        archiveTasksCompleted: currentCycle.archiveTasksCompleted,
+        agoraTasksCompleted: currentCycle.agoraTasksCompleted,
+        totalTasksCompleted: currentCycle.tasksCompleted,
+      } : null);
+
+      res.json({
+        profile,
+        currentCycle,
+        rooms,
+        projection,
+        stagnation,
+        forgeCosts: FORGE_COSTS,
+      });
+    } catch (error) {
+      console.error("Error fetching game profile:", error);
+      res.status(500).json({ message: "Failed to fetch game profile" });
+    }
+  });
+
+  // Choose or switch path
+  const choosePathSchema = z.object({
+    path: z.enum(["scholar", "diplomat", "generalist"]),
+  });
+
+  app.post("/api/game/choose-path", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const validation = choosePathSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid path", errors: validation.error.flatten() });
+      }
+
+      const { path } = validation.data;
+      let profile = await storage.getGameProfile(userId);
+
+      if (!profile) {
+        profile = await storage.createGameProfile({
+          userId,
+          sparkBalance: 0,
+          totalSparkEarned: 0,
+          totalSparkSpent: 0,
+          currentPath: null,
+          pathMomentum: 0,
+          currentCycleNumber: 1,
+          versatilityPoints: 0,
+          stagnationLevel: 0,
+          totalForgeEntries: 0,
+          totalTasksCompleted: 0,
+        });
+      }
+
+      const switchResult = calculatePathSwitch(profile, path);
+
+      // Apply switch
+      const newMomentum = switchResult.momentumReset ? 0 : profile.pathMomentum + 1;
+
+      const updated = await storage.updateGameProfile(userId, {
+        currentPath: path,
+        sparkBalance: switchResult.newBalance,
+        totalSparkSpent: profile.totalSparkSpent + switchResult.sparkPenalty,
+        pathMomentum: newMomentum,
+        versatilityPoints: profile.versatilityPoints + switchResult.versatilityGained,
+      });
+
+      // Create or update cycle for this path
+      let currentCycle = await storage.getCurrentGameCycle(userId);
+      if (!currentCycle) {
+        currentCycle = await storage.createGameCycle({
+          userId,
+          cycleNumber: profile.currentCycleNumber,
+          pathChosen: path,
+          tasksCompleted: 0,
+          archiveTasksCompleted: 0,
+          agoraTasksCompleted: 0,
+          sparkEarned: 0,
+          sparkSpent: switchResult.sparkPenalty,
+          stagnationHits: 0,
+        });
+      }
+
+      res.json({
+        profile: updated,
+        switchResult,
+        currentCycle,
+      });
+    } catch (error) {
+      console.error("Error choosing path:", error);
+      res.status(500).json({ message: "Failed to choose path" });
+    }
+  });
+
+  // Get available tasks
+  app.get("/api/game/tasks", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const room = req.query.room as string | undefined;
+
+      const profile = await storage.getGameProfile(userId);
+      const tasks = await storage.getGameTasks(room);
+
+      // Annotate each task with availability and projected reward
+      const currentCycle = await storage.getCurrentGameCycle(userId);
+      const cycleStats = currentCycle ? {
+        archiveTasksCompleted: currentCycle.archiveTasksCompleted,
+        agoraTasksCompleted: currentCycle.agoraTasksCompleted,
+        totalTasksCompleted: currentCycle.tasksCompleted,
+      } : { archiveTasksCompleted: 0, agoraTasksCompleted: 0, totalTasksCompleted: 0 };
+
+      const annotated = tasks.map((task) => {
+        const availability = profile ? canCompleteTask(task, profile) : { allowed: false, reason: "No profile" };
+        const sparkCalc = profile ? calculateSparkReward(task, profile, cycleStats) : null;
+
+        return {
+          ...task,
+          availability,
+          sparkProjection: sparkCalc,
+        };
+      });
+
+      res.json(annotated);
+    } catch (error) {
+      console.error("Error fetching game tasks:", error);
+      res.status(500).json({ message: "Failed to fetch game tasks" });
+    }
+  });
+
+  // Complete a task
+  const completeTaskSchema = z.object({
+    taskId: z.string().min(1),
+  });
+
+  app.post("/api/game/complete-task", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const validation = completeTaskSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid task", errors: validation.error.flatten() });
+      }
+
+      const { taskId } = validation.data;
+      const profile = await storage.getGameProfile(userId);
+      if (!profile) {
+        return res.status(400).json({ message: "No game profile. Choose a path first." });
+      }
+
+      const task = await storage.getGameTask(taskId);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      const availability = canCompleteTask(task, profile);
+      if (!availability.allowed) {
+        return res.status(403).json({ message: availability.reason });
+      }
+
+      // Get current cycle
+      let currentCycle = await storage.getCurrentGameCycle(userId);
+      if (!currentCycle) {
+        return res.status(400).json({ message: "No active cycle. Choose a path first." });
+      }
+
+      const cycleStats = {
+        archiveTasksCompleted: currentCycle.archiveTasksCompleted,
+        agoraTasksCompleted: currentCycle.agoraTasksCompleted,
+        totalTasksCompleted: currentCycle.tasksCompleted,
+      };
+
+      // Calculate reward
+      const sparkCalc = calculateSparkReward(task, profile, cycleStats);
+
+      // Record completion
+      const completion = await storage.createTaskCompletion({
+        userId,
+        taskId,
+        cycleNumber: profile.currentCycleNumber,
+        sparkEarned: sparkCalc.finalReward,
+        pathAtCompletion: profile.currentPath,
+        momentumMultiplier: 1 + sparkCalc.momentumBonus,
+        stagnationPenalty: sparkCalc.stagnationPenalty,
+      });
+
+      // Update profile
+      await storage.updateGameProfile(userId, {
+        sparkBalance: profile.sparkBalance + sparkCalc.finalReward,
+        totalSparkEarned: profile.totalSparkEarned + sparkCalc.finalReward,
+        totalTasksCompleted: profile.totalTasksCompleted + 1,
+        stagnationLevel: sparkCalc.stagnationPenalty,
+      });
+
+      // Update cycle
+      const cycleUpdates: any = {
+        tasksCompleted: currentCycle.tasksCompleted + 1,
+        sparkEarned: currentCycle.sparkEarned + sparkCalc.finalReward,
+      };
+      if (task.room === "archive") {
+        cycleUpdates.archiveTasksCompleted = currentCycle.archiveTasksCompleted + 1;
+      } else if (task.room === "agora") {
+        cycleUpdates.agoraTasksCompleted = currentCycle.agoraTasksCompleted + 1;
+      }
+      if (sparkCalc.wasStagnated) {
+        cycleUpdates.stagnationHits = currentCycle.stagnationHits + 1;
+      }
+
+      await storage.updateGameCycle(currentCycle.id, cycleUpdates);
+
+      const updatedProfile = await storage.getGameProfile(userId);
+      const updatedCycle = await storage.getCurrentGameCycle(userId);
+
+      res.json({
+        completion,
+        sparkCalculation: sparkCalc,
+        profile: updatedProfile,
+        currentCycle: updatedCycle,
+      });
+    } catch (error) {
+      console.error("Error completing task:", error);
+      res.status(500).json({ message: "Failed to complete task" });
+    }
+  });
+
+  // Enter the Forge
+  const enterForgeSchema = z.object({
+    tier: z.enum(["basic", "extended", "master"]),
+  });
+
+  app.post("/api/game/enter-forge", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const validation = enterForgeSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid tier", errors: validation.error.flatten() });
+      }
+
+      const { tier } = validation.data;
+      const profile = await storage.getGameProfile(userId);
+      if (!profile) {
+        return res.status(400).json({ message: "No game profile." });
+      }
+
+      const accessCalc = calculateForgeAccess(profile, tier);
+      if (!accessCalc.canAccess) {
+        return res.status(403).json({
+          message: `Not enough Spark. You need ${accessCalc.cost} but have ${profile.sparkBalance}. Short by ${accessCalc.shortfall}.`,
+          accessCalc,
+        });
+      }
+
+      // Deduct Spark
+      await storage.updateGameProfile(userId, {
+        sparkBalance: profile.sparkBalance - accessCalc.cost,
+        totalSparkSpent: profile.totalSparkSpent + accessCalc.cost,
+        totalForgeEntries: profile.totalForgeEntries + 1,
+      });
+
+      // Create forge session
+      const forgeSession = await storage.createForgeAccess({
+        userId,
+        cycleNumber: profile.currentCycleNumber,
+        sessionTier: tier,
+        sparkCost: accessCalc.cost,
+        buildsUsed: 0,
+        buildsAllowed: accessCalc.buildsAllowed,
+      });
+
+      // Update cycle
+      const currentCycle = await storage.getCurrentGameCycle(userId);
+      if (currentCycle) {
+        await storage.updateGameCycle(currentCycle.id, {
+          sparkSpent: currentCycle.sparkSpent + accessCalc.cost,
+        });
+      }
+
+      const updatedProfile = await storage.getGameProfile(userId);
+
+      res.json({
+        forgeSession,
+        profile: updatedProfile,
+        accessCalc,
+      });
+    } catch (error) {
+      console.error("Error entering forge:", error);
+      res.status(500).json({ message: "Failed to enter forge" });
+    }
+  });
+
+  // Use a build in the Forge
+  app.post("/api/game/forge-build", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const activeSession = await storage.getActiveForgeAccess(userId);
+
+      if (!activeSession) {
+        return res.status(403).json({ message: "No active Forge session. Enter the Forge first." });
+      }
+
+      if (activeSession.buildsUsed >= activeSession.buildsAllowed) {
+        return res.status(403).json({
+          message: `Build limit reached for this ${activeSession.sessionTier} session (${activeSession.buildsUsed}/${activeSession.buildsAllowed}).`,
+        });
+      }
+
+      const updated = await storage.updateForgeAccess(activeSession.id, {
+        buildsUsed: activeSession.buildsUsed + 1,
+      });
+
+      res.json({
+        forgeSession: updated,
+        buildsRemaining: activeSession.buildsAllowed - activeSession.buildsUsed - 1,
+      });
+    } catch (error) {
+      console.error("Error using forge build:", error);
+      res.status(500).json({ message: "Failed to use forge build" });
+    }
+  });
+
+  // Advance to next cycle
+  app.post("/api/game/advance-cycle", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const profile = await storage.getGameProfile(userId);
+      if (!profile) {
+        return res.status(400).json({ message: "No game profile." });
+      }
+
+      // Close current cycle
+      const currentCycle = await storage.getCurrentGameCycle(userId);
+      if (currentCycle) {
+        await storage.updateGameCycle(currentCycle.id, {
+          endedAt: new Date(),
+        } as any);
+      }
+
+      const newCycleNumber = profile.currentCycleNumber + 1;
+
+      // Increment momentum if staying on same path
+      const newMomentum = profile.currentPath ? profile.pathMomentum + 1 : 0;
+
+      await storage.updateGameProfile(userId, {
+        currentCycleNumber: newCycleNumber,
+        pathMomentum: newMomentum,
+        stagnationLevel: 0, // reset stagnation for new cycle
+      });
+
+      // Auto-create the new cycle with the same path
+      let newCycle = null;
+      if (profile.currentPath) {
+        newCycle = await storage.createGameCycle({
+          userId,
+          cycleNumber: newCycleNumber,
+          pathChosen: profile.currentPath,
+          tasksCompleted: 0,
+          archiveTasksCompleted: 0,
+          agoraTasksCompleted: 0,
+          sparkEarned: 0,
+          sparkSpent: 0,
+          stagnationHits: 0,
+        });
+      }
+
+      const updatedProfile = await storage.getGameProfile(userId);
+
+      res.json({
+        profile: updatedProfile,
+        newCycle,
+        previousCycle: currentCycle,
+      });
+    } catch (error) {
+      console.error("Error advancing cycle:", error);
+      res.status(500).json({ message: "Failed to advance cycle" });
+    }
+  });
+
+  // Get stagnation analysis
+  app.get("/api/game/stagnation", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const profile = await storage.getGameProfile(userId);
+      if (!profile) {
+        return res.status(400).json({ message: "No game profile." });
+      }
+
+      const currentCycle = await storage.getCurrentGameCycle(userId);
+      const stagnation = analyzeStagnation(profile, currentCycle ? {
+        archiveTasksCompleted: currentCycle.archiveTasksCompleted,
+        agoraTasksCompleted: currentCycle.agoraTasksCompleted,
+        totalTasksCompleted: currentCycle.tasksCompleted,
+      } : null);
+
+      const cycleHistory = await storage.getGameCycleHistory(userId, 10);
+
+      res.json({
+        stagnation,
+        cycleHistory,
+        profile,
+      });
+    } catch (error) {
+      console.error("Error fetching stagnation:", error);
+      res.status(500).json({ message: "Failed to fetch stagnation analysis" });
+    }
+  });
+
+  // Get cycle history with completions
+  app.get("/api/game/history", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const cycles = await storage.getGameCycleHistory(userId, 20);
+      const forgeHistory = await storage.getForgeAccessHistory(userId, 20);
+
+      res.json({ cycles, forgeHistory });
+    } catch (error) {
+      console.error("Error fetching game history:", error);
+      res.status(500).json({ message: "Failed to fetch game history" });
+    }
+  });
+
+  // Get forge status
+  app.get("/api/game/forge", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const profile = await storage.getGameProfile(userId);
+      if (!profile) {
+        return res.status(400).json({ message: "No game profile." });
+      }
+
+      const activeSession = await storage.getActiveForgeAccess(userId);
+      const history = await storage.getForgeAccessHistory(userId, 10);
+
+      const tiers = (["basic", "extended", "master"] as const).map((t) => ({
+        ...calculateForgeAccess(profile, t),
+      }));
+
+      res.json({
+        activeSession,
+        history,
+        tiers,
+        profile,
+      });
+    } catch (error) {
+      console.error("Error fetching forge status:", error);
+      res.status(500).json({ message: "Failed to fetch forge status" });
     }
   });
 

@@ -31,6 +31,10 @@ import {
   LogOut,
   ChevronUp,
   User,
+  Zap,
+  Compass,
+  Target,
+  Hammer,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -63,6 +67,29 @@ const mainNavItems = [
     title: "Audit Logs",
     url: "/audit-logs",
     icon: FileText,
+  },
+];
+
+const nexusNavItems = [
+  {
+    title: "Nexus Hub",
+    url: "/nexus",
+    icon: Zap,
+  },
+  {
+    title: "Choose Path",
+    url: "/nexus/paths",
+    icon: Compass,
+  },
+  {
+    title: "Task Board",
+    url: "/nexus/tasks",
+    icon: Target,
+  },
+  {
+    title: "The Forge",
+    url: "/nexus/forge",
+    icon: Hammer,
   },
 ];
 
@@ -99,6 +126,26 @@ export function AppSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={isActive(item.url)}
+                  >
+                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Nexus Protocol</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {nexusNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={item.url === "/nexus" ? location === "/nexus" : location.startsWith(item.url)}
                   >
                     <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />

@@ -22,6 +22,10 @@ import BriefingNew from "@/pages/briefing-new";
 import BriefingDetail from "@/pages/briefing-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
+import NexusHub from "@/pages/nexus-hub";
+import NexusPaths from "@/pages/nexus-paths";
+import NexusTasks from "@/pages/nexus-tasks";
+import NexusForge from "@/pages/nexus-forge";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -64,6 +68,10 @@ function AuthenticatedRouter() {
         <Route path="/briefings/:id" component={BriefingDetail} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
+        <Route path="/nexus" component={NexusHub} />
+        <Route path="/nexus/paths" component={NexusPaths} />
+        <Route path="/nexus/tasks" component={NexusTasks} />
+        <Route path="/nexus/forge" component={NexusForge} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>
