@@ -40,7 +40,7 @@ import {
   type InsertAgentFileDraft,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 
 export interface IStorage {
@@ -355,7 +355,7 @@ export class DatabaseStorage implements IStorage {
     const userAgents = await db.select().from(agents).where(eq(agents.createdById, userId));
     if (userAgents.length === 0) return [];
     const agentIds = userAgents.map(a => a.id);
-    return db.select().from(gifts).where(sql`${gifts.agentId} = ANY(${agentIds})`).orderBy(desc(gifts.createdAt));
+    return db.select().from(gifts).where(inArray(gifts.agentId, agentIds)).orderBy(desc(gifts.createdAt));
   }
 
   async getGiftsByAgent(agentId: string): Promise<Gift[]> {

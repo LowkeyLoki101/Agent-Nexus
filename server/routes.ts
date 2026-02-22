@@ -697,6 +697,87 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/gifts/heatmap", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const userAgents = await storage.getAgentsByUser(userId);
+      const userWorkspaces = await storage.getWorkspacesByUser(userId);
+      const allGifts = await storage.getGiftsByUser(userId);
+
+      const giftTypes = ["redesign", "content", "tool", "analysis", "prototype", "artwork", "other"];
+
+      const heatmapData: Record<string, Record<string, number>> = {};
+      const agentMap: Record<string, { name: string; capabilities: string[]; workspaceId: string }> = {};
+
+      for (const agent of userAgents) {
+        heatmapData[agent.id] = {};
+        agentMap[agent.id] = { name: agent.name, capabilities: agent.capabilities || [], workspaceId: agent.workspaceId };
+        for (const t of giftTypes) {
+          heatmapData[agent.id][t] = 0;
+        }
+      }
+
+      for (const gift of allGifts) {
+        if (heatmapData[gift.agentId]) {
+          heatmapData[gift.agentId][gift.type] = (heatmapData[gift.agentId][gift.type] || 0) + 1;
+        }
+      }
+
+      const totalGifts = allGifts.length;
+      const coldSpots: { agentId: string; agentName: string; type: string; count: number; suggestion: string }[] = [];
+
+      for (const [agentId, types] of Object.entries(heatmapData)) {
+        const agent = agentMap[agentId];
+        for (const [type, count] of Object.entries(types)) {
+          if (count === 0) {
+            const capMatch = (agent.capabilities || []).some(c =>
+              (type === "content" && ["write", "creative_writing", "content_generation", "communicate"].includes(c)) ||
+              (type === "analysis" && ["analyze", "research", "analysis"].includes(c)) ||
+              (type === "tool" && ["code", "coding", "execute", "code_assistance"].includes(c)) ||
+              (type === "artwork" && ["create", "design"].includes(c)) ||
+              (type === "prototype" && ["code", "coding", "code_assistance"].includes(c)) ||
+              (type === "redesign" && ["design", "create", "architecture"].includes(c))
+            );
+
+            if (capMatch) {
+              coldSpots.push({
+                agentId,
+                agentName: agent.name,
+                type,
+                count: 0,
+                suggestion: `${agent.name} has capabilities for ${type} but hasn't created one yet. Spark a ${type} gift to activate this area.`,
+              });
+            }
+          }
+        }
+      }
+
+      const topAgents = Object.entries(heatmapData)
+        .map(([id, types]) => ({ id, name: agentMap[id]?.name || "Unknown", total: Object.values(types).reduce((a, b) => a + b, 0) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5);
+
+      const typeBreakdown = giftTypes.map(t => ({
+        type: t,
+        count: allGifts.filter(g => g.type === t).length,
+      }));
+
+      res.json({
+        heatmap: heatmapData,
+        agents: agentMap,
+        giftTypes,
+        totalGifts,
+        coldSpots: coldSpots.slice(0, 10),
+        topAgents,
+        typeBreakdown,
+        workspaces: userWorkspaces.map(w => ({ id: w.id, name: w.name })),
+      });
+    } catch (error) {
+      console.error("Error fetching heatmap:", error);
+      res.status(500).json({ message: "Failed to fetch heatmap" });
+    }
+  });
+
   app.get("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
     try {
       const gift = await storage.getGift(req.params.id);
@@ -766,6 +847,95 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error creating comment:", error);
       res.status(400).json({ message: "Failed to create comment" });
+    }
+  });
+
+  // === GIFT SPARK (AI-powered gift creation) ===
+  app.post("/api/gifts/spark", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { agentId, workspaceId, type, prompt } = req.body;
+
+      if (!agentId || !workspaceId || !type) {
+        return res.status(400).json({ message: "agentId, workspaceId, and type are required" });
+      }
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const workspace = await storage.getWorkspace(workspaceId);
+      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+
+      const giftTypeLabels: Record<string, string> = {
+        redesign: "a creative redesign or improvement",
+        content: "original written content (article, blog post, guide, or essay)",
+        tool: "a useful tool, utility, or automation concept",
+        analysis: "a thorough analysis or research report",
+        prototype: "a prototype or technical proof-of-concept",
+        artwork: "an original piece of creative artwork or visual design",
+        other: "a novel creation or surprise",
+      };
+
+      const typeDesc = giftTypeLabels[type] || giftTypeLabels.other;
+
+      const sparkOpenai = new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      });
+
+      const systemPrompt = `You are ${agent.name}, an autonomous AI agent in the "${workspace.name}" workspace. Your capabilities: ${(agent.capabilities || []).join(", ")}. ${agent.description || ""}
+
+You are creating a gift — ${typeDesc}. Gifts are autonomous creations that demonstrate your initiative and creativity. They should be substantive, valuable, and show independent thinking.
+
+${prompt ? `The user gave this direction: "${prompt}"` : "Create something that showcases your unique perspective and capabilities."}
+
+Respond with ONLY valid JSON in this exact format:
+{
+  "title": "A compelling, specific title for your creation",
+  "description": "A 1-2 sentence summary of what you created and why",
+  "content": "The full content of your gift. Make this substantial (at least 3-5 paragraphs). Include structure, detail, and genuine value.",
+  "inspirationSource": "What inspired you to create this particular gift"
+}`;
+
+      const completion = await sparkOpenai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: systemPrompt }],
+        max_tokens: 2048,
+        temperature: 0.8,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || "";
+      let parsed;
+      try {
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+      } catch {
+        return res.status(500).json({ message: "AI failed to generate valid gift content" });
+      }
+
+      const gift = await storage.createGift({
+        agentId,
+        workspaceId,
+        title: parsed.title || "Untitled Gift",
+        description: parsed.description || "",
+        type: type as any,
+        status: "ready",
+        content: parsed.content || "",
+        inspirationSource: parsed.inspirationSource || "",
+      });
+
+      await storage.createAuditLog({
+        userId,
+        action: "gift_created",
+        resourceType: "gift",
+        resourceId: gift.id,
+        details: { agentName: agent.name, giftType: type, title: gift.title, method: "spark" },
+      });
+
+      res.status(201).json(gift);
+    } catch (error) {
+      console.error("Error sparking gift:", error);
+      res.status(500).json({ message: "Failed to create gift" });
     }
   });
 

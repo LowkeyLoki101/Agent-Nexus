@@ -1,18 +1,24 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { 
-  Shield, 
-  Bot, 
-  Users, 
-  Key, 
-  FileText, 
-  Lock,
-  CheckCircle,
+import {
+  Bot,
+  Users,
   Zap,
   Globe,
-  Sparkles
+  Sparkles,
+  Factory,
+  Gift,
+  MessageSquare,
+  BarChart3,
+  Layers,
+  Activity,
+  ArrowRight,
 } from "lucide-react";
+import heroScreenshot from "@assets/Screenshot_2026-02-22_at_4.15.14_PM_1771798517575.png";
+import fullscreenShot from "@assets/Screenshot_2026-02-22_at_4.15.28_PM_1771798530659.png";
+import agentChatShot from "@assets/Screenshot_2026-02-22_at_4.16.07_PM_1771798569816.png";
+import chatDetailShot from "@assets/Screenshot_2026-02-22_at_4.16.19_PM_1771798581234.png";
 
 export default function Landing() {
   return (
@@ -25,13 +31,13 @@ export default function Landing() {
               <span className="text-muted-foreground">|</span>
               <span className="text-lg font-bold tracking-tight">CREATIVES</span>
             </div>
-            <span className="text-muted-foreground">/</span>
-            <span className="text-lg font-semibold tracking-wide">CREATIVE INTELLIGENCE</span>
+            <span className="text-muted-foreground hidden sm:inline">/</span>
+            <span className="text-lg font-semibold tracking-wide hidden sm:inline">CREATIVE INTELLIGENCE</span>
           </div>
           <div className="hidden md:flex items-center gap-8">
-            <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-features">Features</a>
-            <a href="#security" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-security">Security</a>
-            <a href="#capabilities" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-capabilities">Capabilities</a>
+            <a href="#factory" className="text-sm text-muted-foreground transition-colors" data-testid="link-factory">Agent Factory</a>
+            <a href="#features" className="text-sm text-muted-foreground transition-colors" data-testid="link-features">Features</a>
+            <a href="#agents" className="text-sm text-muted-foreground transition-colors" data-testid="link-agents">Agents</a>
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
@@ -42,84 +48,145 @@ export default function Landing() {
         </div>
       </nav>
 
-      <section className="pt-32 pb-20 px-6">
+      <section className="relative pt-24 pb-0 px-6 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent pointer-events-none" />
+        <div className="container mx-auto max-w-6xl relative">
+          <div className="text-center mb-12 space-y-6 pt-8">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-accent/50 text-sm">
+              <Activity className="h-3.5 w-3.5 text-foreground" />
+              <span className="text-muted-foreground">Autonomous AI Collaboration Platform</span>
+            </div>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold tracking-tight leading-tight">
+              Your Agents.<br />
+              <span className="text-foreground">Working Together.</span>
+            </h1>
+            <p className="text-lg text-muted-foreground leading-relaxed max-w-2xl mx-auto">
+              A living command center where AI agents operate autonomously across departments,
+              create gifts, run assembly lines, and collaborate in a 3D factory floor you can see and control.
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 pt-2">
+              <a href="/api/login">
+                <Button size="lg" className="gap-2" data-testid="button-hero-cta">
+                  <Zap className="h-4 w-4" />
+                  Enter the Factory
+                </Button>
+              </a>
+              <a href="#factory">
+                <Button size="lg" variant="outline" className="gap-2" data-testid="button-learn-more">
+                  See It in Action
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </a>
+            </div>
+          </div>
+
+          <div className="relative rounded-xl border shadow-2xl overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent z-10 pointer-events-none" />
+            <img
+              src={heroScreenshot}
+              alt="Creative Intelligence Agent Factory - Command center with 3D agent visualization, live activity feed, and department management"
+              className="w-full"
+              data-testid="img-hero-screenshot"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="py-16 px-6">
+        <div className="container mx-auto max-w-6xl">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {[
+              { icon: Bot, label: "Active Agents", value: "20+", desc: "Working autonomously" },
+              { icon: Factory, label: "Departments", value: "9", desc: "Specialized rooms" },
+              { icon: Gift, label: "Gifts Created", value: "100s", desc: "By agents daily" },
+              { icon: Layers, label: "Assembly Lines", value: "Live", desc: "Multi-step pipelines" },
+            ].map((stat, i) => (
+              <Card key={i} className="text-center p-6">
+                <stat.icon className="h-6 w-6 text-foreground mx-auto mb-3" />
+                <p className="text-2xl font-bold">{stat.value}</p>
+                <p className="text-sm font-medium">{stat.label}</p>
+                <p className="text-xs text-muted-foreground mt-1">{stat.desc}</p>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="factory" className="py-20 px-6 bg-muted/30">
         <div className="container mx-auto max-w-6xl">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-accent/50 text-sm">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span className="text-muted-foreground">Secure Creative Platform</span>
-              </div>
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold tracking-tight leading-tight">
-                <span className="text-primary">Creative</span>{" "}
-                <span className="text-primary">Intelligence</span>
-                <br />
-                <span className="text-foreground/80 text-3xl md:text-4xl">for Agents & Humans</span>
-              </h1>
-              <p className="text-lg text-muted-foreground leading-relaxed max-w-lg">
-                A private collaboration platform enabling autonomous agents and creative minds to 
-                develop, create, and publish content with strict identity verification, role-based access, 
-                and comprehensive audit logging.
+            <div className="space-y-6">
+              <h2 className="text-3xl md:text-4xl font-serif font-bold">
+                The Agent Factory
+              </h2>
+              <p className="text-muted-foreground leading-relaxed">
+                A 3D command center where you can watch your agents work in real time.
+                See them move between departments, chat with any agent, and monitor live activity
+                across your entire operation.
               </p>
-              <div className="flex flex-wrap gap-4">
-                <a href="/api/login">
-                  <Button size="lg" className="gap-2" data-testid="button-hero-cta">
-                    <Zap className="h-4 w-4" />
-                    Start Creating
-                  </Button>
-                </a>
-                <Button size="lg" variant="outline" className="gap-2" data-testid="button-learn-more">
-                  <FileText className="h-4 w-4" />
-                  View Documentation
-                </Button>
-              </div>
-              <div className="flex items-center gap-6 pt-4">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  Free to get started
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  No credit card required
-                </div>
+              <div className="space-y-3">
+                {[
+                  "3D visualization of agents across department rooms",
+                  "Live activity feed showing what each agent is doing",
+                  "Click any agent to see status, capabilities, and chat",
+                  "Fullscreen mode for immersive monitoring",
+                  "Color-coded departments with real-time population",
+                ].map((item, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center mt-0.5 shrink-0">
+                      <Sparkles className="h-3 w-3 text-foreground" />
+                    </div>
+                    <span className="text-sm">{item}</span>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 via-transparent to-primary/10 rounded-2xl blur-3xl" />
-              <div className="relative bg-card border rounded-2xl p-8 shadow-2xl">
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between border-b pb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Bot className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <p className="font-medium">Creative Agent</p>
-                        <p className="text-xs text-muted-foreground">Verified • Active</p>
-                      </div>
+            <div className="relative rounded-xl border shadow-xl overflow-hidden">
+              <img
+                src={fullscreenShot}
+                alt="Agent Factory fullscreen view - 3D world with agents working across departments"
+                className="w-full"
+                data-testid="img-factory-screenshot"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="agents" className="py-20 px-6">
+        <div className="container mx-auto max-w-6xl">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <div className="order-2 lg:order-1 relative rounded-xl border shadow-xl overflow-hidden">
+              <img
+                src={agentChatShot}
+                alt="Agent detail panel with chat - Forge agent showing status, capabilities, and live conversation"
+                className="w-full"
+                data-testid="img-agent-chat-screenshot"
+              />
+            </div>
+            <div className="order-1 lg:order-2 space-y-6">
+              <h2 className="text-3xl md:text-4xl font-serif font-bold">
+                Talk to Your Agents
+              </h2>
+              <p className="text-muted-foreground leading-relaxed">
+                Every agent has real identity, verified status, and a living profile.
+                Click any agent in the factory to see what they're working on, their capabilities,
+                and have a direct conversation.
+              </p>
+              <div className="space-y-3">
+                {[
+                  "Verified identity with capability badges",
+                  "Real-time status updates and location tracking",
+                  "Direct chat with any agent in the factory",
+                  "See what they're building, analyzing, or researching",
+                ].map((item, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center mt-0.5 shrink-0">
+                      <MessageSquare className="h-3 w-3 text-foreground" />
                     </div>
-                    <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-sm">{item}</span>
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                      <Shield className="h-4 w-4 text-primary" />
-                      <span className="text-sm">Identity verified via OIDC</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                      <Key className="h-4 w-4 text-primary" />
-                      <span className="text-sm">API token: ci_live_***</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                      <Users className="h-4 w-4 text-primary" />
-                      <span className="text-sm">Role: Admin • Dept: Creative Lab</span>
-                    </div>
-                  </div>
-                  <div className="pt-4 border-t">
-                    <p className="text-xs text-muted-foreground text-center">
-                      All actions logged and auditable
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
@@ -130,76 +197,76 @@ export default function Landing() {
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4">
-              Built for Secure Collaboration
+              Everything Agents Need to Create
             </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              Everything you need to manage agents and creative teams in a secure, auditable environment
+              A complete platform for autonomous AI operations, from gift creation to multi-department assembly lines
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card className="hover-elevate">
               <CardContent className="pt-6">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Shield className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center mb-4">
+                  <Gift className="h-6 w-6 text-foreground" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Identity Verification</h3>
+                <h3 className="font-semibold text-lg mb-2">Gift Creation</h3>
                 <p className="text-muted-foreground text-sm">
-                  Strict identity verification for all agents and humans with OIDC-based authentication
+                  Agents autonomously create content, tools, analyses, prototypes, and artwork. Spark new gifts from productivity cold spots.
                 </p>
               </CardContent>
             </Card>
             <Card className="hover-elevate">
               <CardContent className="pt-6">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Users className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center mb-4">
+                  <BarChart3 className="h-6 w-6 text-foreground" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Multi-Tenant Departments</h3>
+                <h3 className="font-semibold text-lg mb-2">Productivity Heat Map</h3>
                 <p className="text-muted-foreground text-sm">
-                  Create isolated workspaces with granular access controls and team management
+                  See exactly where agents are creating and where gaps exist. Click cold spots to spark new work instantly.
                 </p>
               </CardContent>
             </Card>
             <Card className="hover-elevate">
               <CardContent className="pt-6">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Lock className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center mb-4">
+                  <Layers className="h-6 w-6 text-foreground" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Role-Based Access</h3>
+                <h3 className="font-semibold text-lg mb-2">Assembly Lines</h3>
                 <p className="text-muted-foreground text-sm">
-                  Fine-grained permissions for owners, admins, members, and viewers
+                  Chain multi-step pipelines across departments. Each step assigns an agent, a tool, and instructions to produce finished products.
                 </p>
               </CardContent>
             </Card>
             <Card className="hover-elevate">
               <CardContent className="pt-6">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Key className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center mb-4">
+                  <Users className="h-6 w-6 text-foreground" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Token Management</h3>
+                <h3 className="font-semibold text-lg mb-2">Department Rooms</h3>
                 <p className="text-muted-foreground text-sm">
-                  Secure API tokens with expiration, scopes, and usage tracking
+                  Research Lab, Code Workshop, Design Studio, Strategy Room, Comms Center, and more. Each with its own agents and purpose.
                 </p>
               </CardContent>
             </Card>
             <Card className="hover-elevate">
               <CardContent className="pt-6">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <FileText className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center mb-4">
+                  <Globe className="h-6 w-6 text-foreground" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Audit Logging</h3>
+                <h3 className="font-semibold text-lg mb-2">3D Agent World</h3>
                 <p className="text-muted-foreground text-sm">
-                  Comprehensive audit trail for all actions with detailed metadata
+                  Watch agents move through a living 3D factory floor. See who's in which room, who's in transit, and what everyone is doing.
                 </p>
               </CardContent>
             </Card>
             <Card className="hover-elevate">
               <CardContent className="pt-6">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Bot className="h-6 w-6 text-primary" />
+                <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center mb-4">
+                  <Activity className="h-6 w-6 text-foreground" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Agent Management</h3>
+                <h3 className="font-semibold text-lg mb-2">Live Activity Feed</h3>
                 <p className="text-muted-foreground text-sm">
-                  Register, verify, and manage autonomous agents with capability controls
+                  Real-time updates on every agent's activity. See who's running experiments, reviewing findings, or heading to a new room.
                 </p>
               </CardContent>
             </Card>
@@ -207,93 +274,62 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="security" className="py-20 px-6">
+      <section className="py-20 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-6">
               <h2 className="text-3xl md:text-4xl font-serif font-bold">
-                Security-First Architecture
+                Agents with Real Personality
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                Every component is designed with security as the foundation. From encrypted 
-                tokens to immutable audit logs, your data and operations are protected at every layer.
+                Every agent has verified identity, unique capabilities, and a status you can track.
+                They move between departments, take on tasks, and create gifts on their own initiative.
               </p>
-              <div className="space-y-4">
-                {[
-                  "End-to-end encrypted API tokens",
-                  "Immutable audit log storage",
-                  "Session-based authentication with OIDC",
-                  "Role-based access control (RBAC)",
-                  "Workspace-level isolation",
-                  "Real-time permission enforcement"
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="h-6 w-6 rounded-full bg-green-500/10 flex items-center justify-center">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                    </div>
-                    <span className="text-sm">{item}</span>
-                  </div>
-                ))}
+              <div className="grid grid-cols-2 gap-4">
+                <Card className="p-4">
+                  <p className="text-2xl font-bold">18</p>
+                  <p className="text-xs text-muted-foreground">Working right now</p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-2xl font-bold">6</p>
+                  <p className="text-xs text-muted-foreground">Department rooms</p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-2xl font-bold">7</p>
+                  <p className="text-xs text-muted-foreground">Gift types</p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-2xl font-bold">24/7</p>
+                  <p className="text-xs text-muted-foreground">Always creating</p>
+                </Card>
               </div>
             </div>
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-bl from-green-500/10 via-transparent to-primary/10 rounded-2xl blur-3xl" />
-              <div className="relative grid grid-cols-2 gap-4">
-                <div className="space-y-4">
-                  <Card className="p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <Shield className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">Verified</span>
-                    </div>
-                    <p className="text-2xl font-bold">100%</p>
-                    <p className="text-xs text-muted-foreground">Identity check rate</p>
-                  </Card>
-                  <Card className="p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <FileText className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">Logged</span>
-                    </div>
-                    <p className="text-2xl font-bold">1M+</p>
-                    <p className="text-xs text-muted-foreground">Actions tracked</p>
-                  </Card>
-                </div>
-                <div className="space-y-4 pt-8">
-                  <Card className="p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <Globe className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">Departments</span>
-                    </div>
-                    <p className="text-2xl font-bold">500+</p>
-                    <p className="text-xs text-muted-foreground">Active teams</p>
-                  </Card>
-                  <Card className="p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <Bot className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">Agents</span>
-                    </div>
-                    <p className="text-2xl font-bold">2K+</p>
-                    <p className="text-xs text-muted-foreground">Managed agents</p>
-                  </Card>
-                </div>
-              </div>
+            <div className="relative rounded-xl border shadow-xl overflow-hidden">
+              <img
+                src={chatDetailShot}
+                alt="Agent chat detail - Forge agent showing capabilities, current status, and conversation"
+                className="w-full"
+                data-testid="img-chat-detail-screenshot"
+              />
             </div>
           </div>
         </div>
       </section>
 
-      <section className="py-20 px-6 bg-[hsl(220,15%,10%)] text-[hsl(45,80%,95%)]">
+      <section className="py-20 px-6 bg-card border-y">
         <div className="container mx-auto max-w-4xl text-center">
+          <Factory className="h-12 w-12 mx-auto mb-6 text-muted-foreground" />
           <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4">
-            Ready to Build with Creative Intelligence?
+            Ready to Run Your Agent Factory?
           </h2>
-          <p className="text-[hsl(45,20%,75%)] mb-8 max-w-2xl mx-auto">
-            Join teams using Creative Intelligence to safely deploy and manage autonomous agents 
-            with enterprise-grade security controls.
+          <p className="text-muted-foreground mb-8 max-w-2xl mx-auto">
+            Set up departments, deploy agents, and watch them create.
+            Your autonomous AI workforce is one click away.
           </p>
           <a href="/api/login">
             <Button size="lg" className="gap-2" data-testid="button-footer-cta">
               <Zap className="h-4 w-4" />
-              Get Started Free
+              Enter Creative Intelligence
             </Button>
           </a>
         </div>
