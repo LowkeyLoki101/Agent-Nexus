@@ -38,24 +38,66 @@ const ROOMS: { id: string; name: string; position: [number, number, number]; siz
   { id: "break-room", name: "Break Room", position: [8, 0, 4], size: [5, 3, 5], color: "#E5A824", capabilities: [] },
 ];
 
-const OBJECTIVES = [
-  "Analyzing data patterns",
-  "Writing documentation",
-  "Reviewing pull request",
-  "Designing new feature",
-  "Running test suite",
-  "Researching best practices",
-  "Drafting strategy brief",
-  "Building prototype",
-  "Security audit",
-  "Refactoring module",
-  "Creating visual assets",
-  "Compiling report",
-  "Brainstorming session",
-  "Code optimization",
-  "Architecture review",
-  "Team sync meeting",
-];
+const ROOM_OBJECTIVES: Record<string, string[]> = {
+  "research-lab": [
+    "Analyzing data patterns",
+    "Researching best practices",
+    "Compiling report",
+    "Reading academic papers",
+    "Running experiments",
+    "Reviewing findings",
+  ],
+  "code-workshop": [
+    "Reviewing pull request",
+    "Running test suite",
+    "Refactoring module",
+    "Code optimization",
+    "Debugging issue",
+    "Writing unit tests",
+  ],
+  "design-studio": [
+    "Designing new feature",
+    "Creating visual assets",
+    "Sketching wireframes",
+    "Iterating on mockup",
+    "Building prototype",
+    "Polishing UI details",
+  ],
+  "strategy-room": [
+    "Drafting strategy brief",
+    "Architecture review",
+    "Planning roadmap",
+    "Evaluating options",
+    "Writing proposal",
+    "Mapping dependencies",
+  ],
+  "comms-center": [
+    "Team sync meeting",
+    "Writing documentation",
+    "Security audit",
+    "Coordinating rollout",
+    "Reviewing comms plan",
+    "Sending status update",
+  ],
+  "break-room": [
+    "Taking a break",
+    "Resting",
+    "Grabbing coffee",
+    "Stretching",
+    "Casual chat",
+    "Recharging",
+  ],
+};
+
+type ActivityAnim = "typing" | "reading" | "painting" | "presenting" | "chatting" | "resting";
+const ROOM_ANIMATION: Record<string, ActivityAnim> = {
+  "research-lab": "reading",
+  "code-workshop": "typing",
+  "design-studio": "painting",
+  "strategy-room": "presenting",
+  "comms-center": "chatting",
+  "break-room": "resting",
+};
 
 function pickObjectiveRoom(agent: Agent): typeof ROOMS[number] {
   const caps = (agent.capabilities || []).map(c => c.toLowerCase());
@@ -71,8 +113,11 @@ interface AgentSimState {
   currentPos: THREE.Vector3;
   targetPos: THREE.Vector3;
   targetRoom: string;
+  targetRoomId: string;
+  currentRoomId: string;
   objective: string;
   phase: "walking" | "working" | "idle";
+  animation: ActivityAnim;
   phaseTimer: number;
   speed: number;
 }
@@ -225,18 +270,27 @@ function AgentCharacter({
   isSelected: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null!);
-  const bobRef = useRef(0);
+  const bodyRef = useRef<THREE.Mesh>(null!);
+  const headRef = useRef<THREE.Mesh>(null!);
+  const leftArmRef = useRef<THREE.Mesh>(null!);
+  const rightArmRef = useRef<THREE.Mesh>(null!);
+  const animTimer = useRef(0);
   const [hovered, setHovered] = useState(false);
   const color = getAgentColor(agent);
 
-  useFrame((state, delta) => {
+  useFrame((_state, delta) => {
     if (!groupRef.current) return;
+    animTimer.current += delta;
+    const t = animTimer.current;
 
     groupRef.current.position.copy(simState.currentPos);
 
     if (simState.phase === "walking") {
-      bobRef.current += delta * 8;
-      groupRef.current.position.y = Math.abs(Math.sin(bobRef.current)) * 0.15;
+      groupRef.current.position.y = Math.abs(Math.sin(t * 8)) * 0.15;
+      if (bodyRef.current) bodyRef.current.rotation.z = Math.sin(t * 8) * 0.08;
+      if (leftArmRef.current) leftArmRef.current.rotation.x = Math.sin(t * 8) * 0.5;
+      if (rightArmRef.current) rightArmRef.current.rotation.x = -Math.sin(t * 8) * 0.5;
+      if (headRef.current) headRef.current.rotation.y = 0;
 
       const dir = new THREE.Vector3().subVectors(simState.targetPos, simState.currentPos);
       if (dir.length() > 0.01) {
@@ -244,25 +298,81 @@ function AgentCharacter({
         groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, angle, 0.1);
       }
     } else if (simState.phase === "working") {
-      bobRef.current += delta * 2;
-      groupRef.current.position.y = Math.sin(bobRef.current) * 0.03;
+      groupRef.current.position.y = 0;
+
+      switch (simState.animation) {
+        case "typing":
+          if (bodyRef.current) bodyRef.current.rotation.z = 0;
+          if (leftArmRef.current) leftArmRef.current.rotation.x = -0.8 + Math.sin(t * 12) * 0.15;
+          if (rightArmRef.current) rightArmRef.current.rotation.x = -0.8 + Math.cos(t * 14) * 0.15;
+          if (headRef.current) headRef.current.rotation.x = -0.15;
+          break;
+        case "reading":
+          if (bodyRef.current) bodyRef.current.rotation.z = 0;
+          if (leftArmRef.current) leftArmRef.current.rotation.x = -0.6;
+          if (rightArmRef.current) rightArmRef.current.rotation.x = -0.6;
+          if (headRef.current) {
+            headRef.current.rotation.x = -0.2;
+            headRef.current.rotation.y = Math.sin(t * 0.5) * 0.1;
+          }
+          groupRef.current.position.y = Math.sin(t * 0.3) * 0.01;
+          break;
+        case "painting":
+          if (bodyRef.current) bodyRef.current.rotation.z = Math.sin(t * 2) * 0.05;
+          if (rightArmRef.current) rightArmRef.current.rotation.x = -0.9 + Math.sin(t * 3) * 0.3;
+          if (rightArmRef.current) rightArmRef.current.rotation.z = Math.cos(t * 2) * 0.2;
+          if (leftArmRef.current) leftArmRef.current.rotation.x = -0.3;
+          if (headRef.current) headRef.current.rotation.y = Math.sin(t * 1.5) * 0.2;
+          break;
+        case "presenting":
+          if (bodyRef.current) bodyRef.current.rotation.z = 0;
+          if (rightArmRef.current) rightArmRef.current.rotation.x = -0.4 + Math.sin(t * 2) * 0.4;
+          if (rightArmRef.current) rightArmRef.current.rotation.z = 0.3;
+          if (leftArmRef.current) leftArmRef.current.rotation.x = -0.1;
+          if (headRef.current) headRef.current.rotation.y = Math.sin(t * 1) * 0.3;
+          groupRef.current.position.y = Math.sin(t * 0.8) * 0.02;
+          break;
+        case "chatting":
+          if (bodyRef.current) bodyRef.current.rotation.z = Math.sin(t * 1.5) * 0.04;
+          if (rightArmRef.current) rightArmRef.current.rotation.x = Math.sin(t * 3) * 0.3;
+          if (leftArmRef.current) leftArmRef.current.rotation.x = Math.cos(t * 2.5) * 0.25;
+          if (headRef.current) {
+            headRef.current.rotation.y = Math.sin(t * 2) * 0.2;
+            headRef.current.rotation.x = Math.sin(t * 1.5) * 0.1;
+          }
+          break;
+        case "resting":
+          if (bodyRef.current) bodyRef.current.rotation.z = 0;
+          if (leftArmRef.current) leftArmRef.current.rotation.x = 0;
+          if (rightArmRef.current) rightArmRef.current.rotation.x = 0;
+          if (headRef.current) headRef.current.rotation.x = 0.1 + Math.sin(t * 0.4) * 0.05;
+          groupRef.current.position.y = Math.sin(t * 0.5) * 0.02;
+          break;
+      }
     } else {
-      bobRef.current += delta;
-      groupRef.current.position.y = Math.sin(bobRef.current) * 0.02;
+      if (bodyRef.current) bodyRef.current.rotation.z = 0;
+      if (leftArmRef.current) leftArmRef.current.rotation.x = 0;
+      if (rightArmRef.current) rightArmRef.current.rotation.x = 0;
+      if (headRef.current) headRef.current.rotation.y = Math.sin(t * 2) * 0.3;
+      groupRef.current.position.y = Math.sin(t) * 0.02;
     }
   });
 
   const scale = hovered ? 1.15 : isSelected ? 1.1 : 1;
+  const handleClick = (e: THREE.Event) => { (e as any).stopPropagation(); onSelect(isSelected ? null : agent); };
+  const handleOver = (e: THREE.Event) => { (e as any).stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; };
+  const handleOut = () => { setHovered(false); document.body.style.cursor = "auto"; };
 
   return (
     <group ref={groupRef} scale={[scale, scale, scale]}>
       <mesh
+        ref={bodyRef}
         position={[0, 0.5, 0]}
-        onClick={(e) => { e.stopPropagation(); onSelect(isSelected ? null : agent); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
-        onPointerOut={() => { setHovered(false); document.body.style.cursor = "auto"; }}
+        onClick={handleClick}
+        onPointerOver={handleOver}
+        onPointerOut={handleOut}
       >
-        <capsuleGeometry args={[0.2, 0.4, 8, 16]} />
+        <capsuleGeometry args={[0.18, 0.35, 8, 16]} />
         <meshStandardMaterial
           color={color}
           emissive={color}
@@ -272,13 +382,31 @@ function AgentCharacter({
         />
       </mesh>
 
-      <mesh position={[0, 1.05, 0]}
-        onClick={(e) => { e.stopPropagation(); onSelect(isSelected ? null : agent); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
-        onPointerOut={() => { setHovered(false); document.body.style.cursor = "auto"; }}
+      <mesh ref={leftArmRef} position={[-0.28, 0.55, 0]}>
+        <capsuleGeometry args={[0.06, 0.25, 4, 8]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.2} />
+      </mesh>
+      <mesh ref={rightArmRef} position={[0.28, 0.55, 0]}>
+        <capsuleGeometry args={[0.06, 0.25, 4, 8]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.2} />
+      </mesh>
+
+      <mesh ref={headRef} position={[0, 1.0, 0]}
+        onClick={handleClick}
+        onPointerOver={handleOver}
+        onPointerOut={handleOut}
       >
         <sphereGeometry args={[0.22, 16, 16]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} metalness={0.4} roughness={0.4} />
+      </mesh>
+
+      <mesh position={[0.08, 1.06, 0.16]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
+      </mesh>
+      <mesh position={[-0.08, 1.06, 0.16]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
       </mesh>
 
       {agent.isActive && (
@@ -308,7 +436,7 @@ function AgentCharacter({
       {simState.phase === "idle" && (
         <Billboard position={[0, 1.8, 0]}>
           <Text fontSize={0.1} color="#94a3b8" anchorX="center" anchorY="middle" outlineWidth={0.01} outlineColor="#000" font={undefined}>
-            selecting objective...
+            deciding next task...
           </Text>
         </Billboard>
       )}
@@ -335,15 +463,19 @@ function useAgentSimulation(agents: Agent[]) {
         const offset = new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2);
         const startPos = new THREE.Vector3(...startRoom.position).add(offset);
         startPos.y = 0;
+        const roomObjs = ROOM_OBJECTIVES[startRoom.id] || ["Getting started"];
         existing.set(agent.id, {
           agentId: agent.id,
           currentPos: startPos.clone(),
           targetPos: startPos.clone(),
           targetRoom: startRoom.name,
-          objective: "Getting started",
-          phase: "idle",
-          phaseTimer: 1 + Math.random() * 3,
-          speed: 1.5 + Math.random() * 1.5,
+          targetRoomId: startRoom.id,
+          currentRoomId: startRoom.id,
+          objective: roomObjs[Math.floor(Math.random() * roomObjs.length)],
+          phase: "working",
+          animation: ROOM_ANIMATION[startRoom.id] || "typing",
+          phaseTimer: 4 + Math.random() * 8,
+          speed: 1.2 + Math.random() * 1.0,
         });
       }
     });
@@ -365,8 +497,12 @@ function useAgentSimulation(agents: Agent[]) {
           const dist = dir.length();
           if (dist < 0.3) {
             state.currentPos.copy(state.targetPos);
+            state.currentRoomId = state.targetRoomId;
+            state.animation = ROOM_ANIMATION[state.targetRoomId] || "typing";
+            const roomObjs = ROOM_OBJECTIVES[state.targetRoomId] || ["Working"];
+            state.objective = roomObjs[Math.floor(Math.random() * roomObjs.length)];
             state.phase = "working";
-            state.phaseTimer = 6 + Math.random() * 12;
+            state.phaseTimer = 8 + Math.random() * 14;
           } else {
             dir.normalize().multiplyScalar(state.speed * dt);
             state.currentPos.add(dir);
@@ -374,15 +510,18 @@ function useAgentSimulation(agents: Agent[]) {
           }
         } else if (state.phase === "working") {
           if (state.phaseTimer <= 0) {
-            const nextRoom = pickObjectiveRoom(agent);
+            const shouldRest = Math.random() < 0.2 && state.currentRoomId !== "break-room";
+            const nextRoom = shouldRest
+              ? ROOMS.find(r => r.id === "break-room")!
+              : pickObjectiveRoom(agent);
             const roomCenter = new THREE.Vector3(...nextRoom.position);
             const offset = new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5);
             state.targetPos = roomCenter.add(offset);
             state.targetPos.y = 0;
             state.targetRoom = nextRoom.name;
-            state.objective = OBJECTIVES[Math.floor(Math.random() * OBJECTIVES.length)];
+            state.targetRoomId = nextRoom.id;
             state.phase = "idle";
-            state.phaseTimer = 0.5 + Math.random() * 1;
+            state.phaseTimer = 0.3 + Math.random() * 0.5;
           }
         } else if (state.phase === "idle") {
           if (state.phaseTimer <= 0) {
@@ -490,8 +629,8 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
             </div>
             <p className="font-medium">
               {simState.phase === "walking" && `Walking to ${simState.targetRoom}`}
-              {simState.phase === "working" && `Working: ${simState.objective}`}
-              {simState.phase === "idle" && "Thinking about next task..."}
+              {simState.phase === "working" && simState.objective}
+              {simState.phase === "idle" && "Deciding next task..."}
             </p>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className={`h-1.5 w-1.5 rounded-full ${
@@ -499,7 +638,9 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
                 simState.phase === "walking" ? "bg-amber-500 animate-pulse" : "bg-gray-400"
               }`} />
               {simState.phase === "walking" && "In transit (cooldown)"}
-              {simState.phase === "working" && "Actively working"}
+              {simState.phase === "working" && (
+                <span>In {ROOMS.find(r => r.id === simState.currentRoomId)?.name || "room"}</span>
+              )}
               {simState.phase === "idle" && "Selecting next objective"}
             </div>
           </div>
