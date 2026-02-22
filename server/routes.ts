@@ -972,6 +972,48 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/briefings/:id/video-status", isAuthenticated, async (req: any, res) => {
+    try {
+      const briefing = await storage.getBriefing(req.params.id);
+      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
+
+      const videoUrl = briefing.videoUrl;
+      if (!videoUrl) return res.json({ status: "none" });
+
+      if (!videoUrl.startsWith("heygen:")) {
+        return res.json({ status: "completed", videoUrl });
+      }
+
+      const videoId = videoUrl.replace("heygen:", "");
+      const apiKey = process.env.HEYGEN_API_KEY;
+      if (!apiKey) return res.status(500).json({ message: "HeyGen API key not configured" });
+
+      const response = await fetch(`https://api.heygen.com/v1/video_status.get?video_id=${videoId}`, {
+        headers: { "X-Api-Key": apiKey },
+      });
+
+      if (!response.ok) {
+        return res.json({ status: "processing", videoId });
+      }
+
+      const result: any = await response.json();
+      const data = result.data;
+
+      if (data?.status === "completed" && data?.video_url) {
+        const updated = await storage.updateBriefing(briefing.id, { videoUrl: data.video_url, thumbnailUrl: data.thumbnail_url || null });
+        return res.json({ status: "completed", videoUrl: data.video_url, thumbnailUrl: data.thumbnail_url, briefing: updated });
+      }
+
+      if (data?.status === "failed") {
+        return res.json({ status: "failed", error: data.error || "Video generation failed" });
+      }
+
+      return res.json({ status: "processing", videoId, progress: data?.status });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to check video status" });
+    }
+  });
+
   app.get("/api/briefings/latest-broadcast", async (_req, res) => {
     try {
       const allBriefings = await storage.getBriefingsByWorkspace("newsroom-001");
