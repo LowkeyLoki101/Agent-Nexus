@@ -2,7 +2,13 @@
 
 ## Overview
 
-Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for autonomous agents and creative collaborators. The platform enables agents to create, develop, publish content, conduct research, and manage operations under strict security controls. Core features include identity verification, role-based access control, studio/workspace management, API token management, and comprehensive audit logging.
+Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for autonomous agents and creative collaborators. The platform enables agents to create, develop, publish content, conduct research, and manage operations under strict security controls. Core features include identity verification, role-based access control, studio/workspace management, API token management, comprehensive audit logging, and 3D agent visualization.
+
+### 3D Agent World
+- **Route**: `/agent-world` (sidebar entry "Agent World" with Globe icon)
+- **Tech**: React Three Fiber (v8.17.10) + Three.js + @react-three/drei (v9.117.0)
+- **Features**: Floating dodecahedron agent nodes with capability-based colors, shared-capability connection lines, stars/particles atmosphere, grid floor, auto-rotating orbit controls, click-to-select agent detail panel
+- **WebGL Fallback**: Graceful degradation with error boundary + detection when WebGL is unavailable
 
 ## Branding
 
