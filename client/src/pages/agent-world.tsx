@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Text, Billboard, RoundedBox } from "@react-three/drei";
+import { OrbitControls, Text, Billboard, RoundedBox, Sky } from "@react-three/drei";
 import { useRef, useState, useMemo, useCallback, Suspense, Component, type ReactNode, useEffect } from "react";
 import * as THREE from "three";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Agent, Briefing, Workspace, ApiToken } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -120,18 +121,212 @@ interface AgentSimState {
   speed: number;
 }
 
-function FactoryFloor() {
+function FactoryEnvironment() {
+  const groundRef = useRef<THREE.Mesh>(null!);
+
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
-        <planeGeometry args={[30, 24]} />
-        <meshStandardMaterial color="#1a1a2e" />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow>
+        <planeGeometry args={[60, 60]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.9} metalness={0.05} />
       </mesh>
-      <gridHelper args={[30, 30, "#E5A82440", "#E5A82415"]} position={[0, 0.01, 0]} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, -1]} receiveShadow>
-        <planeGeometry args={[4, 8]} />
-        <meshStandardMaterial color="#252540" />
+
+      <mesh ref={groundRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
+        <planeGeometry args={[32, 26]} />
+        <meshStandardMaterial color="#1e1e38" roughness={0.7} metalness={0.1} />
       </mesh>
+
+      <gridHelper args={[32, 32, "#E5A824", "#3a3a5a"]} position={[0, 0.005, 0]} />
+
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.003, -1]} receiveShadow>
+        <planeGeometry args={[3.5, 20]} />
+        <meshStandardMaterial color="#2a2a4a" roughness={0.6} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.003, 0]} receiveShadow>
+        <planeGeometry args={[20, 2.5]} />
+        <meshStandardMaterial color="#2a2a4a" roughness={0.6} />
+      </mesh>
+
+      {[[-16, 0, -13], [16, 0, -13], [-16, 0, 13], [16, 0, 13], [0, 0, -13], [0, 0, 13]].map(([x, _y, z], i) => (
+        <group key={`tree-${i}`} position={[x, 0, z]}>
+          <mesh position={[0, 0.6, 0]}>
+            <cylinderGeometry args={[0.08, 0.12, 1.2, 6]} />
+            <meshStandardMaterial color="#5c3a1e" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 1.5, 0]}>
+            <coneGeometry args={[0.7, 1.5, 6]} />
+            <meshStandardMaterial color="#1a5c2a" roughness={0.8} />
+          </mesh>
+          <mesh position={[0, 2.2, 0]}>
+            <coneGeometry args={[0.5, 1.0, 6]} />
+            <meshStandardMaterial color="#1e6b30" roughness={0.8} />
+          </mesh>
+        </group>
+      ))}
+
+      {[[-14, 0, 0], [14, 0, 0], [-14, 0, -8], [14, 0, -8], [-14, 0, 8], [14, 0, 8]].map(([x, _y, z], i) => (
+        <group key={`lamp-${i}`} position={[x, 0, z]}>
+          <mesh position={[0, 1.5, 0]}>
+            <cylinderGeometry args={[0.04, 0.06, 3, 6]} />
+            <meshStandardMaterial color="#4a4a6a" metalness={0.5} />
+          </mesh>
+          <mesh position={[0, 3.1, 0]}>
+            <sphereGeometry args={[0.15, 8, 8]} />
+            <meshStandardMaterial color="#E5A824" emissive="#E5A824" emissiveIntensity={0.8} />
+          </mesh>
+          <pointLight position={[0, 3, 0]} color="#E5A824" intensity={0.15} distance={6} />
+        </group>
+      ))}
+
+      {[[-12, 0, -5], [12, 0, 5], [-5, 0, 9], [5, 0, -9]].map(([x, _y, z], i) => (
+        <group key={`bench-${i}`} position={[x, 0, z]}>
+          <RoundedBox args={[1.2, 0.08, 0.4]} position={[0, 0.4, 0]} radius={0.02}>
+            <meshStandardMaterial color="#5c3a1e" roughness={0.8} />
+          </RoundedBox>
+          <mesh position={[-0.5, 0.2, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.4, 6]} />
+            <meshStandardMaterial color="#4a4a6a" metalness={0.4} />
+          </mesh>
+          <mesh position={[0.5, 0.2, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.4, 6]} />
+            <meshStandardMaterial color="#4a4a6a" metalness={0.4} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function Desk({ position, color }: { position: [number, number, number]; color: string }) {
+  return (
+    <group position={position}>
+      <RoundedBox args={[1.2, 0.05, 0.6]} position={[0, 0.55, 0]} radius={0.02}>
+        <meshStandardMaterial color="#3a3a5a" roughness={0.5} metalness={0.2} />
+      </RoundedBox>
+      {[[-0.5, 0.275, -0.25], [-0.5, 0.275, 0.25], [0.5, 0.275, -0.25], [0.5, 0.275, 0.25]].map(([x, y, z], i) => (
+        <mesh key={i} position={[x, y, z]}>
+          <cylinderGeometry args={[0.025, 0.025, 0.55, 6]} />
+          <meshStandardMaterial color="#4a4a6a" metalness={0.4} />
+        </mesh>
+      ))}
+      <RoundedBox args={[0.4, 0.3, 0.02]} position={[0, 0.75, -0.1]} radius={0.01}>
+        <meshStandardMaterial color="#1a1a2e" emissive={color} emissiveIntensity={0.15} />
+      </RoundedBox>
+    </group>
+  );
+}
+
+function Chair({ position, color }: { position: [number, number, number]; color: string }) {
+  return (
+    <group position={position}>
+      <RoundedBox args={[0.4, 0.04, 0.4]} position={[0, 0.38, 0]} radius={0.02}>
+        <meshStandardMaterial color={color} roughness={0.7} />
+      </RoundedBox>
+      <RoundedBox args={[0.4, 0.35, 0.04]} position={[0, 0.57, -0.18]} radius={0.02}>
+        <meshStandardMaterial color={color} roughness={0.7} />
+      </RoundedBox>
+      <mesh position={[0, 0.19, 0]}>
+        <cylinderGeometry args={[0.03, 0.04, 0.38, 6]} />
+        <meshStandardMaterial color="#4a4a6a" metalness={0.5} />
+      </mesh>
+    </group>
+  );
+}
+
+function Whiteboard({ position, color }: { position: [number, number, number]; color: string }) {
+  return (
+    <group position={position}>
+      <RoundedBox args={[1.8, 1.0, 0.05]} position={[0, 1.2, 0]} radius={0.03}>
+        <meshStandardMaterial color="#e8e8e8" roughness={0.3} />
+      </RoundedBox>
+      <RoundedBox args={[1.9, 0.06, 0.08]} position={[0, 0.68, 0.03]} radius={0.01}>
+        <meshStandardMaterial color="#4a4a6a" metalness={0.3} />
+      </RoundedBox>
+      <mesh position={[-0.6, 1.3, 0.03]}>
+        <boxGeometry args={[0.5, 0.02, 0.02]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
+      </mesh>
+      <mesh position={[0.2, 1.1, 0.03]}>
+        <boxGeometry args={[0.8, 0.02, 0.02]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.2} />
+      </mesh>
+    </group>
+  );
+}
+
+function PlantPot({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.15, 0]}>
+        <cylinderGeometry args={[0.12, 0.08, 0.3, 8]} />
+        <meshStandardMaterial color="#6b4c3b" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 0.35, 0]}>
+        <sphereGeometry args={[0.18, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#2d8a4e" roughness={0.8} />
+      </mesh>
+      <mesh position={[0.05, 0.45, 0.05]}>
+        <sphereGeometry args={[0.12, 6, 6, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#3ba55c" roughness={0.8} />
+      </mesh>
+    </group>
+  );
+}
+
+function CoffeeMachine({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <RoundedBox args={[0.3, 0.4, 0.25]} position={[0, 0.2, 0]} radius={0.03}>
+        <meshStandardMaterial color="#2a2a3a" metalness={0.5} roughness={0.3} />
+      </RoundedBox>
+      <mesh position={[0, 0.42, 0]}>
+        <cylinderGeometry args={[0.08, 0.12, 0.05, 8]} />
+        <meshStandardMaterial color="#3a3a4a" metalness={0.6} />
+      </mesh>
+      <mesh position={[0, 0.35, 0.13]}>
+        <sphereGeometry args={[0.03, 8, 8]} />
+        <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={0.5} />
+      </mesh>
+    </group>
+  );
+}
+
+function ServerRack({ position, color }: { position: [number, number, number]; color: string }) {
+  return (
+    <group position={position}>
+      <RoundedBox args={[0.5, 1.4, 0.4]} position={[0, 0.7, 0]} radius={0.03}>
+        <meshStandardMaterial color="#1a1a2e" metalness={0.3} roughness={0.5} />
+      </RoundedBox>
+      {[0.3, 0.6, 0.9, 1.2].map((y, i) => (
+        <mesh key={i} position={[0.15, y, 0.21]}>
+          <sphereGeometry args={[0.02, 6, 6]} />
+          <meshStandardMaterial color={i % 2 === 0 ? "#22c55e" : color} emissive={i % 2 === 0 ? "#22c55e" : color} emissiveIntensity={0.8} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function Bookshelf({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <RoundedBox args={[1.0, 1.4, 0.3]} position={[0, 0.7, 0]} radius={0.03}>
+        <meshStandardMaterial color="#5c3a1e" roughness={0.8} />
+      </RoundedBox>
+      {[0.3, 0.65, 1.0].map((y, i) => (
+        <group key={i}>
+          <mesh position={[0, y, 0]}>
+            <boxGeometry args={[0.92, 0.03, 0.28]} />
+            <meshStandardMaterial color="#4a2e15" roughness={0.9} />
+          </mesh>
+          {[-0.3, -0.1, 0.1, 0.25].map((x, j) => (
+            <mesh key={j} position={[x, y + 0.1, 0]}>
+              <boxGeometry args={[0.12, 0.18, 0.2]} />
+              <meshStandardMaterial color={["#3B82F6", "#10B981", "#E5A824", "#8B5CF6", "#EC4899", "#F97316"][(i * 4 + j) % 6]} roughness={0.7} />
+            </mesh>
+          ))}
+        </group>
+      ))}
     </group>
   );
 }
@@ -139,78 +334,134 @@ function FactoryFloor() {
 function Room({ room }: { room: typeof ROOMS[number] }) {
   const [px, py, pz] = room.position;
   const [sx, sy, sz] = room.size;
+  const baseY = -sy / 2;
 
   return (
     <group position={[px, py + sy / 2, pz]}>
-      <mesh position={[0, -sy / 2 + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <mesh position={[0, baseY + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[sx, sz]} />
-        <meshStandardMaterial color={room.color} opacity={0.15} transparent />
+        <meshStandardMaterial color={room.color} opacity={0.12} transparent />
       </mesh>
       <mesh position={[-sx / 2, 0, 0]}>
         <boxGeometry args={[0.1, sy, sz]} />
-        <meshStandardMaterial color={room.color} opacity={0.3} transparent />
+        <meshStandardMaterial color={room.color} opacity={0.25} transparent />
       </mesh>
       <mesh position={[sx / 2, 0, 0]}>
         <boxGeometry args={[0.1, sy, sz]} />
-        <meshStandardMaterial color={room.color} opacity={0.3} transparent />
+        <meshStandardMaterial color={room.color} opacity={0.25} transparent />
       </mesh>
       <mesh position={[0, 0, -sz / 2]}>
         <boxGeometry args={[sx, sy, 0.1]} />
-        <meshStandardMaterial color={room.color} opacity={0.3} transparent />
+        <meshStandardMaterial color={room.color} opacity={0.25} transparent />
       </mesh>
       <mesh position={[0, 0, sz / 2]}>
         <boxGeometry args={[sx * 0.3, sy, 0.1]} />
-        <meshStandardMaterial color={room.color} opacity={0.3} transparent />
+        <meshStandardMaterial color={room.color} opacity={0.25} transparent />
       </mesh>
+
+      <mesh position={[0, sy / 2 - 0.02, 0]}>
+        <boxGeometry args={[sx - 0.2, 0.04, sz - 0.2]} />
+        <meshStandardMaterial color="#1a1a2e" opacity={0.6} transparent />
+      </mesh>
+
       <Billboard position={[0, sy / 2 + 0.4, 0]}>
         <Text fontSize={0.35} color={room.color} anchorX="center" anchorY="middle" outlineWidth={0.02} outlineColor="#000000" font={undefined}>
           {room.name}
         </Text>
       </Billboard>
       <pointLight position={[0, sy - 0.5, 0]} color={room.color} intensity={0.4} distance={6} />
+
       {room.id === "code-workshop" && (
         <>
-          <RoundedBox args={[1.2, 0.6, 0.8]} position={[-1, -sy / 2 + 0.3, -1]} radius={0.05}>
-            <meshStandardMaterial color="#2a2a4a" />
-          </RoundedBox>
-          <RoundedBox args={[0.8, 0.05, 0.5]} position={[-1, -sy / 2 + 0.65, -1.1]} radius={0.02}>
-            <meshStandardMaterial color="#10B981" emissive="#10B981" emissiveIntensity={0.3} />
-          </RoundedBox>
+          <Desk position={[-1.2, baseY, -1.2]} color="#10B981" />
+          <Chair position={[-1.2, baseY, -0.5]} color="#2a4a3a" />
+          <Desk position={[0.8, baseY, -1.2]} color="#10B981" />
+          <Chair position={[0.8, baseY, -0.5]} color="#2a4a3a" />
+          <ServerRack position={[2.0, baseY, -1.8]} color="#10B981" />
+          <PlantPot position={[-2.0, baseY, 1.8]} />
+          <Whiteboard position={[0, baseY, -2.4]} color="#10B981" />
         </>
       )}
       {room.id === "research-lab" && (
         <>
-          <RoundedBox args={[1.5, 0.6, 0.6]} position={[0, -sy / 2 + 0.3, -1.5]} radius={0.05}>
-            <meshStandardMaterial color="#2a2a4a" />
-          </RoundedBox>
-          <mesh position={[0.8, -sy / 2 + 0.8, -1.5]}>
-            <cylinderGeometry args={[0.1, 0.1, 0.4, 8]} />
-            <meshStandardMaterial color="#3B82F6" emissive="#3B82F6" emissiveIntensity={0.5} transparent opacity={0.7} />
+          <Desk position={[-1.0, baseY, -1.0]} color="#3B82F6" />
+          <Chair position={[-1.0, baseY, -0.3]} color="#2a3a5a" />
+          <Desk position={[1.0, baseY, -1.0]} color="#3B82F6" />
+          <Chair position={[1.0, baseY, -0.3]} color="#2a3a5a" />
+          <Bookshelf position={[-2.0, baseY, 0]} />
+          <PlantPot position={[2.0, baseY, 1.8]} />
+          <mesh position={[0, baseY + 0.65, -2.0]}>
+            <cylinderGeometry args={[0.12, 0.12, 0.5, 8]} />
+            <meshStandardMaterial color="#3B82F6" emissive="#3B82F6" emissiveIntensity={0.5} transparent opacity={0.6} />
+          </mesh>
+          <mesh position={[0.5, baseY + 0.65, -2.0]}>
+            <cylinderGeometry args={[0.08, 0.08, 0.35, 8]} />
+            <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={0.4} transparent opacity={0.5} />
           </mesh>
         </>
       )}
       {room.id === "design-studio" && (
         <>
-          <RoundedBox args={[1.8, 0.05, 1.2]} position={[0, -sy / 2 + 0.75, -0.5]} radius={0.02}>
-            <meshStandardMaterial color="#F97316" emissive="#F97316" emissiveIntensity={0.15} />
+          <Desk position={[-0.5, baseY, 0]} color="#F97316" />
+          <Chair position={[-0.5, baseY, 0.7]} color="#4a3a2a" />
+          <RoundedBox args={[1.8, 0.05, 1.2]} position={[0, baseY + 0.75, -0.8]} radius={0.02}>
+            <meshStandardMaterial color="#F97316" emissive="#F97316" emissiveIntensity={0.1} />
           </RoundedBox>
-          <RoundedBox args={[1.6, 0.9, 0.05]} position={[0, -sy / 2 + 0.45, -1.8]} radius={0.02}>
-            <meshStandardMaterial color="#2a2a4a" />
-          </RoundedBox>
+          <Whiteboard position={[0, baseY, -2.4]} color="#F97316" />
+          <PlantPot position={[2.0, baseY, 1.8]} />
+          <PlantPot position={[-2.0, baseY, 1.8]} />
+          <mesh position={[1.5, baseY + 0.6, -1.5]}>
+            <cylinderGeometry args={[0.15, 0.15, 1.2, 8]} />
+            <meshStandardMaterial color="#3a3a5a" roughness={0.6} />
+          </mesh>
+          <mesh position={[1.5, baseY + 1.25, -1.5]}>
+            <boxGeometry args={[0.5, 0.4, 0.05]} />
+            <meshStandardMaterial color="#1a1a2e" emissive="#F97316" emissiveIntensity={0.1} />
+          </mesh>
         </>
       )}
       {room.id === "strategy-room" && (
-        <RoundedBox args={[2.0, 0.6, 1.2]} position={[0, -sy / 2 + 0.3, 0]} radius={0.05}>
-          <meshStandardMaterial color="#2a2a4a" />
-        </RoundedBox>
+        <>
+          <RoundedBox args={[2.2, 0.06, 1.4]} position={[0, baseY + 0.55, 0]} radius={0.03}>
+            <meshStandardMaterial color="#3a3a5a" roughness={0.4} metalness={0.2} />
+          </RoundedBox>
+          {[[-0.8, 0.8], [0.8, 0.8], [-0.8, -0.8], [0.8, -0.8]].map(([x, z], i) => (
+            <Chair key={i} position={[x, baseY, z]} color="#3a2a5a" />
+          ))}
+          <Whiteboard position={[0, baseY, -2.4]} color="#8B5CF6" />
+          <PlantPot position={[2.0, baseY, 1.8]} />
+        </>
+      )}
+      {room.id === "comms-center" && (
+        <>
+          <Desk position={[-1.2, baseY, -0.5]} color="#EC4899" />
+          <Chair position={[-1.2, baseY, 0.2]} color="#4a2a3a" />
+          <Desk position={[1.2, baseY, -0.5]} color="#EC4899" />
+          <Chair position={[1.2, baseY, 0.2]} color="#EC4899" />
+          <ServerRack position={[0, baseY, -2.0]} color="#EC4899" />
+          <ServerRack position={[0.6, baseY, -2.0]} color="#EC4899" />
+          <PlantPot position={[-2.0, baseY, 1.8]} />
+        </>
       )}
       {room.id === "break-room" && (
         <>
-          <RoundedBox args={[0.8, 0.4, 0.8]} position={[-0.8, -sy / 2 + 0.2, 0]} radius={0.05}>
-            <meshStandardMaterial color="#3a3a5a" />
+          <RoundedBox args={[1.0, 0.04, 1.0]} position={[0, baseY + 0.5, 0]} radius={0.02}>
+            <meshStandardMaterial color="#5c3a1e" roughness={0.8} />
           </RoundedBox>
-          <RoundedBox args={[0.8, 0.4, 0.8]} position={[0.8, -sy / 2 + 0.2, 0]} radius={0.05}>
-            <meshStandardMaterial color="#3a3a5a" />
+          {[[-0.6, 0], [0.6, 0], [0, -0.6], [0, 0.6]].map(([x, z], i) => (
+            <Chair key={i} position={[x, baseY, z]} color="#E5A824" />
+          ))}
+          <CoffeeMachine position={[2.0, baseY + 0.55, -1.8]} />
+          <RoundedBox args={[1.0, 0.55, 0.4]} position={[2.0, baseY + 0.275, -1.8]} radius={0.03}>
+            <meshStandardMaterial color="#3a3a5a" roughness={0.5} />
+          </RoundedBox>
+          <PlantPot position={[-2.0, baseY, 1.8]} />
+          <PlantPot position={[2.0, baseY, 1.8]} />
+          <RoundedBox args={[0.8, 0.5, 0.8]} position={[-1.5, baseY + 0.25, -1.5]} radius={0.05}>
+            <meshStandardMaterial color="#3a3a5a" roughness={0.6} />
+          </RoundedBox>
+          <RoundedBox args={[0.7, 0.08, 0.7]} position={[-1.5, baseY + 0.54, -1.5]} radius={0.02}>
+            <meshStandardMaterial color="#4a3a2a" roughness={0.8} />
           </RoundedBox>
         </>
       )}
@@ -251,6 +502,107 @@ function getAgentColor(agent: Agent): string {
   return colors[hash % colors.length];
 }
 
+type AgentOutfit = "engineer" | "researcher" | "creative" | "strategist" | "communicator" | "general";
+
+function getAgentOutfit(agent: Agent): AgentOutfit {
+  const caps = (agent.capabilities || []).map(c => c.toLowerCase()).join(" ");
+  if (caps.includes("cod") || caps.includes("debug") || caps.includes("engineer") || caps.includes("deploy") || caps.includes("test")) return "engineer";
+  if (caps.includes("research") || caps.includes("analy") || caps.includes("read")) return "researcher";
+  if (caps.includes("design") || caps.includes("creat") || caps.includes("writ") || caps.includes("content") || caps.includes("art")) return "creative";
+  if (caps.includes("strateg") || caps.includes("architect") || caps.includes("plan")) return "strategist";
+  if (caps.includes("commun") || caps.includes("discuss") || caps.includes("coord") || caps.includes("review")) return "communicator";
+  return "general";
+}
+
+function AgentOutfitMesh({ outfit, color, baseY }: { outfit: AgentOutfit; color: string; baseY: number }) {
+  switch (outfit) {
+    case "engineer":
+      return (
+        <>
+          <mesh position={[0, 0.95, 0.22]}>
+            <boxGeometry args={[0.08, 0.04, 0.06]} />
+            <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.6} />
+          </mesh>
+          <mesh position={[0.18, 0.42, 0.12]}>
+            <boxGeometry args={[0.04, 0.15, 0.04]} />
+            <meshStandardMaterial color="#4a4a6a" metalness={0.6} />
+          </mesh>
+          <mesh position={[-0.25, 0.35, 0]}>
+            <boxGeometry args={[0.06, 0.2, 0.06]} />
+            <meshStandardMaterial color="#E5A824" roughness={0.5} />
+          </mesh>
+        </>
+      );
+    case "researcher":
+      return (
+        <>
+          <mesh position={[-0.12, 1.08, 0.18]}>
+            <torusGeometry args={[0.06, 0.012, 8, 16]} />
+            <meshStandardMaterial color="#94a3b8" metalness={0.6} />
+          </mesh>
+          <mesh position={[0.12, 1.08, 0.18]}>
+            <torusGeometry args={[0.06, 0.012, 8, 16]} />
+            <meshStandardMaterial color="#94a3b8" metalness={0.6} />
+          </mesh>
+          <mesh position={[0, 1.08, 0.18]}>
+            <boxGeometry args={[0.06, 0.01, 0.01]} />
+            <meshStandardMaterial color="#94a3b8" metalness={0.6} />
+          </mesh>
+          <mesh position={[0.22, 0.45, 0.1]}>
+            <boxGeometry args={[0.06, 0.18, 0.04]} />
+            <meshStandardMaterial color="#3B82F6" roughness={0.6} />
+          </mesh>
+        </>
+      );
+    case "creative":
+      return (
+        <>
+          <mesh position={[0, 1.25, 0]} rotation={[0.15, 0, 0.1]}>
+            <cylinderGeometry args={[0.25, 0.28, 0.06, 8]} />
+            <meshStandardMaterial color="#F97316" roughness={0.6} />
+          </mesh>
+          <mesh position={[0.25, 0.5, 0.05]}>
+            <cylinderGeometry args={[0.015, 0.015, 0.3, 6]} />
+            <meshStandardMaterial color="#F97316" emissive="#F97316" emissiveIntensity={0.3} />
+          </mesh>
+        </>
+      );
+    case "strategist":
+      return (
+        <>
+          <mesh position={[0.15, 0.55, 0.15]}>
+            <boxGeometry args={[0.12, 0.08, 0.01]} />
+            <meshStandardMaterial color="#8B5CF6" emissive="#8B5CF6" emissiveIntensity={0.3} />
+          </mesh>
+          <mesh position={[0, 0.35, 0]} rotation={[0, 0, 0]}>
+            <torusGeometry args={[0.22, 0.015, 8, 16]} />
+            <meshStandardMaterial color={color} metalness={0.5} roughness={0.3} />
+          </mesh>
+        </>
+      );
+    case "communicator":
+      return (
+        <>
+          <mesh position={[0.22, 1.1, 0]}>
+            <sphereGeometry args={[0.06, 8, 8]} />
+            <meshStandardMaterial color="#EC4899" roughness={0.5} />
+          </mesh>
+          <mesh position={[0.22, 1.1, 0]} rotation={[0, 0, -0.3]}>
+            <cylinderGeometry args={[0.008, 0.008, 0.15, 4]} />
+            <meshStandardMaterial color="#4a4a6a" metalness={0.5} />
+          </mesh>
+        </>
+      );
+    default:
+      return (
+        <mesh position={[0, 0.35, 0.2]}>
+          <boxGeometry args={[0.1, 0.06, 0.02]} />
+          <meshStandardMaterial color="#E5A824" emissive="#E5A824" emissiveIntensity={0.4} />
+        </mesh>
+      );
+  }
+}
+
 function AgentCharacter({ agent, simState, onSelect, isSelected }: {
   agent: Agent; simState: AgentSimState; onSelect: (agent: Agent | null) => void; isSelected: boolean;
 }) {
@@ -262,6 +614,7 @@ function AgentCharacter({ agent, simState, onSelect, isSelected }: {
   const animTimer = useRef(0);
   const [hovered, setHovered] = useState(false);
   const color = getAgentColor(agent);
+  const outfit = getAgentOutfit(agent);
 
   useFrame((_state, delta) => {
     if (!groupRef.current) return;
@@ -363,6 +716,7 @@ function AgentCharacter({ agent, simState, onSelect, isSelected }: {
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
       </mesh>
+      <AgentOutfitMesh outfit={outfit} color={color} baseY={0} />
       {agent.isActive && <pointLight position={[0, 0.8, 0]} color={color} intensity={0.3} distance={2} />}
       <Billboard position={[0, 1.55, 0]}>
         <Text fontSize={0.18} color="white" anchorX="center" anchorY="middle" outlineWidth={0.015} outlineColor="#000" font={undefined}>
@@ -483,7 +837,7 @@ function Scene({ agents, selectedAgent, onSelectAgent, simStates }: {
       <directionalLight position={[-10, 15, -5]} intensity={0.2} />
       <hemisphereLight color="#1a1a3e" groundColor="#0a0a1a" intensity={0.3} />
       <fog attach="fog" args={["#0a0a1a", 20, 45]} />
-      <FactoryFloor />
+      <FactoryEnvironment />
       <FactorySign />
       {ROOMS.map(room => <Room key={room.id} room={room} />)}
       {agents.map((agent) => {
@@ -765,8 +1119,16 @@ function RoomDetailPanel({ room, agents, simStates, onClose, onAssignAgent }: {
   );
 }
 
-function parseDisplayCommands(text: string): { cleanText: string; containers: DisplayContainer[] } {
+interface FactoryAction {
+  type: "assign-step" | "activate" | "deactivate" | "move-department";
+  agentId: string;
+  stepId?: string;
+  workspaceId?: string;
+}
+
+function parseDisplayCommands(text: string): { cleanText: string; containers: DisplayContainer[]; actions: FactoryAction[] } {
   const containers: DisplayContainer[] = [];
+  const actions: FactoryAction[] = [];
   const lines = text.split("\n");
   const cleanLines: string[] = [];
 
@@ -783,15 +1145,21 @@ function parseDisplayCommands(text: string): { cleanText: string; containers: Di
             data: parsed,
           });
         }
-      } catch {
-        // always strip :::display: lines even on parse error
-      }
+      } catch {}
+    } else if (line.trim().startsWith(":::action:")) {
+      try {
+        const jsonStr = line.trim().slice(":::action:".length);
+        const parsed = JSON.parse(jsonStr);
+        if (parsed.type && parsed.agentId) {
+          actions.push(parsed as FactoryAction);
+        }
+      } catch {}
     } else {
       cleanLines.push(line);
     }
   }
 
-  return { cleanText: cleanLines.join("\n").trim(), containers };
+  return { cleanText: cleanLines.join("\n").trim(), containers, actions };
 }
 
 function DisplayContainerRenderer({ container, onClose }: { container: DisplayContainer; onClose: () => void }) {
@@ -933,6 +1301,89 @@ function DisplayContainerRenderer({ container, onClose }: { container: DisplayCo
   );
 }
 
+interface FactoryHealth {
+  summary: { totalAgents: number; activeAgents: number; inactiveAgents: number; departments: number; assemblyLines: number; activeLines: number };
+  coldZones: { roomId: string; roomName: string; agentCount: number; isCold: boolean }[];
+  roomActivity: { roomId: string; roomName: string; agentCount: number; agentNames: string[]; isCold: boolean }[];
+  driftRisks: { agentName: string; issue: string; severity: "low" | "medium" | "high" }[];
+  pendingAssemblySteps: { lineName: string; stepOrder: number; room: string; status: string }[];
+}
+
+function FactoryHealthPanel() {
+  const { data: health } = useQuery<FactoryHealth>({ queryKey: ["/api/factory/health"] });
+
+  if (!health) return null;
+
+  const severityColor = { high: "text-red-500", medium: "text-amber-500", low: "text-blue-400" };
+  const hasColdZones = health.coldZones.length > 0;
+  const hasDriftRisks = health.driftRisks.length > 0;
+  const hasPendingSteps = health.pendingAssemblySteps.length > 0;
+
+  if (!hasColdZones && !hasDriftRisks && !hasPendingSteps) return null;
+
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/5" data-testid="panel-factory-health">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          <CardTitle className="text-sm">Factory Health Alerts</CardTitle>
+          <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30">
+            {health.coldZones.length + health.driftRisks.length + health.pendingAssemblySteps.length} issues
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-xs">
+        {hasColdZones && (
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">Cold Zones (No Coverage)</p>
+            <div className="space-y-1">
+              {health.coldZones.map(z => (
+                <div key={z.roomId} className="flex items-center gap-2 px-2 py-1 rounded bg-red-500/10 border border-red-500/20" data-testid={`alert-cold-zone-${z.roomId}`}>
+                  <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+                  <span className="text-red-400">{z.roomName}</span>
+                  <span className="text-muted-foreground ml-auto">0 agents</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {hasDriftRisks && (
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">Quality & Drift Risks</p>
+            <div className="space-y-1">
+              {health.driftRisks.map((d, i) => (
+                <div key={i} className="flex items-start gap-2 px-2 py-1 rounded bg-muted/30" data-testid={`alert-drift-${i}`}>
+                  <span className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${d.severity === "high" ? "bg-red-500" : d.severity === "medium" ? "bg-amber-500" : "bg-blue-400"}`} />
+                  <div className="min-w-0">
+                    <span className={`font-medium ${severityColor[d.severity]}`}>{d.agentName}</span>
+                    <span className="text-muted-foreground ml-1">{d.issue}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {hasPendingSteps && (
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">Stalled Assembly Steps</p>
+            <div className="space-y-1">
+              {health.pendingAssemblySteps.map((s, i) => (
+                <div key={i} className="flex items-center gap-2 px-2 py-1 rounded bg-muted/30" data-testid={`alert-stalled-step-${i}`}>
+                  <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+                  <span className="truncate">{s.lineName} - Step {s.stepOrder}</span>
+                  <Badge variant="outline" className="text-[9px] ml-auto shrink-0">{s.status}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces: Workspace[] }) {
   const STORAGE_KEY = "factory-command-chat-history";
   const CONTAINERS_KEY = "factory-display-containers";
@@ -953,7 +1404,37 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [actionResults, setActionResults] = useState<{ action: string; result: string; success: boolean }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const executeActions = useCallback(async (actions: FactoryAction[]) => {
+    for (const action of actions) {
+      try {
+        const resp = await fetch("/api/factory/assign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(action),
+        });
+        const data = await resp.json();
+        setActionResults(prev => [...prev, {
+          action: `${action.type} - ${action.agentId.slice(0, 8)}`,
+          result: data.message || "Done",
+          success: resp.ok,
+        }]);
+        queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/factory/health"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/assembly-lines"] });
+      } catch {
+        setActionResults(prev => [...prev, {
+          action: `${action.type}`,
+          result: "Failed to execute",
+          success: false,
+        }]);
+      }
+    }
+    setTimeout(() => setActionResults([]), 8000);
+  }, []);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1054,14 +1535,15 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
             try {
               const data = JSON.parse(line.slice(6));
               if (data.done) {
-                const { cleanText, containers } = parseDisplayCommands(assistantContent);
-                if (containers.length > 0) {
+                const { cleanText, containers, actions } = parseDisplayCommands(assistantContent);
+                if (containers.length > 0 || actions.length > 0) {
                   setChatMessages(prev => {
                     const updated = [...prev];
                     updated[updated.length - 1] = { role: "assistant", content: cleanText };
                     return updated;
                   });
-                  setDisplayContainers(prev => [...prev, ...containers]);
+                  if (containers.length > 0) setDisplayContainers(prev => [...prev, ...containers]);
+                  if (actions.length > 0) executeActions(actions);
                 }
                 break;
               }
@@ -1082,7 +1564,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
     } finally {
       setIsStreaming(false);
     }
-  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles]);
+  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles, executeActions]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1121,7 +1603,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
                     Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights.
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center mt-4">
-                    {["Show factory status", "Plan a new workflow", "What can this platform do?"].map(suggestion => (
+                    {["Show factory health", "Check for cold zones", "Assign agents to rooms", "Show drift risks"].map(suggestion => (
                       <Button
                         key={suggestion}
                         variant="outline"
@@ -1151,6 +1633,17 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
                   </div>
                 </div>
               ))}
+
+              {actionResults.length > 0 && (
+                <div className="space-y-1 px-1" data-testid="action-results">
+                  {actionResults.map((ar, i) => (
+                    <div key={i} className={`flex items-center gap-2 text-[11px] px-2 py-1 rounded ${ar.success ? "bg-green-500/10 border border-green-500/20 text-green-400" : "bg-red-500/10 border border-red-500/20 text-red-400"}`}>
+                      <Zap className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{ar.result}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {uploadedFiles.length > 0 && (
@@ -1617,6 +2110,8 @@ export default function AgentWorld() {
           onClose={() => setSelectedRoom(null)}
         />
       )}
+
+      <FactoryHealthPanel />
 
       <CommandChatPanel agents={agentList} workspaces={workspaces || []} />
     </div>

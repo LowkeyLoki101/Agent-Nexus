@@ -1579,6 +1579,159 @@ Respond with ONLY valid JSON in this exact format:
     res.sendFile(filePath);
   });
 
+  app.get("/api/factory/health", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const agents = await storage.getAgentsByUser(userId);
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      const assemblyLinesData = await storage.getAssemblyLinesByUser(userId);
+
+      const activeAgents = agents.filter(a => a.isActive);
+      const inactiveAgents = agents.filter(a => !a.isActive);
+
+      const FACTORY_ROOMS = [
+        { id: "research-lab", name: "Research Lab", capabilities: ["research", "analysis"] },
+        { id: "code-workshop", name: "Code Workshop", capabilities: ["code-review", "engineering", "testing", "coding", "debugging"] },
+        { id: "design-studio", name: "Design Studio", capabilities: ["design", "content-creation", "writing", "creative_writing", "content_generation"] },
+        { id: "strategy-room", name: "Strategy Room", capabilities: ["strategy", "architecture", "planning"] },
+        { id: "comms-center", name: "Comms Center", capabilities: ["communication", "security", "communicate", "discuss", "coordinate"] },
+        { id: "break-room", name: "Break Room", capabilities: [] },
+      ];
+
+      const roomAgentCounts = FACTORY_ROOMS.map(room => {
+        const matching = activeAgents.filter(a =>
+          (a.capabilities || []).some(cap =>
+            room.capabilities.some(rc => cap.toLowerCase().includes(rc))
+          )
+        );
+        return {
+          roomId: room.id,
+          roomName: room.name,
+          agentCount: matching.length,
+          agentNames: matching.map(a => a.name),
+          isCold: matching.length === 0 && room.id !== "break-room",
+        };
+      });
+
+      const coldZones = roomAgentCounts.filter(r => r.isCold);
+
+      const capabilityMap: Record<string, string[]> = {};
+      activeAgents.forEach(a => {
+        (a.capabilities || []).forEach(cap => {
+          if (!capabilityMap[cap]) capabilityMap[cap] = [];
+          capabilityMap[cap].push(a.name);
+        });
+      });
+
+      const overloadedCaps = Object.entries(capabilityMap)
+        .filter(([_, agents]) => agents.length > 3)
+        .map(([cap, agents]) => ({ capability: cap, agentCount: agents.length, agents: agents }));
+
+      const underservedCaps = Object.entries(capabilityMap)
+        .filter(([_, agents]) => agents.length === 1)
+        .map(([cap, agents]) => ({ capability: cap, agentCount: 1, agent: agents[0] }));
+
+      const driftRisks: { agentName: string; issue: string; severity: "low" | "medium" | "high" }[] = [];
+
+      activeAgents.forEach(a => {
+        const caps = a.capabilities || [];
+        if (caps.length === 0) {
+          driftRisks.push({ agentName: a.name, issue: "No capabilities defined - cannot be assigned to any room", severity: "high" });
+        }
+        if (!a.isVerified && caps.length > 0) {
+          driftRisks.push({ agentName: a.name, issue: "Active but unverified - identity not confirmed", severity: "medium" });
+        }
+        if (caps.length > 6) {
+          driftRisks.push({ agentName: a.name, issue: `Too many capabilities (${caps.length}) - may lack focus`, severity: "low" });
+        }
+        const ws = workspaces.find(w => w.id === a.workspaceId);
+        if (!ws) {
+          driftRisks.push({ agentName: a.name, issue: "Assigned to non-existent department", severity: "high" });
+        }
+      });
+
+      const pendingSteps: { lineName: string; stepOrder: number; room: string; status: string }[] = [];
+      for (const line of assemblyLinesData) {
+        const steps = await storage.getAssemblyLineSteps(line.id);
+        steps.filter(s => s.status === "pending" || s.status === "in_progress").forEach(s => {
+          pendingSteps.push({
+            lineName: line.name,
+            stepOrder: s.stepOrder,
+            room: s.departmentRoom,
+            status: s.status,
+          });
+        });
+      }
+
+      res.json({
+        summary: {
+          totalAgents: agents.length,
+          activeAgents: activeAgents.length,
+          inactiveAgents: inactiveAgents.length,
+          departments: workspaces.length,
+          assemblyLines: assemblyLinesData.length,
+          activeLines: assemblyLinesData.filter(l => l.status === "active").length,
+        },
+        coldZones,
+        roomActivity: roomAgentCounts,
+        overloadedCapabilities: overloadedCaps,
+        underservedCapabilities: underservedCaps,
+        driftRisks,
+        pendingAssemblySteps: pendingSteps,
+      });
+    } catch (error) {
+      console.error("Error fetching factory health:", error);
+      res.status(500).json({ message: "Failed to fetch factory health" });
+    }
+  });
+
+  app.post("/api/factory/assign", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const body = req.body ?? {};
+      const { agentId, assemblyLineId, stepId, action } = body;
+
+      if (!agentId || !action) {
+        return res.status(400).json({ message: "agentId and action are required" });
+      }
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      switch (action) {
+        case "activate": {
+          const updated = await storage.updateAgent(agentId, { isActive: true });
+          res.json({ message: `${agent.name} activated`, agent: updated });
+          break;
+        }
+        case "deactivate": {
+          const updated = await storage.updateAgent(agentId, { isActive: false });
+          res.json({ message: `${agent.name} deactivated`, agent: updated });
+          break;
+        }
+        case "assign-step": {
+          if (!stepId) return res.status(400).json({ message: "stepId required for assign-step" });
+          const step = await storage.updateAssemblyLineStep(stepId, { assignedAgentId: agentId, status: "in_progress" });
+          res.json({ message: `${agent.name} assigned to step`, step });
+          break;
+        }
+        case "move-department": {
+          const { workspaceId } = body;
+          if (!workspaceId) return res.status(400).json({ message: "workspaceId required for move-department" });
+          const updated = await storage.updateAgent(agentId, { workspaceId });
+          const ws = await storage.getWorkspace(workspaceId);
+          res.json({ message: `${agent.name} moved to ${ws?.name || workspaceId}`, agent: updated });
+          break;
+        }
+        default:
+          res.status(400).json({ message: `Unknown action: ${action}` });
+      }
+    } catch (error) {
+      console.error("Error in factory assign:", error);
+      res.status(500).json({ message: "Failed to process assignment" });
+    }
+  });
+
   app.post("/api/command-chat", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -1590,9 +1743,51 @@ Respond with ONLY valid JSON in this exact format:
 
       const agents = await storage.getAgentsByUser(userId);
       const workspaces = await storage.getWorkspacesByUser(userId);
+      const assemblyLinesData = await storage.getAssemblyLinesByUser(userId);
 
-      const agentList = agents.map(a => `- ${a.name} (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}] workspace: ${workspaces.find(w => w.id === a.workspaceId)?.name || a.workspaceId}`).join("\n");
-      const deptList = workspaces.map(w => `- ${w.name} (/${w.slug}) - ${w.description || "No description"}`).join("\n");
+      const agentList = agents.map(a => `- ${a.name} [id:${a.id}] (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}] [${a.isVerified ? "verified" : "unverified"}] workspace: ${workspaces.find(w => w.id === a.workspaceId)?.name || a.workspaceId}`).join("\n");
+      const deptList = workspaces.map(w => `- ${w.name} [id:${w.id}] (/${w.slug}) - ${w.description || "No description"}`).join("\n");
+
+      const FACTORY_ROOMS = [
+        { id: "research-lab", name: "Research Lab", capabilities: ["research", "analysis"] },
+        { id: "code-workshop", name: "Code Workshop", capabilities: ["code-review", "engineering", "testing", "coding", "debugging"] },
+        { id: "design-studio", name: "Design Studio", capabilities: ["design", "content-creation", "writing", "creative_writing", "content_generation"] },
+        { id: "strategy-room", name: "Strategy Room", capabilities: ["strategy", "architecture", "planning"] },
+        { id: "comms-center", name: "Comms Center", capabilities: ["communication", "security", "communicate", "discuss", "coordinate"] },
+        { id: "break-room", name: "Break Room", capabilities: [] },
+      ];
+
+      const activeAgents = agents.filter(a => a.isActive);
+      const roomCoverage = FACTORY_ROOMS.map(room => {
+        const matching = activeAgents.filter(a =>
+          (a.capabilities || []).some(cap =>
+            room.capabilities.some(rc => cap.toLowerCase().includes(rc))
+          )
+        );
+        return `${room.name}: ${matching.length > 0 ? matching.map(a => a.name).join(", ") : "COLD ZONE - no agents"}`;
+      }).join("\n");
+
+      const driftIssues: string[] = [];
+      activeAgents.forEach(a => {
+        const caps = a.capabilities || [];
+        if (caps.length === 0) driftIssues.push(`${a.name}: No capabilities - cannot route to rooms`);
+        if (!a.isVerified) driftIssues.push(`${a.name}: Unverified identity`);
+        if (caps.length > 6) driftIssues.push(`${a.name}: ${caps.length} capabilities - may lack focus`);
+      });
+
+      let assemblyLineContext = "";
+      if (assemblyLinesData.length > 0) {
+        const lineDetails = [];
+        for (const line of assemblyLinesData.slice(0, 5)) {
+          const steps = await storage.getAssemblyLineSteps(line.id);
+          const pendingCount = steps.filter(s => s.status === "pending").length;
+          const inProgressCount = steps.filter(s => s.status === "in_progress").length;
+          const completedCount = steps.filter(s => s.status === "completed").length;
+          const unassigned = steps.filter(s => !s.assignedAgentId).length;
+          lineDetails.push(`- ${line.name} [id:${line.id}] [${line.status}] Steps: ${completedCount} done, ${inProgressCount} in-progress, ${pendingCount} pending, ${unassigned} unassigned`);
+        }
+        assemblyLineContext = `\n\nAssembly Lines:\n${lineDetails.join("\n")}`;
+      }
 
       let fileContext = "";
       if (uploadedFiles && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
@@ -1601,7 +1796,12 @@ Respond with ONLY valid JSON in this exact format:
         ).join("\n");
       }
 
-      const systemPrompt = `You are Creative Intelligence — the Factory Command AI for CB | CREATIVES. You help the user manage their agent factory, plan operations, create tools, and configure departments. You have deep knowledge of the platform architecture and can answer technical questions.
+      const systemPrompt = `You are Creative Intelligence — the Factory Operations AI for CB | CREATIVES. You are the chief operations officer of this agent factory. Your primary responsibilities are:
+
+1. AGENT ASSIGNMENT - Assign agents to rooms, assembly line steps, and departments based on their capabilities
+2. COLD ZONE MONITORING - Detect rooms with no agents and recommend coverage
+3. QUALITY & DRIFT DETECTION - Identify agents that may be drifting from their assignment, lacking focus, or having capability mismatches
+4. OPERATIONS MANAGEMENT - Ensure all assembly lines are progressing, all departments are covered, and agents are productive
 
 FORMATTING RULES:
 - Write in plain text for your conversational responses.
@@ -1610,6 +1810,21 @@ FORMATTING RULES:
 - Separate sections with blank lines for readability.
 - Keep responses concise and scannable.
 - Do NOT use markdown formatting like **bold**, *italic*, or ## headings in your text.
+
+ASSIGNMENT ACTIONS:
+When the user asks you to assign, reassign, activate, or deactivate agents, include an :::action: line in your response. The user's frontend will execute these actions automatically.
+
+Available actions:
+:::action:{"type":"assign-step","agentId":"<agent-id>","stepId":"<step-id>"}
+:::action:{"type":"activate","agentId":"<agent-id>"}
+:::action:{"type":"deactivate","agentId":"<agent-id>"}
+:::action:{"type":"move-department","agentId":"<agent-id>","workspaceId":"<workspace-id>"}
+
+Rules for actions:
+- Always confirm what you're doing before issuing an action
+- Use the actual agent IDs and step IDs from the data provided
+- You can issue MULTIPLE actions in one response
+- Each :::action: must be on its own line with the full JSON on the same line
 
 DISPLAY CONTAINERS:
 You can create visual display containers to show structured data. To open a container, include a line in your response that starts with :::display: followed by a JSON object on the SAME line. Each container appears as a visual panel the user can see.
@@ -1645,6 +1860,13 @@ RULES FOR DISPLAY CONTAINERS:
 - When the user uploads a file, use containers to display/analyze its contents.
 - The :::display: line must be on its own line, with the full JSON on the same line.
 
+PROACTIVE MONITORING:
+When asked about factory health, cold zones, or quality, proactively analyze and report:
+- Which rooms are "cold" (no agents with matching capabilities)
+- Which agents might be drifting (wrong room for their skills, too many/few capabilities)
+- Which assembly line steps are stalled (pending without assigned agents)
+- Which capabilities are overloaded or underserved
+
 Current Factory State:
 
 Departments:
@@ -1653,22 +1875,30 @@ ${deptList || "No departments yet"}
 Agents:
 ${agentList || "No agents registered"}
 
-${factoryContext ? `Factory View: ${factoryContext}` : ""}
+Room Coverage (based on agent capabilities):
+${roomCoverage}
+
+${driftIssues.length > 0 ? `Quality & Drift Alerts:\n${driftIssues.map(d => `- ${d}`).join("\n")}` : "No drift issues detected."}
+${assemblyLineContext}
+
+${factoryContext ? `Factory 3D View: ${factoryContext}` : ""}
 ${fileContext}
 
 Platform Architecture & Documentation:
 ${architectureDoc}
 
 You can help with:
+- Assigning agents to assembly line steps, rooms, and departments
+- Monitoring cold zones and recommending agent redistribution
+- Detecting quality drift and capability mismatches
+- Activating/deactivating agents
 - Planning agent workflows and operations
 - Suggesting department configurations
 - Creating tool specifications for agents
 - Analyzing factory performance
 - Answering questions about agent capabilities, platform features, and system architecture
-- Recommending agent assignments and optimizations
-- Explaining how any part of the platform works
 
-Be concise and actionable. When suggesting changes, explain what you'd do and why.`;
+Be proactive about identifying problems. When you see cold zones or drift, mention them even if not asked. Be concise and actionable.`;
 
       const chatMessages: { role: "user" | "assistant" | "system"; content: string }[] = [
         { role: "system", content: systemPrompt },
