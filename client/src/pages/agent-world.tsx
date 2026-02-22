@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import ReactMarkdown from "react-markdown";
 import {
   Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity,
   Send, MessageSquare, ChevronDown, ChevronUp, Loader2,
@@ -18,6 +17,7 @@ import {
   FileText, Code, Palette, Brain, Users, Coffee, Settings,
   ArrowRight, Newspaper, Gauge, Terminal,
   Play, Pause, Volume2, VolumeX,
+  Upload, Paperclip, Table2, BarChart3, List, Image as ImageIcon, Video, Trash2,
 } from "lucide-react";
 
 function detectWebGL(): boolean {
@@ -501,6 +501,22 @@ interface ChatMessage {
   content: string;
 }
 
+interface UploadedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  preview: string;
+  url: string;
+}
+
+interface DisplayContainer {
+  id: string;
+  type: "table" | "summary" | "image" | "video" | "code" | "list" | "metrics";
+  title: string;
+  data: any;
+}
+
 function getToolIcon(iconType: string) {
   switch (iconType) {
     case "search": return <SearchIcon className="h-4 w-4" />;
@@ -749,17 +765,253 @@ function RoomDetailPanel({ room, agents, simStates, onClose, onAssignAgent }: {
   );
 }
 
+function parseDisplayCommands(text: string): { cleanText: string; containers: DisplayContainer[] } {
+  const containers: DisplayContainer[] = [];
+  const lines = text.split("\n");
+  const cleanLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.trim().startsWith(":::display:")) {
+      try {
+        const jsonStr = line.trim().slice(":::display:".length);
+        const parsed = JSON.parse(jsonStr);
+        if (parsed.type) {
+          containers.push({
+            id: `dc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: parsed.type,
+            title: parsed.title || parsed.type,
+            data: parsed,
+          });
+        }
+      } catch {
+        // always strip :::display: lines even on parse error
+      }
+    } else {
+      cleanLines.push(line);
+    }
+  }
+
+  return { cleanText: cleanLines.join("\n").trim(), containers };
+}
+
+function DisplayContainerRenderer({ container, onClose }: { container: DisplayContainer; onClose: () => void }) {
+  const typeIcons: Record<string, any> = {
+    table: <Table2 className="h-3.5 w-3.5" />,
+    summary: <FileText className="h-3.5 w-3.5" />,
+    image: <ImageIcon className="h-3.5 w-3.5" />,
+    video: <Video className="h-3.5 w-3.5" />,
+    code: <Code className="h-3.5 w-3.5" />,
+    list: <List className="h-3.5 w-3.5" />,
+    metrics: <BarChart3 className="h-3.5 w-3.5" />,
+  };
+
+  const renderContent = () => {
+    const d = container.data;
+    switch (container.type) {
+      case "table":
+        return (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-primary/20">
+                  {(d.headers || []).map((h: string, i: number) => (
+                    <th key={i} className="text-left px-2 py-1.5 text-muted-foreground font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(d.rows || []).map((row: string[], ri: number) => (
+                  <tr key={ri} className="border-b border-border/50 hover:bg-muted/50">
+                    {row.map((cell, ci) => (
+                      <td key={ci} className="px-2 py-1.5">{cell}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+
+      case "summary":
+        return (
+          <div className="space-y-3">
+            {(d.sections || []).map((s: any, i: number) => (
+              <div key={i}>
+                <div className="text-xs font-medium text-primary mb-1">{s.heading}</div>
+                <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{s.content}</div>
+              </div>
+            ))}
+          </div>
+        );
+
+      case "image":
+        return (
+          <div className="flex justify-center">
+            <img src={d.src} alt={d.alt || d.title} className="max-w-full max-h-[300px] rounded object-contain" />
+          </div>
+        );
+
+      case "video": {
+        const videoId = d.url?.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/)?.[1];
+        return videoId ? (
+          <div className="aspect-video">
+            <iframe
+              src={`https://www.youtube.com/embed/${videoId}`}
+              className="w-full h-full rounded"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        ) : <p className="text-xs text-muted-foreground">Invalid video URL</p>;
+      }
+
+      case "code":
+        return (
+          <pre className="bg-background/80 rounded p-3 overflow-x-auto text-xs font-mono leading-relaxed">
+            <code>{d.code}</code>
+          </pre>
+        );
+
+      case "list":
+        return (
+          <div className="space-y-1.5">
+            {(d.items || []).map((item: any, i: number) => (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                  item.status === "active" ? "bg-green-500" :
+                  item.status === "inactive" ? "bg-gray-400" :
+                  item.status === "warning" ? "bg-yellow-500" :
+                  item.status === "error" ? "bg-red-500" : "bg-primary"
+                }`} />
+                <div>
+                  <span className="font-medium">{item.label}</span>
+                  {item.detail && <span className="text-muted-foreground ml-1">- {item.detail}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+
+      case "metrics":
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {(d.metrics || []).map((m: any, i: number) => (
+              <div key={i} className="bg-background/60 rounded-lg p-2.5 text-center">
+                <div className="text-lg font-bold text-primary">{m.value}</div>
+                <div className="text-[10px] text-muted-foreground">{m.label}</div>
+                {m.change && (
+                  <div className={`text-[10px] font-medium ${m.change.startsWith("+") ? "text-green-500" : m.change.startsWith("-") ? "text-red-500" : "text-muted-foreground"}`}>
+                    {m.change}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+
+      default:
+        return <p className="text-xs text-muted-foreground">Unknown container type</p>;
+    }
+  };
+
+  return (
+    <Card className="border-primary/20 bg-card/80 backdrop-blur-sm" data-testid={`display-container-${container.type}`}>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-primary/10">
+        <div className="flex items-center gap-1.5">
+          <span className="text-primary">{typeIcons[container.type] || <FileText className="h-3.5 w-3.5" />}</span>
+          <span className="text-xs font-medium">{container.title}</span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0">{container.type}</Badge>
+        </div>
+        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={onClose} data-testid="button-close-container">
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+      <CardContent className="p-3">
+        {renderContent()}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces: Workspace[] }) {
+  const STORAGE_KEY = "factory-command-chat-history";
+  const CONTAINERS_KEY = "factory-display-containers";
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [displayContainers, setDisplayContainers] = useState<DisplayContainer[]>(() => {
+    try {
+      const saved = localStorage.getItem(CONTAINERS_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [chatMessages]);
+
+  useEffect(() => {
+    if (!isStreaming && chatMessages.length > 0) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatMessages.slice(-50))); } catch {}
+    }
+  }, [chatMessages, isStreaming]);
+
+  useEffect(() => {
+    try { localStorage.setItem(CONTAINERS_KEY, JSON.stringify(displayContainers)); } catch {}
+  }, [displayContainers]);
+
+  const clearHistory = useCallback(() => {
+    setChatMessages([]);
+    setDisplayContainers([]);
+    setUploadedFiles([]);
+    try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(CONTAINERS_KEY); } catch {}
+  }, []);
+
+  const removeContainer = useCallback((id: string) => {
+    setDisplayContainers(prev => prev.filter(c => c.id !== id));
+  }, []);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const resp = await fetch("/api/command-chat/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (!resp.ok) throw new Error("Upload failed");
+      const data = await resp.json();
+      setUploadedFiles(prev => [...prev, data]);
+      if (data.type.startsWith("image/")) {
+        setDisplayContainers(prev => [...prev, {
+          id: `dc-${Date.now()}`,
+          type: "image",
+          title: data.name,
+          data: { type: "image", title: data.name, src: data.url, alt: data.name },
+        }]);
+      }
+    } catch {
+      console.error("File upload failed");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const msg = chatInput.trim();
@@ -779,6 +1031,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
           message: msg,
           history: chatMessages,
           factoryContext: `${agents.length} agents, ${workspaces.length} departments, ${ROOMS.length} rooms`,
+          uploadedFiles: uploadedFiles.map(f => ({ name: f.name, type: f.type, size: f.size, preview: f.preview })),
         }),
       });
 
@@ -800,7 +1053,18 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
           if (line.startsWith("data: ")) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.done) break;
+              if (data.done) {
+                const { cleanText, containers } = parseDisplayCommands(assistantContent);
+                if (containers.length > 0) {
+                  setChatMessages(prev => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { role: "assistant", content: cleanText };
+                    return updated;
+                  });
+                  setDisplayContainers(prev => [...prev, ...containers]);
+                }
+                break;
+              }
               if (data.content) {
                 assistantContent += data.content;
                 setChatMessages(prev => {
@@ -818,7 +1082,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
     } finally {
       setIsStreaming(false);
     }
-  }, [chatInput, isStreaming, chatMessages, agents, workspaces]);
+  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -828,91 +1092,165 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
   };
 
   return (
-    <Card className="border-primary/20" data-testid="panel-command-chat">
-      <div className="border-b">
-        <Button
-          variant="ghost"
-          className="w-full flex items-center justify-between rounded-none px-4 py-2"
-          onClick={() => setIsExpanded(!isExpanded)}
-          data-testid="button-toggle-command-chat"
-        >
-          <div className="flex items-center gap-2">
-            <Terminal className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium">Factory Command Center</span>
-            <Badge variant="outline" className="text-[10px]">Creative Intelligence</Badge>
-          </div>
-          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-        </Button>
-      </div>
+    <div className="space-y-3" data-testid="panel-command-chat">
+      <Card className="border-primary/20">
+        <div className="border-b">
+          <Button
+            variant="ghost"
+            className="w-full flex items-center justify-between rounded-none px-4 py-2"
+            onClick={() => setIsExpanded(!isExpanded)}
+            data-testid="button-toggle-command-chat"
+          >
+            <div className="flex items-center gap-2">
+              <Terminal className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium">Factory Command Center</span>
+              <Badge variant="outline" className="text-[10px]">Creative Intelligence</Badge>
+            </div>
+            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </Button>
+        </div>
 
-      {isExpanded && (
-        <CardContent className="p-0">
-          <div ref={scrollRef} className="h-[250px] overflow-y-auto px-4 py-3 space-y-3">
-            {chatMessages.length === 0 && (
-              <div className="text-center py-8">
-                <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
-                <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
-                <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
-                  Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights.
-                </p>
-                <div className="flex flex-wrap gap-2 justify-center mt-4">
-                  {["Show factory status", "Plan a new workflow", "Create a web scraper tool"].map(suggestion => (
-                    <Button
-                      key={suggestion}
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => { setChatInput(suggestion); }}
-                      data-testid={`button-suggestion-${suggestion.split(" ").slice(0, 3).join("-").toLowerCase()}`}
-                    >
-                      {suggestion}
-                    </Button>
-                  ))}
+        {isExpanded && (
+          <CardContent className="p-0">
+            <div ref={scrollRef} className="h-[300px] overflow-y-auto px-4 py-3 space-y-3">
+              {chatMessages.length === 0 && (
+                <div className="text-center py-8">
+                  <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
+                  <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
+                  <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
+                    Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights.
+                  </p>
+                  <div className="flex flex-wrap gap-2 justify-center mt-4">
+                    {["Show factory status", "Plan a new workflow", "What can this platform do?"].map(suggestion => (
+                      <Button
+                        key={suggestion}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => { setChatInput(suggestion); }}
+                        data-testid={`button-suggestion-${suggestion.split(" ").slice(0, 3).join("-").toLowerCase()}`}
+                      >
+                        {suggestion}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
+              )}
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                    msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+                  }`} data-testid={`command-message-${msg.role}-${i}`}>
+                    {msg.content ? (
+                      <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                    ) : (isStreaming && i === chatMessages.length - 1 ? (
+                      <span className="flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                      </span>
+                    ) : "")}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {uploadedFiles.length > 0 && (
+              <div className="px-4 py-1 border-t flex flex-wrap gap-1">
+                {uploadedFiles.map(f => (
+                  <Badge key={f.id} variant="secondary" className="text-[10px] gap-1">
+                    <Paperclip className="h-2.5 w-2.5" />
+                    {f.name.length > 20 ? f.name.slice(0, 17) + "..." : f.name}
+                    <button onClick={() => setUploadedFiles(prev => prev.filter(x => x.id !== f.id))} className="ml-0.5 hover:text-destructive" data-testid="button-remove-file">
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </Badge>
+                ))}
               </div>
             )}
-            {chatMessages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
-                  msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
-                }`} data-testid={`command-message-${msg.role}-${i}`}>
-                  {msg.content ? (
-                    msg.role === "assistant" ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_pre]:text-xs [&_pre]:bg-background/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      </div>
-                    ) : msg.content
-                  ) : (isStreaming && i === chatMessages.length - 1 ? (
-                    <span className="flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
-                    </span>
-                  ) : "")}
+
+            <div className="px-4 pb-3 pt-1 border-t">
+              <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2 items-end">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.xlsx,.xls,.csv,.zip,.txt,.json,.doc,.docx"
+                  onChange={handleFileUpload}
+                  data-testid="input-file-upload"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 h-9 w-9"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || isStreaming}
+                  data-testid="button-upload-file"
+                >
+                  {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                </Button>
+                <Textarea
+                  ref={inputRef}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Ask about operations, architecture, agents, or tools..."
+                  className="min-h-[40px] max-h-[100px] text-sm resize-none"
+                  rows={1}
+                  disabled={isStreaming}
+                  data-testid="input-command-chat"
+                />
+                <Button type="submit" size="icon" className="shrink-0 self-end" disabled={!chatInput.trim() || isStreaming} data-testid="button-send-command">
+                  {isStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </form>
+              {chatMessages.length > 0 && (
+                <div className="flex justify-end mt-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-muted-foreground h-6 px-2"
+                    onClick={clearHistory}
+                    disabled={isStreaming}
+                    data-testid="button-clear-chat-history"
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" /> Clear history
+                  </Button>
                 </div>
-              </div>
+              )}
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {displayContainers.length > 0 && (
+        <div className="space-y-2" data-testid="display-container-wall">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-1.5">
+              <Gauge className="h-3.5 w-3.5 text-primary" />
+              <span className="text-xs font-medium text-muted-foreground">Display Panels ({displayContainers.length})</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-[10px] text-muted-foreground h-5 px-1.5"
+              onClick={() => setDisplayContainers([])}
+              data-testid="button-clear-containers"
+            >
+              Clear all
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {displayContainers.map(container => (
+              <DisplayContainerRenderer
+                key={container.id}
+                container={container}
+                onClose={() => removeContainer(container.id)}
+              />
             ))}
           </div>
-
-          <div className="px-4 pb-3 pt-1 border-t">
-            <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2">
-              <Textarea
-                ref={inputRef}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask Creative Intelligence to plan operations, create tools, or configure the factory..."
-                className="min-h-[40px] max-h-[100px] text-sm resize-none"
-                rows={1}
-                disabled={isStreaming}
-                data-testid="input-command-chat"
-              />
-              <Button type="submit" size="icon" className="shrink-0 self-end" disabled={!chatInput.trim() || isStreaming} data-testid="button-send-command">
-                {isStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
-            </form>
-          </div>
-        </CardContent>
+        </div>
       )}
-    </Card>
+    </div>
   );
 }
 

@@ -5,6 +5,9 @@ import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integra
 import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
+import * as fs from "fs";
+import * as path from "path";
+import multer from "multer";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -1269,10 +1272,72 @@ export async function registerRoutes(
     baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
   });
 
+  let architectureDoc = "";
+  try {
+    architectureDoc = fs.readFileSync("replit.md", "utf-8");
+  } catch {}
+
+  const uploadsDir = path.join(process.cwd(), "uploads");
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: uploadsDir,
+      filename: (_req, file, cb) => {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, uniqueSuffix + "-" + file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_"));
+      },
+    }),
+    limits: { fileSize: 25 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = [
+        "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel", "text/csv",
+        "application/zip", "application/x-zip-compressed",
+        "text/plain", "application/json",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+      ];
+      cb(null, allowed.includes(file.mimetype) || file.originalname.endsWith(".csv") || file.originalname.endsWith(".json") || file.originalname.endsWith(".txt"));
+    },
+  });
+
+  app.post("/api/command-chat/upload", isAuthenticated, upload.single("file"), (req: any, res) => {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded or file type not allowed" });
+    const f = req.file;
+    let preview = "";
+    try {
+      if (f.mimetype === "text/plain" || f.mimetype === "application/json" || f.mimetype === "text/csv" || f.originalname.endsWith(".csv") || f.originalname.endsWith(".txt") || f.originalname.endsWith(".json")) {
+        const content = fs.readFileSync(f.path, "utf-8");
+        preview = content.slice(0, 3000);
+      }
+    } catch {}
+    res.json({
+      id: f.filename,
+      name: f.originalname,
+      size: f.size,
+      type: f.mimetype,
+      preview,
+      url: `/api/command-chat/uploads/${f.filename}`,
+    });
+  });
+
+  app.get("/api/command-chat/uploads/:filename", isAuthenticated, (req: any, res) => {
+    const filename = path.basename(req.params.filename);
+    if (filename !== req.params.filename || filename.includes("..")) {
+      return res.status(400).json({ message: "Invalid filename" });
+    }
+    const filePath = path.join(uploadsDir, filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not found" });
+    res.sendFile(filePath);
+  });
+
   app.post("/api/command-chat", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { message, history, factoryContext } = req.body;
+      const { message, history, factoryContext, uploadedFiles } = req.body;
 
       if (!message || typeof message !== "string") {
         return res.status(400).json({ message: "Message is required" });
@@ -1281,12 +1346,62 @@ export async function registerRoutes(
       const agents = await storage.getAgentsByUser(userId);
       const workspaces = await storage.getWorkspacesByUser(userId);
 
-      const agentList = agents.map(a => `- ${a.name} (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}]`).join("\n");
-      const deptList = workspaces.map(w => `- ${w.name} (/${w.slug})`).join("\n");
+      const agentList = agents.map(a => `- ${a.name} (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}] workspace: ${workspaces.find(w => w.id === a.workspaceId)?.name || a.workspaceId}`).join("\n");
+      const deptList = workspaces.map(w => `- ${w.name} (/${w.slug}) - ${w.description || "No description"}`).join("\n");
 
-      const systemPrompt = `You are the Factory Command AI for CB | CREATIVES — Creative Intelligence platform. You help the user manage their agent factory, plan operations, create tools, and configure departments.
+      let fileContext = "";
+      if (uploadedFiles && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
+        fileContext = "\n\nUser uploaded files:\n" + uploadedFiles.map((f: any) =>
+          `- ${f.name} (${f.type}, ${(f.size / 1024).toFixed(1)}KB)${f.preview ? `\nContent preview:\n${f.preview}` : ""}`
+        ).join("\n");
+      }
+
+      const systemPrompt = `You are Creative Intelligence — the Factory Command AI for CB | CREATIVES. You help the user manage their agent factory, plan operations, create tools, and configure departments. You have deep knowledge of the platform architecture and can answer technical questions.
+
+FORMATTING RULES:
+- Write in plain text for your conversational responses.
+- Use simple dashes (-) for bullet points.
+- Use numbered lists (1. 2. 3.) for sequential steps.
+- Separate sections with blank lines for readability.
+- Keep responses concise and scannable.
+- Do NOT use markdown formatting like **bold**, *italic*, or ## headings in your text.
+
+DISPLAY CONTAINERS:
+You can create visual display containers to show structured data. To open a container, include a line in your response that starts with :::display: followed by a JSON object on the SAME line. Each container appears as a visual panel the user can see.
+
+Available container types and their JSON format:
+
+1. Table - show structured data:
+:::display:{"type":"table","title":"Title Here","headers":["Col1","Col2"],"rows":[["val1","val2"],["val3","val4"]]}
+
+2. Summary - show organized information with sections:
+:::display:{"type":"summary","title":"Title Here","sections":[{"heading":"Section 1","content":"Details here"},{"heading":"Section 2","content":"More details"}]}
+
+3. Image - show an uploaded image:
+:::display:{"type":"image","title":"Image Title","src":"/api/command-chat/uploads/filename","alt":"description"}
+
+4. Video - embed a YouTube video:
+:::display:{"type":"video","title":"Video Title","url":"https://www.youtube.com/watch?v=ID"}
+
+5. Code - show code or technical content:
+:::display:{"type":"code","title":"Title","language":"javascript","code":"const x = 1;"}
+
+6. List - show a structured list with items:
+:::display:{"type":"list","title":"Title","items":[{"label":"Item 1","detail":"Description","status":"active"},{"label":"Item 2","detail":"Description","status":"inactive"}]}
+
+7. Metrics - show key numbers/stats:
+:::display:{"type":"metrics","title":"Title","metrics":[{"label":"Total Agents","value":"21","change":"+3"},{"label":"Active","value":"18"}]}
+
+RULES FOR DISPLAY CONTAINERS:
+- You can open MULTIPLE containers in a single response to show different perspectives.
+- Always include a brief text explanation BEFORE or AFTER the container.
+- Use containers when data is best shown visually (tables, stats, comparisons).
+- When the user asks about status, metrics, or comparisons, prefer containers over plain text.
+- When the user uploads a file, use containers to display/analyze its contents.
+- The :::display: line must be on its own line, with the full JSON on the same line.
 
 Current Factory State:
+
 Departments:
 ${deptList || "No departments yet"}
 
@@ -1294,16 +1409,21 @@ Agents:
 ${agentList || "No agents registered"}
 
 ${factoryContext ? `Factory View: ${factoryContext}` : ""}
+${fileContext}
+
+Platform Architecture & Documentation:
+${architectureDoc}
 
 You can help with:
 - Planning agent workflows and operations
-- Suggesting department configurations  
+- Suggesting department configurations
 - Creating tool specifications for agents
 - Analyzing factory performance
-- Answering questions about agent capabilities
+- Answering questions about agent capabilities, platform features, and system architecture
 - Recommending agent assignments and optimizations
+- Explaining how any part of the platform works
 
-Be concise and actionable. When suggesting changes, explain what you'd do and why. Use clear formatting for lists and steps.`;
+Be concise and actionable. When suggesting changes, explain what you'd do and why.`;
 
       const chatMessages: { role: "user" | "assistant" | "system"; content: string }[] = [
         { role: "system", content: systemPrompt },
@@ -1327,7 +1447,7 @@ Be concise and actionable. When suggesting changes, explain what you'd do and wh
         model: "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
-        max_tokens: 1024,
+        max_tokens: 2048,
       });
 
       for await (const chunk of stream) {
