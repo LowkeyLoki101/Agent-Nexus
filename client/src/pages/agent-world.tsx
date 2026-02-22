@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity, Send, MessageSquare, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 
 function detectWebGL(): boolean {
   try {
@@ -594,11 +595,119 @@ function Scene({
   );
 }
 
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState?: AgentSimState; onClose: () => void }) {
   const color = getAgentColor(agent);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const prevAgentId = useRef(agent.id);
+
+  useEffect(() => {
+    if (prevAgentId.current !== agent.id) {
+      setChatMessages([]);
+      setChatInput("");
+      setIsStreaming(false);
+      prevAgentId.current = agent.id;
+    }
+  }, [agent.id]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  useEffect(() => {
+    if (chatOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [chatOpen]);
+
+  const sendMessage = useCallback(async () => {
+    const msg = chatInput.trim();
+    if (!msg || isStreaming) return;
+
+    const userMsg: ChatMessage = { role: "user", content: msg };
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput("");
+    setIsStreaming(true);
+
+    const isWalking = simState?.phase === "walking";
+    const currentRoom = simState
+      ? isWalking
+        ? ROOMS.find(r => r.id === simState.targetRoomId)?.name || "the factory"
+        : ROOMS.find(r => r.id === simState.currentRoomId)?.name || "the factory"
+      : "the factory";
+    const currentObjective = simState?.objective || "general tasks";
+    const currentActivity = simState?.animation === "resting" ? "resting" : isWalking ? "walking" : "working";
+
+    try {
+      const response = await fetch(`/api/agents/${agent.id}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          message: msg,
+          history: chatMessages,
+          context: {
+            room: currentRoom,
+            objective: currentObjective,
+            activity: currentActivity,
+          },
+        }),
+      });
+
+      if (!response.ok) throw new Error("Chat failed");
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader");
+
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+      setChatMessages(prev => [...prev, { role: "assistant", content: "" }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        const lines = text.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.done) break;
+              if (data.content) {
+                assistantContent += data.content;
+                setChatMessages(prev => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: assistantContent };
+                  return updated;
+                });
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (error) {
+      setChatMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't respond right now. Try again." }]);
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [chatInput, isStreaming, agent.id, chatMessages, simState]);
+
   return (
-    <Card className="absolute right-4 top-4 w-80 bg-background/90 backdrop-blur-lg border-primary/30 z-20 shadow-2xl" data-testid={`panel-agent-detail-${agent.id}`}>
-      <CardHeader className="pb-3">
+    <Card className="absolute right-4 top-4 w-[340px] bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col max-h-[calc(100%-2rem)]" data-testid={`panel-agent-detail-${agent.id}`}>
+      <CardHeader className="pb-2 shrink-0">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: color + "30", border: `2px solid ${color}` }}>
@@ -620,14 +729,14 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3 text-sm">
+      <CardContent className="space-y-2 text-sm pb-2 shrink-0">
         {simState && (
-          <div className="rounded-md bg-muted/50 p-2.5 space-y-1.5">
+          <div className="rounded-md bg-muted/50 p-2 space-y-1">
             <div className="flex items-center gap-2">
               <Activity className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Current Status</span>
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</span>
             </div>
-            <p className="font-medium">
+            <p className="font-medium text-sm">
               {simState.phase === "walking" && `Walking to ${simState.targetRoom}`}
               {simState.phase === "working" && simState.objective}
               {simState.phase === "idle" && "Deciding next task..."}
@@ -645,21 +754,89 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
             </div>
           </div>
         )}
-        {agent.description && <p className="text-muted-foreground">{agent.description}</p>}
         {agent.capabilities && agent.capabilities.length > 0 && (
-          <div>
-            <p className="text-xs font-medium mb-1.5 text-muted-foreground uppercase tracking-wider">Capabilities</p>
-            <div className="flex flex-wrap gap-1.5">
-              {agent.capabilities.map((cap, i) => (
-                <Badge key={i} variant="secondary" className="text-xs"><Zap className="h-3 w-3 mr-1" />{cap}</Badge>
-              ))}
-            </div>
+          <div className="flex flex-wrap gap-1">
+            {agent.capabilities.slice(0, 4).map((cap, i) => (
+              <Badge key={i} variant="secondary" className="text-[10px] py-0"><Zap className="h-2.5 w-2.5 mr-0.5" />{cap}</Badge>
+            ))}
+            {(agent.capabilities.length > 4) && (
+              <Badge variant="secondary" className="text-[10px] py-0">+{agent.capabilities.length - 4}</Badge>
+            )}
           </div>
         )}
-        <div className="pt-2 border-t text-xs text-muted-foreground">
-          Created {agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : "recently"}
-        </div>
       </CardContent>
+
+      <div className="border-t shrink-0">
+        <Button
+          variant="ghost"
+          className="w-full flex items-center justify-between rounded-none text-xs font-medium uppercase tracking-wider text-muted-foreground"
+          onClick={() => setChatOpen(!chatOpen)}
+          data-testid="button-toggle-chat"
+        >
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-3.5 w-3.5" />
+            <span>Chat with {agent.name.split(" ")[0]}</span>
+          </div>
+          {chatOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+
+      {chatOpen && (
+        <div className="flex flex-col min-h-0 flex-1">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[280px]">
+            {chatMessages.length === 0 && (
+              <div className="text-center py-6">
+                <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground/50">Say hi to {agent.name}</p>
+              </div>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted"
+                  }`}
+                  data-testid={`chat-message-${msg.role}-${i}`}
+                >
+                  {msg.content || (isStreaming && i === chatMessages.length - 1 ? (
+                    <span className="flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                    </span>
+                  ) : "")}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="px-3 pb-3 pt-1 shrink-0">
+            <form
+              onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
+              className="flex gap-1.5"
+            >
+              <Input
+                ref={inputRef}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder={`Message ${agent.name.split(" ")[0]}...`}
+                className="text-xs"
+                disabled={isStreaming}
+                data-testid="input-agent-chat"
+              />
+              <Button
+                type="submit"
+                size="icon"
+                className="shrink-0"
+                disabled={!chatInput.trim() || isStreaming}
+                data-testid="button-send-agent-chat"
+              >
+                {isStreaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              </Button>
+            </form>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import { insertWorkspaceSchema, insertAgentSchema } from "@shared/schema";
 import { z } from "zod";
+import OpenAI from "openai";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -620,6 +621,90 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching workspace briefings:", error);
       res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
+  const agentChatOpenai = new OpenAI({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  });
+
+  app.post("/api/agents/:agentId/chat", isAuthenticated, async (req: any, res) => {
+    try {
+      const { agentId } = req.params;
+      const userId = req.user.claims.sub;
+      const { message, history, context } = req.body;
+
+      if (!message || typeof message !== "string") {
+        return res.status(400).json({ message: "Message is required" });
+      }
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const caps = (agent.capabilities || []).join(", ");
+      const currentActivity = context?.activity || "working";
+      const currentRoom = context?.room || "the factory";
+      const currentObjective = context?.objective || "general tasks";
+
+      const systemPrompt = `You are ${agent.name}, an autonomous AI agent working at the CB | CREATIVES Agent Factory.
+
+Your capabilities: ${caps || "general assistance"}.
+${agent.description ? `About you: ${agent.description}` : ""}
+
+Right now you are ${currentActivity === "resting" ? `in the ${currentRoom}, taking a break and relaxing` : currentActivity === "walking" ? `walking to the ${currentRoom} to start your next task: ${currentObjective}` : `in the ${currentRoom}, working on: ${currentObjective}`}.
+
+Stay in character as this specific agent. Be conversational and natural, like a coworker chatting at their desk. Reference what you're currently working on when relevant. Keep responses concise (2-4 sentences) unless asked for detail. Show personality based on your capabilities - a code-focused agent might speak differently than a design-focused one.`;
+
+      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+      ];
+
+      if (history && Array.isArray(history)) {
+        for (const msg of history.slice(-10)) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            chatMessages.push({ role: msg.role, content: msg.content });
+          }
+        }
+      }
+
+      chatMessages.push({ role: "user", content: message });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const stream = await agentChatOpenai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: chatMessages,
+        stream: true,
+        max_tokens: 512,
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } catch (error) {
+      console.error("Error in agent chat:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: "Chat failed" })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ message: "Failed to chat with agent" });
+      }
     }
   });
 
