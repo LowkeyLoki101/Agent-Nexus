@@ -55,7 +55,7 @@ export default function Briefings() {
             Briefings
           </h1>
           <p className="text-muted-foreground">
-            Create and manage creative briefings for your studios
+            Create and manage creative briefings for your departments
           </p>
         </div>
         <Link href="/briefings/new">

@@ -5,6 +5,11 @@ import {
   apiTokens,
   auditLogs,
   briefings,
+  gifts,
+  giftComments,
+  assemblyLines,
+  assemblyLineSteps,
+  products,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -16,10 +21,20 @@ import {
   type AuditLog,
   type InsertAuditLog,
   type Briefing,
-  type InsertBriefing
+  type InsertBriefing,
+  type Gift,
+  type InsertGift,
+  type GiftComment,
+  type InsertGiftComment,
+  type AssemblyLine,
+  type InsertAssemblyLine,
+  type AssemblyLineStep,
+  type InsertAssemblyLineStep,
+  type Product,
+  type InsertProduct,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 
 export interface IStorage {
@@ -61,6 +76,34 @@ export interface IStorage {
   createBriefing(briefing: InsertBriefing): Promise<Briefing>;
   updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined>;
   deleteBriefing(id: string): Promise<void>;
+
+  getGift(id: string): Promise<Gift | undefined>;
+  getGiftsByUser(userId: string): Promise<Gift[]>;
+  getGiftsByAgent(agentId: string): Promise<Gift[]>;
+  getRecentGifts(limit?: number): Promise<Gift[]>;
+  createGift(gift: InsertGift): Promise<Gift>;
+  updateGift(id: string, updates: Partial<InsertGift>): Promise<Gift | undefined>;
+  deleteGift(id: string): Promise<void>;
+  likeGift(id: string): Promise<void>;
+
+  getGiftComments(giftId: string): Promise<GiftComment[]>;
+  createGiftComment(comment: InsertGiftComment): Promise<GiftComment>;
+
+  getAssemblyLine(id: string): Promise<AssemblyLine | undefined>;
+  getAssemblyLinesByUser(userId: string): Promise<AssemblyLine[]>;
+  createAssemblyLine(line: InsertAssemblyLine): Promise<AssemblyLine>;
+  updateAssemblyLine(id: string, updates: Partial<InsertAssemblyLine>): Promise<AssemblyLine | undefined>;
+  deleteAssemblyLine(id: string): Promise<void>;
+
+  getAssemblyLineSteps(assemblyLineId: string): Promise<AssemblyLineStep[]>;
+  createAssemblyLineStep(step: InsertAssemblyLineStep): Promise<AssemblyLineStep>;
+  updateAssemblyLineStep(id: string, updates: Partial<InsertAssemblyLineStep>): Promise<AssemblyLineStep | undefined>;
+
+  getProduct(id: string): Promise<Product | undefined>;
+  getProductsByUser(userId: string): Promise<Product[]>;
+  getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]>;
+  createProduct(product: InsertProduct): Promise<Product>;
+  updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -282,6 +325,113 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBriefing(id: string): Promise<void> {
     await db.delete(briefings).where(eq(briefings.id, id));
+  }
+
+  async getGift(id: string): Promise<Gift | undefined> {
+    const [gift] = await db.select().from(gifts).where(eq(gifts.id, id));
+    return gift;
+  }
+
+  async getGiftsByUser(userId: string): Promise<Gift[]> {
+    const userAgents = await db.select().from(agents).where(eq(agents.createdById, userId));
+    if (userAgents.length === 0) return [];
+    const agentIds = userAgents.map(a => a.id);
+    return db.select().from(gifts).where(sql`${gifts.agentId} = ANY(${agentIds})`).orderBy(desc(gifts.createdAt));
+  }
+
+  async getGiftsByAgent(agentId: string): Promise<Gift[]> {
+    return db.select().from(gifts).where(eq(gifts.agentId, agentId)).orderBy(desc(gifts.createdAt));
+  }
+
+  async getRecentGifts(limit = 20): Promise<Gift[]> {
+    return db.select().from(gifts).orderBy(desc(gifts.createdAt)).limit(limit);
+  }
+
+  async createGift(gift: InsertGift): Promise<Gift> {
+    const [created] = await db.insert(gifts).values(gift).returning();
+    return created;
+  }
+
+  async updateGift(id: string, updates: Partial<InsertGift>): Promise<Gift | undefined> {
+    const [updated] = await db.update(gifts).set({ ...updates, updatedAt: new Date() }).where(eq(gifts.id, id)).returning();
+    return updated;
+  }
+
+  async deleteGift(id: string): Promise<void> {
+    await db.delete(gifts).where(eq(gifts.id, id));
+  }
+
+  async likeGift(id: string): Promise<void> {
+    await db.update(gifts).set({ likes: sql`COALESCE(${gifts.likes}, 0) + 1` }).where(eq(gifts.id, id));
+  }
+
+  async getGiftComments(giftId: string): Promise<GiftComment[]> {
+    return db.select().from(giftComments).where(eq(giftComments.giftId, giftId)).orderBy(asc(giftComments.createdAt));
+  }
+
+  async createGiftComment(comment: InsertGiftComment): Promise<GiftComment> {
+    const [created] = await db.insert(giftComments).values(comment).returning();
+    return created;
+  }
+
+  async getAssemblyLine(id: string): Promise<AssemblyLine | undefined> {
+    const [line] = await db.select().from(assemblyLines).where(eq(assemblyLines.id, id));
+    return line;
+  }
+
+  async getAssemblyLinesByUser(userId: string): Promise<AssemblyLine[]> {
+    return db.select().from(assemblyLines).where(eq(assemblyLines.ownerId, userId)).orderBy(desc(assemblyLines.createdAt));
+  }
+
+  async createAssemblyLine(line: InsertAssemblyLine): Promise<AssemblyLine> {
+    const [created] = await db.insert(assemblyLines).values(line).returning();
+    return created;
+  }
+
+  async updateAssemblyLine(id: string, updates: Partial<InsertAssemblyLine>): Promise<AssemblyLine | undefined> {
+    const [updated] = await db.update(assemblyLines).set({ ...updates, updatedAt: new Date() }).where(eq(assemblyLines.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAssemblyLine(id: string): Promise<void> {
+    await db.delete(assemblyLines).where(eq(assemblyLines.id, id));
+  }
+
+  async getAssemblyLineSteps(assemblyLineId: string): Promise<AssemblyLineStep[]> {
+    return db.select().from(assemblyLineSteps).where(eq(assemblyLineSteps.assemblyLineId, assemblyLineId)).orderBy(asc(assemblyLineSteps.stepOrder));
+  }
+
+  async createAssemblyLineStep(step: InsertAssemblyLineStep): Promise<AssemblyLineStep> {
+    const [created] = await db.insert(assemblyLineSteps).values(step).returning();
+    return created;
+  }
+
+  async updateAssemblyLineStep(id: string, updates: Partial<InsertAssemblyLineStep>): Promise<AssemblyLineStep | undefined> {
+    const [updated] = await db.update(assemblyLineSteps).set(updates).where(eq(assemblyLineSteps.id, id)).returning();
+    return updated;
+  }
+
+  async getProduct(id: string): Promise<Product | undefined> {
+    const [product] = await db.select().from(products).where(eq(products.id, id));
+    return product;
+  }
+
+  async getProductsByUser(userId: string): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.ownerId, userId)).orderBy(desc(products.createdAt));
+  }
+
+  async getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.assemblyLineId, assemblyLineId)).orderBy(desc(products.createdAt));
+  }
+
+  async createProduct(product: InsertProduct): Promise<Product> {
+    const [created] = await db.insert(products).values(product).returning();
+    return created;
+  }
+
+  async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined> {
+    const [updated] = await db.update(products).set(updates).where(eq(products.id, id)).returning();
+    return updated;
   }
 }
 

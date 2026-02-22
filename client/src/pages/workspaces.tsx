@@ -34,7 +34,7 @@ export default function Workspaces() {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-workspaces-title">
-            Workspaces
+            Departments
           </h1>
           <p className="text-muted-foreground">
             Manage your team spaces and collaboration environments
@@ -43,7 +43,7 @@ export default function Workspaces() {
         <Link href="/workspaces/new">
           <Button className="gap-2" data-testid="button-create-workspace">
             <Plus className="h-4 w-4" />
-            Create Workspace
+            Create Department
           </Button>
         </Link>
       </div>
@@ -52,7 +52,7 @@ export default function Workspaces() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search workspaces..."
+            placeholder="Search departments..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -131,19 +131,19 @@ export default function Workspaces() {
             <div className="text-center">
               <Building2 className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium mb-2">
-                {searchQuery ? "No matching workspaces" : "No workspaces yet"}
+                {searchQuery ? "No matching departments" : "No departments yet"}
               </h3>
               <p className="text-muted-foreground mb-6 max-w-md mx-auto">
                 {searchQuery 
                   ? "Try adjusting your search query"
-                  : "Create your first workspace to start collaborating with agents and team members"
+                  : "Create your first department to start collaborating with agents and team members"
                 }
               </p>
               {!searchQuery && (
                 <Link href="/workspaces/new">
                   <Button className="gap-2" data-testid="button-create-first-workspace">
                     <Plus className="h-4 w-4" />
-                    Create your first workspace
+                    Create your first department
                   </Button>
                 </Link>
               )}

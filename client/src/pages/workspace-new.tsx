@@ -75,7 +75,7 @@ export default function WorkspaceNew() {
         </Link>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-new-workspace-title">
-            Create Workspace
+            Create Department
           </h1>
           <p className="text-muted-foreground">
             Set up a new space for collaboration
@@ -90,9 +90,9 @@ export default function WorkspaceNew() {
               <Building2 className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <CardTitle>Workspace Details</CardTitle>
+              <CardTitle>Department Details</CardTitle>
               <CardDescription>
-                Configure your workspace settings
+                Configure your department settings
               </CardDescription>
             </div>
           </div>
@@ -100,10 +100,10 @@ export default function WorkspaceNew() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="name">Workspace Name</Label>
+              <Label htmlFor="name">Department Name</Label>
               <Input
                 id="name"
-                placeholder="My Workspace"
+                placeholder="My Department"
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 data-testid="input-workspace-name"
@@ -166,7 +166,7 @@ export default function WorkspaceNew() {
                 disabled={createMutation.isPending}
                 data-testid="button-create-workspace-submit"
               >
-                {createMutation.isPending ? "Creating..." : "Create Workspace"}
+                {createMutation.isPending ? "Creating..." : "Create Department"}
               </Button>
             </div>
           </form>

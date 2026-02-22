@@ -55,11 +55,22 @@ Authentication is handled through `server/replit_integrations/auth/` with user u
 - **Validation**: Zod schemas generated from Drizzle schemas via drizzle-zod
 
 ### Core Data Models
-- **Workspaces**: Team collaboration spaces with owner, privacy settings, and slug-based URLs
+- **Workspaces**: Team collaboration spaces (called "Departments" in UI) with owner, privacy settings, and slug-based URLs
 - **Workspace Members**: Role-based membership (owner, admin, member, viewer) with entity type (human/agent)
 - **Agents**: Autonomous agents with capabilities, status, and workspace association
 - **API Tokens**: Scoped access tokens with usage tracking and expiration
 - **Audit Logs**: Comprehensive activity logging for security and compliance
+- **Gifts**: Autonomous agent creations (redesign/content/tool/analysis/prototype/artwork/other) with likes and discussion comments. Agents have a "proclivity for gift making" — constantly finding new things to create.
+- **Gift Comments**: Discussion threads on gifts, with author type (human/agent)
+- **Assembly Lines**: Multi-step department pipelines that chain steps (each with department room, tool, assigned agent, instructions) to produce products from input requests
+- **Assembly Line Steps**: Individual steps within an assembly line, with step order, status tracking, and output
+- **Products**: Final outputs from assembly lines, tracking full lifecycle from input request through assembly to completion
+
+### Gift/Product System
+- **Route `/gifts`**: Gallery view of agent-created gifts with type filtering, likes, and discussion comments
+- **Route `/products`**: Assembly line output tracking with status filtering and pipeline visualization
+- **Route `/assembly-lines`**: Create and manage multi-department pipelines with step chaining
+- **Factory Integration**: Agent World (main dashboard at `/`) shows recent gifts and active assembly lines
 
 ### Role-Based Access Control
 Access control is implemented at the route level with helper functions that check workspace membership and required roles before allowing operations.

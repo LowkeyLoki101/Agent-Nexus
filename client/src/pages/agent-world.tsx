@@ -1,15 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Text, Billboard, RoundedBox } from "@react-three/drei";
-import { useRef, useState, useMemo, useCallback, Suspense, Component, type ErrorInfo, type ReactNode, useEffect } from "react";
+import { useRef, useState, useMemo, useCallback, Suspense, Component, type ReactNode, useEffect } from "react";
 import * as THREE from "three";
-import type { Agent } from "@shared/schema";
+import type { Agent, Briefing, Workspace, ApiToken } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity, Send, MessageSquare, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity,
+  Send, MessageSquare, ChevronDown, ChevronUp, Loader2,
+  Radio, Plus, Key, Wrench, Globe as GlobeIcon, Search as SearchIcon,
+  FileText, Code, Palette, Brain, Users, Coffee, Settings,
+  ArrowRight, Newspaper, Gauge, Terminal,
+} from "lucide-react";
 
 function detectWebGL(): boolean {
   try {
@@ -30,6 +37,38 @@ class WebGLErrorBoundary extends Component<{ children: ReactNode; fallback: Reac
   }
 }
 
+const ROOM_TOOLS: Record<string, { name: string; icon: string; description: string }[]> = {
+  "research-lab": [
+    { name: "Web Scraper", icon: "search", description: "Scrape and analyze web content" },
+    { name: "Data Analyzer", icon: "brain", description: "Process and visualize data sets" },
+    { name: "Paper Reader", icon: "file", description: "Parse academic papers and extract insights" },
+  ],
+  "code-workshop": [
+    { name: "Code Generator", icon: "code", description: "Generate code from specifications" },
+    { name: "Test Runner", icon: "zap", description: "Execute automated test suites" },
+    { name: "PR Reviewer", icon: "search", description: "Review code changes and provide feedback" },
+  ],
+  "design-studio": [
+    { name: "Asset Creator", icon: "palette", description: "Generate visual assets and mockups" },
+    { name: "Wireframer", icon: "file", description: "Create wireframes from descriptions" },
+    { name: "Style Guide", icon: "palette", description: "Maintain brand consistency" },
+  ],
+  "strategy-room": [
+    { name: "Strategy Planner", icon: "brain", description: "Create strategic plans and roadmaps" },
+    { name: "Dependency Mapper", icon: "search", description: "Map and analyze project dependencies" },
+    { name: "Risk Assessor", icon: "zap", description: "Evaluate and score project risks" },
+  ],
+  "comms-center": [
+    { name: "Doc Writer", icon: "file", description: "Generate documentation automatically" },
+    { name: "Status Reporter", icon: "zap", description: "Create status reports and updates" },
+    { name: "Security Scanner", icon: "search", description: "Scan for security vulnerabilities" },
+  ],
+  "break-room": [
+    { name: "Team Pulse", icon: "brain", description: "Measure team morale and wellness" },
+    { name: "Idea Board", icon: "palette", description: "Capture and vote on creative ideas" },
+  ],
+};
+
 const ROOMS: { id: string; name: string; position: [number, number, number]; size: [number, number, number]; color: string; capabilities: string[] }[] = [
   { id: "research-lab", name: "Research Lab", position: [-8, 0, -6], size: [5, 3, 5], color: "#3B82F6", capabilities: ["research", "analysis"] },
   { id: "code-workshop", name: "Code Workshop", position: [0, 0, -6], size: [5, 3, 5], color: "#10B981", capabilities: ["code-review", "engineering", "testing"] },
@@ -40,54 +79,12 @@ const ROOMS: { id: string; name: string; position: [number, number, number]; siz
 ];
 
 const ROOM_OBJECTIVES: Record<string, string[]> = {
-  "research-lab": [
-    "Analyzing data patterns",
-    "Researching best practices",
-    "Compiling report",
-    "Reading academic papers",
-    "Running experiments",
-    "Reviewing findings",
-  ],
-  "code-workshop": [
-    "Reviewing pull request",
-    "Running test suite",
-    "Refactoring module",
-    "Code optimization",
-    "Debugging issue",
-    "Writing unit tests",
-  ],
-  "design-studio": [
-    "Designing new feature",
-    "Creating visual assets",
-    "Sketching wireframes",
-    "Iterating on mockup",
-    "Building prototype",
-    "Polishing UI details",
-  ],
-  "strategy-room": [
-    "Drafting strategy brief",
-    "Architecture review",
-    "Planning roadmap",
-    "Evaluating options",
-    "Writing proposal",
-    "Mapping dependencies",
-  ],
-  "comms-center": [
-    "Team sync meeting",
-    "Writing documentation",
-    "Security audit",
-    "Coordinating rollout",
-    "Reviewing comms plan",
-    "Sending status update",
-  ],
-  "break-room": [
-    "Taking a break",
-    "Resting",
-    "Grabbing coffee",
-    "Stretching",
-    "Casual chat",
-    "Recharging",
-  ],
+  "research-lab": ["Analyzing data patterns", "Researching best practices", "Compiling report", "Reading academic papers", "Running experiments", "Reviewing findings"],
+  "code-workshop": ["Reviewing pull request", "Running test suite", "Refactoring module", "Code optimization", "Debugging issue", "Writing unit tests"],
+  "design-studio": ["Designing new feature", "Creating visual assets", "Sketching wireframes", "Iterating on mockup", "Building prototype", "Polishing UI details"],
+  "strategy-room": ["Drafting strategy brief", "Architecture review", "Planning roadmap", "Evaluating options", "Writing proposal", "Mapping dependencies"],
+  "comms-center": ["Team sync meeting", "Writing documentation", "Security audit", "Coordinating rollout", "Reviewing comms plan", "Sending status update"],
+  "break-room": ["Taking a break", "Resting", "Grabbing coffee", "Stretching", "Casual chat", "Recharging"],
 };
 
 type ActivityAnim = "typing" | "reading" | "painting" | "presenting" | "chatting" | "resting";
@@ -103,9 +100,7 @@ const ROOM_ANIMATION: Record<string, ActivityAnim> = {
 function pickObjectiveRoom(agent: Agent): typeof ROOMS[number] {
   const caps = (agent.capabilities || []).map(c => c.toLowerCase());
   const matching = ROOMS.filter(r => r.capabilities.some(rc => caps.some(ac => ac.includes(rc))));
-  if (matching.length > 0) {
-    return matching[Math.floor(Math.random() * matching.length)];
-  }
+  if (matching.length > 0) return matching[Math.floor(Math.random() * matching.length)];
   return ROOMS[Math.floor(Math.random() * ROOMS.length)];
 }
 
@@ -131,7 +126,6 @@ function FactoryFloor() {
         <meshStandardMaterial color="#1a1a2e" />
       </mesh>
       <gridHelper args={[30, 30, "#E5A82440", "#E5A82415"]} position={[0, 0.01, 0]} />
-
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, -1]} receiveShadow>
         <planeGeometry args={[4, 8]} />
         <meshStandardMaterial color="#252540" />
@@ -150,7 +144,6 @@ function Room({ room }: { room: typeof ROOMS[number] }) {
         <planeGeometry args={[sx, sz]} />
         <meshStandardMaterial color={room.color} opacity={0.15} transparent />
       </mesh>
-
       <mesh position={[-sx / 2, 0, 0]}>
         <boxGeometry args={[0.1, sy, sz]} />
         <meshStandardMaterial color={room.color} opacity={0.3} transparent />
@@ -167,15 +160,12 @@ function Room({ room }: { room: typeof ROOMS[number] }) {
         <boxGeometry args={[sx * 0.3, sy, 0.1]} />
         <meshStandardMaterial color={room.color} opacity={0.3} transparent />
       </mesh>
-
       <Billboard position={[0, sy / 2 + 0.4, 0]}>
         <Text fontSize={0.35} color={room.color} anchorX="center" anchorY="middle" outlineWidth={0.02} outlineColor="#000000" font={undefined}>
           {room.name}
         </Text>
       </Billboard>
-
       <pointLight position={[0, sy - 0.5, 0]} color={room.color} intensity={0.4} distance={6} />
-
       {room.id === "code-workshop" && (
         <>
           <RoundedBox args={[1.2, 0.6, 0.8]} position={[-1, -sy / 2 + 0.3, -1]} radius={0.05}>
@@ -259,16 +249,8 @@ function getAgentColor(agent: Agent): string {
   return colors[hash % colors.length];
 }
 
-function AgentCharacter({
-  agent,
-  simState,
-  onSelect,
-  isSelected,
-}: {
-  agent: Agent;
-  simState: AgentSimState;
-  onSelect: (agent: Agent | null) => void;
-  isSelected: boolean;
+function AgentCharacter({ agent, simState, onSelect, isSelected }: {
+  agent: Agent; simState: AgentSimState; onSelect: (agent: Agent | null) => void; isSelected: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null!);
   const bodyRef = useRef<THREE.Mesh>(null!);
@@ -283,7 +265,6 @@ function AgentCharacter({
     if (!groupRef.current) return;
     animTimer.current += delta;
     const t = animTimer.current;
-
     groupRef.current.position.copy(simState.currentPos);
 
     if (simState.phase === "walking") {
@@ -292,7 +273,6 @@ function AgentCharacter({
       if (leftArmRef.current) leftArmRef.current.rotation.x = Math.sin(t * 8) * 0.5;
       if (rightArmRef.current) rightArmRef.current.rotation.x = -Math.sin(t * 8) * 0.5;
       if (headRef.current) headRef.current.rotation.y = 0;
-
       const dir = new THREE.Vector3().subVectors(simState.targetPos, simState.currentPos);
       if (dir.length() > 0.01) {
         const angle = Math.atan2(dir.x, dir.z);
@@ -300,7 +280,6 @@ function AgentCharacter({
       }
     } else if (simState.phase === "working") {
       groupRef.current.position.y = 0;
-
       switch (simState.animation) {
         case "typing":
           if (bodyRef.current) bodyRef.current.rotation.z = 0;
@@ -312,23 +291,18 @@ function AgentCharacter({
           if (bodyRef.current) bodyRef.current.rotation.z = 0;
           if (leftArmRef.current) leftArmRef.current.rotation.x = -0.6;
           if (rightArmRef.current) rightArmRef.current.rotation.x = -0.6;
-          if (headRef.current) {
-            headRef.current.rotation.x = -0.2;
-            headRef.current.rotation.y = Math.sin(t * 0.5) * 0.1;
-          }
+          if (headRef.current) { headRef.current.rotation.x = -0.2; headRef.current.rotation.y = Math.sin(t * 0.5) * 0.1; }
           groupRef.current.position.y = Math.sin(t * 0.3) * 0.01;
           break;
         case "painting":
           if (bodyRef.current) bodyRef.current.rotation.z = Math.sin(t * 2) * 0.05;
-          if (rightArmRef.current) rightArmRef.current.rotation.x = -0.9 + Math.sin(t * 3) * 0.3;
-          if (rightArmRef.current) rightArmRef.current.rotation.z = Math.cos(t * 2) * 0.2;
+          if (rightArmRef.current) { rightArmRef.current.rotation.x = -0.9 + Math.sin(t * 3) * 0.3; rightArmRef.current.rotation.z = Math.cos(t * 2) * 0.2; }
           if (leftArmRef.current) leftArmRef.current.rotation.x = -0.3;
           if (headRef.current) headRef.current.rotation.y = Math.sin(t * 1.5) * 0.2;
           break;
         case "presenting":
           if (bodyRef.current) bodyRef.current.rotation.z = 0;
-          if (rightArmRef.current) rightArmRef.current.rotation.x = -0.4 + Math.sin(t * 2) * 0.4;
-          if (rightArmRef.current) rightArmRef.current.rotation.z = 0.3;
+          if (rightArmRef.current) { rightArmRef.current.rotation.x = -0.4 + Math.sin(t * 2) * 0.4; rightArmRef.current.rotation.z = 0.3; }
           if (leftArmRef.current) leftArmRef.current.rotation.x = -0.1;
           if (headRef.current) headRef.current.rotation.y = Math.sin(t * 1) * 0.3;
           groupRef.current.position.y = Math.sin(t * 0.8) * 0.02;
@@ -337,10 +311,7 @@ function AgentCharacter({
           if (bodyRef.current) bodyRef.current.rotation.z = Math.sin(t * 1.5) * 0.04;
           if (rightArmRef.current) rightArmRef.current.rotation.x = Math.sin(t * 3) * 0.3;
           if (leftArmRef.current) leftArmRef.current.rotation.x = Math.cos(t * 2.5) * 0.25;
-          if (headRef.current) {
-            headRef.current.rotation.y = Math.sin(t * 2) * 0.2;
-            headRef.current.rotation.x = Math.sin(t * 1.5) * 0.1;
-          }
+          if (headRef.current) { headRef.current.rotation.y = Math.sin(t * 2) * 0.2; headRef.current.rotation.x = Math.sin(t * 1.5) * 0.1; }
           break;
         case "resting":
           if (bodyRef.current) bodyRef.current.rotation.z = 0;
@@ -366,23 +337,10 @@ function AgentCharacter({
 
   return (
     <group ref={groupRef} scale={[scale, scale, scale]}>
-      <mesh
-        ref={bodyRef}
-        position={[0, 0.5, 0]}
-        onClick={handleClick}
-        onPointerOver={handleOver}
-        onPointerOut={handleOut}
-      >
+      <mesh ref={bodyRef} position={[0, 0.5, 0]} onClick={handleClick} onPointerOver={handleOver} onPointerOut={handleOut}>
         <capsuleGeometry args={[0.18, 0.35, 8, 16]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={simState.phase === "working" ? 0.5 : 0.2}
-          metalness={0.3}
-          roughness={0.5}
-        />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={simState.phase === "working" ? 0.5 : 0.2} metalness={0.3} roughness={0.5} />
       </mesh>
-
       <mesh ref={leftArmRef} position={[-0.28, 0.55, 0]}>
         <capsuleGeometry args={[0.06, 0.25, 4, 8]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.2} />
@@ -391,16 +349,10 @@ function AgentCharacter({
         <capsuleGeometry args={[0.06, 0.25, 4, 8]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.2} />
       </mesh>
-
-      <mesh ref={headRef} position={[0, 1.0, 0]}
-        onClick={handleClick}
-        onPointerOver={handleOver}
-        onPointerOut={handleOut}
-      >
+      <mesh ref={headRef} position={[0, 1.0, 0]} onClick={handleClick} onPointerOver={handleOver} onPointerOut={handleOut}>
         <sphereGeometry args={[0.22, 16, 16]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} metalness={0.4} roughness={0.4} />
       </mesh>
-
       <mesh position={[0.08, 1.06, 0.16]}>
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
@@ -409,17 +361,12 @@ function AgentCharacter({
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
       </mesh>
-
-      {agent.isActive && (
-        <pointLight position={[0, 0.8, 0]} color={color} intensity={0.3} distance={2} />
-      )}
-
+      {agent.isActive && <pointLight position={[0, 0.8, 0]} color={color} intensity={0.3} distance={2} />}
       <Billboard position={[0, 1.55, 0]}>
         <Text fontSize={0.18} color="white" anchorX="center" anchorY="middle" outlineWidth={0.015} outlineColor="#000" font={undefined}>
           {agent.name}
         </Text>
       </Billboard>
-
       {simState.phase === "walking" && (
         <Billboard position={[0, 1.8, 0]}>
           <Text fontSize={0.1} color="#fbbf24" anchorX="center" anchorY="middle" outlineWidth={0.01} outlineColor="#000" font={undefined}>
@@ -441,7 +388,6 @@ function AgentCharacter({
           </Text>
         </Billboard>
       )}
-
       {(isSelected || hovered) && (
         <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[0.35, 0.45, 32]} />
@@ -454,7 +400,7 @@ function AgentCharacter({
 
 function useAgentSimulation(agents: Agent[]) {
   const simStates = useRef<Map<string, AgentSimState>>(new Map());
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     const existing = simStates.current;
@@ -466,17 +412,11 @@ function useAgentSimulation(agents: Agent[]) {
         startPos.y = 0;
         const roomObjs = ROOM_OBJECTIVES[startRoom.id] || ["Getting started"];
         existing.set(agent.id, {
-          agentId: agent.id,
-          currentPos: startPos.clone(),
-          targetPos: startPos.clone(),
-          targetRoom: startRoom.name,
-          targetRoomId: startRoom.id,
-          currentRoomId: startRoom.id,
+          agentId: agent.id, currentPos: startPos.clone(), targetPos: startPos.clone(),
+          targetRoom: startRoom.name, targetRoomId: startRoom.id, currentRoomId: startRoom.id,
           objective: roomObjs[Math.floor(Math.random() * roomObjs.length)],
-          phase: "working",
-          animation: ROOM_ANIMATION[startRoom.id] || "typing",
-          phaseTimer: 4 + Math.random() * 8,
-          speed: 1.2 + Math.random() * 1.0,
+          phase: "working", animation: ROOM_ANIMATION[startRoom.id] || "typing",
+          phaseTimer: 4 + Math.random() * 8, speed: 1.2 + Math.random() * 1.0,
         });
       }
     });
@@ -486,13 +426,10 @@ function useAgentSimulation(agents: Agent[]) {
     const interval = setInterval(() => {
       const states = simStates.current;
       const dt = 0.1;
-
       states.forEach((state, agentId) => {
         const agent = agents.find(a => a.id === agentId);
         if (!agent || !agent.isActive) return;
-
         state.phaseTimer -= dt;
-
         if (state.phase === "walking") {
           const dir = new THREE.Vector3().subVectors(state.targetPos, state.currentPos);
           const dist = dir.length();
@@ -512,9 +449,7 @@ function useAgentSimulation(agents: Agent[]) {
         } else if (state.phase === "working") {
           if (state.phaseTimer <= 0) {
             const shouldRest = Math.random() < 0.2 && state.currentRoomId !== "break-room";
-            const nextRoom = shouldRest
-              ? ROOMS.find(r => r.id === "break-room")!
-              : pickObjectiveRoom(agent);
+            const nextRoom = shouldRest ? ROOMS.find(r => r.id === "break-room")! : pickObjectiveRoom(agent);
             const roomCenter = new THREE.Vector3(...nextRoom.position);
             const offset = new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5);
             state.targetPos = roomCenter.add(offset);
@@ -525,31 +460,19 @@ function useAgentSimulation(agents: Agent[]) {
             state.phaseTimer = 0.3 + Math.random() * 0.5;
           }
         } else if (state.phase === "idle") {
-          if (state.phaseTimer <= 0) {
-            state.phase = "walking";
-          }
+          if (state.phaseTimer <= 0) state.phase = "walking";
         }
       });
-
       setTick(t => t + 1);
     }, 100);
-
     return () => clearInterval(interval);
   }, [agents]);
 
   return simStates.current;
 }
 
-function Scene({
-  agents,
-  selectedAgent,
-  onSelectAgent,
-  simStates,
-}: {
-  agents: Agent[];
-  selectedAgent: Agent | null;
-  onSelectAgent: (agent: Agent | null) => void;
-  simStates: Map<string, AgentSimState>;
+function Scene({ agents, selectedAgent, onSelectAgent, simStates }: {
+  agents: Agent[]; selectedAgent: Agent | null; onSelectAgent: (agent: Agent | null) => void; simStates: Map<string, AgentSimState>;
 }) {
   return (
     <>
@@ -557,40 +480,16 @@ function Scene({
       <directionalLight position={[15, 20, 10]} intensity={0.5} castShadow />
       <directionalLight position={[-10, 15, -5]} intensity={0.2} />
       <hemisphereLight color="#1a1a3e" groundColor="#0a0a1a" intensity={0.3} />
-
       <fog attach="fog" args={["#0a0a1a", 20, 45]} />
-
       <FactoryFloor />
       <FactorySign />
-
-      {ROOMS.map(room => (
-        <Room key={room.id} room={room} />
-      ))}
-
+      {ROOMS.map(room => <Room key={room.id} room={room} />)}
       {agents.map((agent) => {
         const sim = simStates.get(agent.id);
         if (!sim) return null;
-        return (
-          <AgentCharacter
-            key={agent.id}
-            agent={agent}
-            simState={sim}
-            onSelect={onSelectAgent}
-            isSelected={selectedAgent?.id === agent.id}
-          />
-        );
+        return <AgentCharacter key={agent.id} agent={agent} simState={sim} onSelect={onSelectAgent} isSelected={selectedAgent?.id === agent.id} />;
       })}
-
-      <OrbitControls
-        makeDefault
-        enableDamping
-        dampingFactor={0.05}
-        minDistance={5}
-        maxDistance={35}
-        maxPolarAngle={Math.PI * 0.45}
-        minPolarAngle={Math.PI * 0.1}
-        target={[0, 1, 0]}
-      />
+      <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={5} maxDistance={35} maxPolarAngle={Math.PI * 0.45} minPolarAngle={Math.PI * 0.1} target={[0, 1, 0]} />
     </>
   );
 }
@@ -600,36 +499,205 @@ interface ChatMessage {
   content: string;
 }
 
-function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState?: AgentSimState; onClose: () => void }) {
-  const color = getAgentColor(agent);
-  const [chatOpen, setChatOpen] = useState(true);
+function getToolIcon(iconType: string) {
+  switch (iconType) {
+    case "search": return <SearchIcon className="h-4 w-4" />;
+    case "code": return <Code className="h-4 w-4" />;
+    case "brain": return <Brain className="h-4 w-4" />;
+    case "palette": return <Palette className="h-4 w-4" />;
+    case "file": return <FileText className="h-4 w-4" />;
+    case "zap": return <Zap className="h-4 w-4" />;
+    default: return <Wrench className="h-4 w-4" />;
+  }
+}
+
+function NewsBroadcastBanner({ briefings }: { briefings: Briefing[] }) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (briefings.length <= 1) return;
+    const interval = setInterval(() => {
+      setCurrentIndex(i => (i + 1) % briefings.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [briefings.length]);
+
+  if (briefings.length === 0) {
+    return (
+      <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20 rounded-lg p-3 flex items-center gap-3" data-testid="panel-news-broadcast">
+        <div className="flex items-center gap-2 shrink-0">
+          <Radio className="h-4 w-4 text-primary animate-pulse" />
+          <span className="text-xs font-bold uppercase tracking-wider text-primary">LIVE</span>
+        </div>
+        <div className="border-l border-primary/20 pl-3 flex-1 min-w-0">
+          <p className="text-sm text-muted-foreground truncate">No broadcasts yet. Create briefings to see factory news here.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const current = briefings[currentIndex];
+  const priorityColors: Record<string, string> = {
+    urgent: "text-red-500",
+    high: "text-orange-500",
+    medium: "text-primary",
+    low: "text-muted-foreground",
+  };
+
+  return (
+    <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20 rounded-lg p-3 flex items-center gap-3" data-testid="panel-news-broadcast">
+      <div className="flex items-center gap-2 shrink-0">
+        <Radio className="h-4 w-4 text-primary animate-pulse" />
+        <span className="text-xs font-bold uppercase tracking-wider text-primary">LIVE</span>
+      </div>
+      <div className="border-l border-primary/20 pl-3 flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className={`text-[10px] shrink-0 ${priorityColors[current.priority] || ""}`}>
+            {current.priority.toUpperCase()}
+          </Badge>
+          <p className="text-sm font-medium truncate">{current.title}</p>
+        </div>
+        {current.summary && <p className="text-xs text-muted-foreground mt-0.5 truncate">{current.summary}</p>}
+      </div>
+      {briefings.length > 1 && (
+        <span className="text-[10px] text-muted-foreground shrink-0">{currentIndex + 1}/{briefings.length}</span>
+      )}
+    </div>
+  );
+}
+
+function FactoryControlsBar({ agents, tokens, workspaces, simStates }: {
+  agents: Agent[]; tokens: ApiToken[]; workspaces: Workspace[]; simStates: Map<string, AgentSimState>;
+}) {
+  const activeAgents = agents.filter(a => a.isActive).length;
+  const workingCount = Array.from(simStates.values()).filter(s => s.phase === "working").length;
+  const totalTokenUsage = tokens.reduce((sum, t) => sum + (t.usageCount || 0), 0);
+  const activeTokens = tokens.filter(t => t.status === "active").length;
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="panel-factory-controls">
+      <div className="flex items-center gap-3 bg-card border rounded-lg px-3 py-2">
+        <Bot className="h-4 w-4 text-primary shrink-0" />
+        <div>
+          <p className="text-lg font-bold leading-none" data-testid="text-active-agents">{activeAgents}</p>
+          <p className="text-[10px] text-muted-foreground">Active Agents</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 bg-card border rounded-lg px-3 py-2">
+        <Activity className="h-4 w-4 text-green-500 shrink-0" />
+        <div>
+          <p className="text-lg font-bold leading-none" data-testid="text-working-count">{workingCount}</p>
+          <p className="text-[10px] text-muted-foreground">Working Now</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 bg-card border rounded-lg px-3 py-2">
+        <Key className="h-4 w-4 text-amber-500 shrink-0" />
+        <div>
+          <p className="text-lg font-bold leading-none" data-testid="text-token-usage">{totalTokenUsage.toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground">{activeTokens} Active Tokens</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 bg-card border rounded-lg px-3 py-2">
+        <Gauge className="h-4 w-4 text-blue-500 shrink-0" />
+        <div>
+          <p className="text-lg font-bold leading-none" data-testid="text-dept-count">{workspaces.length}</p>
+          <p className="text-[10px] text-muted-foreground">Departments</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoomDetailPanel({ room, agents, simStates, onClose, onAssignAgent }: {
+  room: typeof ROOMS[number]; agents: Agent[]; simStates: Map<string, AgentSimState>;
+  onClose: () => void; onAssignAgent?: (agentId: string, toolName: string) => void;
+}) {
+  const roomAgents = agents.filter(a => {
+    const sim = simStates.get(a.id);
+    return sim && sim.currentRoomId === room.id && sim.phase === "working";
+  });
+  const tools = ROOM_TOOLS[room.id] || [];
+
+  return (
+    <Card className="border-2" style={{ borderColor: room.color + "50" }} data-testid={`panel-room-detail-${room.id}`}>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: room.color + "20" }}>
+              <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: room.color, display: "block" }} />
+            </div>
+            <div>
+              <CardTitle className="text-base">{room.name}</CardTitle>
+              <CardDescription className="text-xs">{roomAgents.length} agent{roomAgents.length !== 1 ? "s" : ""} working</CardDescription>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} data-testid={`button-close-room-${room.id}`}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Equipment & Tools</p>
+          <div className="space-y-2">
+            {tools.map((tool) => (
+              <div key={tool.name} className="flex items-center justify-between p-2 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors" data-testid={`tool-${tool.name.toLowerCase().replace(/\s+/g, "-")}`}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="h-7 w-7 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: room.color + "20" }}>
+                    {getToolIcon(tool.icon)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{tool.name}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{tool.description}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <Button variant="outline" size="sm" className="text-[10px] px-2 py-1 h-auto" data-testid={`button-run-tool-${tool.name.toLowerCase().replace(/\s+/g, "-")}`}>
+                    Run
+                  </Button>
+                  {roomAgents.length > 0 && (
+                    <Button variant="outline" size="sm" className="text-[10px] px-2 py-1 h-auto" onClick={() => onAssignAgent?.(roomAgents[0].id, tool.name)} data-testid={`button-assign-tool-${tool.name.toLowerCase().replace(/\s+/g, "-")}`}>
+                      Assign
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {roomAgents.length > 0 && (
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Agents in Room</p>
+            <div className="space-y-1.5">
+              {roomAgents.map(agent => {
+                const sim = simStates.get(agent.id);
+                return (
+                  <div key={agent.id} className="flex items-center gap-2 p-1.5 rounded-md bg-muted/30" data-testid={`room-agent-${agent.id}`}>
+                    <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                    <span className="text-xs font-medium truncate">{agent.name}</span>
+                    <span className="text-[10px] text-muted-foreground truncate ml-auto">{sim?.objective}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces: Workspace[] }) {
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const prevAgentId = useRef(agent.id);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (prevAgentId.current !== agent.id) {
-      setChatMessages([]);
-      setChatInput("");
-      setIsStreaming(false);
-      prevAgentId.current = agent.id;
-    }
-  }, [agent.id]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [chatMessages]);
-
-  useEffect(() => {
-    if (chatOpen && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [chatOpen]);
 
   const sendMessage = useCallback(async () => {
     const msg = chatInput.trim();
@@ -640,28 +708,15 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
     setChatInput("");
     setIsStreaming(true);
 
-    const isWalking = simState?.phase === "walking";
-    const currentRoom = simState
-      ? isWalking
-        ? ROOMS.find(r => r.id === simState.targetRoomId)?.name || "the factory"
-        : ROOMS.find(r => r.id === simState.currentRoomId)?.name || "the factory"
-      : "the factory";
-    const currentObjective = simState?.objective || "general tasks";
-    const currentActivity = simState?.animation === "resting" ? "resting" : isWalking ? "walking" : "working";
-
     try {
-      const response = await fetch(`/api/agents/${agent.id}/chat`, {
+      const response = await fetch("/api/command-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           message: msg,
           history: chatMessages,
-          context: {
-            room: currentRoom,
-            objective: currentObjective,
-            activity: currentActivity,
-          },
+          factoryContext: `${agents.length} agents, ${workspaces.length} departments, ${ROOMS.length} rooms`,
         }),
       });
 
@@ -677,10 +732,8 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         const text = decoder.decode(value, { stream: true });
         const lines = text.split("\n");
-
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             try {
@@ -698,7 +751,174 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
           }
         }
       }
-    } catch (error) {
+    } catch {
+      setChatMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't respond right now. Try again." }]);
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [chatInput, isStreaming, chatMessages, agents, workspaces]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <Card className="border-primary/20" data-testid="panel-command-chat">
+      <div className="border-b">
+        <Button
+          variant="ghost"
+          className="w-full flex items-center justify-between rounded-none px-4 py-2"
+          onClick={() => setIsExpanded(!isExpanded)}
+          data-testid="button-toggle-command-chat"
+        >
+          <div className="flex items-center gap-2">
+            <Terminal className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Factory Command Center</span>
+            <Badge variant="outline" className="text-[10px]">Claude</Badge>
+          </div>
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      {isExpanded && (
+        <CardContent className="p-0">
+          <div ref={scrollRef} className="h-[250px] overflow-y-auto px-4 py-3 space-y-3">
+            {chatMessages.length === 0 && (
+              <div className="text-center py-8">
+                <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
+                <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
+                <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
+                  Chat with Claude to plan operations, create agent tools, configure departments, or get factory insights.
+                </p>
+                <div className="flex flex-wrap gap-2 justify-center mt-4">
+                  {["Show factory status", "Plan a new workflow", "Create a web scraper tool"].map(suggestion => (
+                    <Button
+                      key={suggestion}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => { setChatInput(suggestion); }}
+                      data-testid={`button-suggestion-${suggestion.split(" ").slice(0, 3).join("-").toLowerCase()}`}
+                    >
+                      {suggestion}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
+                  msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+                }`} data-testid={`command-message-${msg.role}-${i}`}>
+                  {msg.content || (isStreaming && i === chatMessages.length - 1 ? (
+                    <span className="flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                    </span>
+                  ) : "")}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="px-4 pb-3 pt-1 border-t">
+            <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2">
+              <Textarea
+                ref={inputRef}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask Claude to plan operations, create tools, or configure the factory..."
+                className="min-h-[40px] max-h-[100px] text-sm resize-none"
+                rows={1}
+                disabled={isStreaming}
+                data-testid="input-command-chat"
+              />
+              <Button type="submit" size="icon" className="shrink-0 self-end" disabled={!chatInput.trim() || isStreaming} data-testid="button-send-command">
+                {isStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </form>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState?: AgentSimState; onClose: () => void }) {
+  const color = getAgentColor(agent);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const prevAgentId = useRef(agent.id);
+
+  useEffect(() => {
+    if (prevAgentId.current !== agent.id) {
+      setChatMessages([]); setChatInput(""); setIsStreaming(false);
+      prevAgentId.current = agent.id;
+    }
+  }, [agent.id]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [chatMessages]);
+
+  useEffect(() => {
+    if (chatOpen && inputRef.current) inputRef.current.focus();
+  }, [chatOpen]);
+
+  const sendMessage = useCallback(async () => {
+    const msg = chatInput.trim();
+    if (!msg || isStreaming) return;
+    const userMsg: ChatMessage = { role: "user", content: msg };
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput("");
+    setIsStreaming(true);
+    const isWalking = simState?.phase === "walking";
+    const currentRoom = simState
+      ? isWalking ? ROOMS.find(r => r.id === simState.targetRoomId)?.name || "the factory"
+        : ROOMS.find(r => r.id === simState.currentRoomId)?.name || "the factory"
+      : "the factory";
+    const currentObjective = simState?.objective || "general tasks";
+    const currentActivity = simState?.animation === "resting" ? "resting" : isWalking ? "walking" : "working";
+
+    try {
+      const response = await fetch(`/api/agents/${agent.id}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ message: msg, history: chatMessages, context: { room: currentRoom, objective: currentObjective, activity: currentActivity } }),
+      });
+      if (!response.ok) throw new Error("Chat failed");
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader");
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+      setChatMessages(prev => [...prev, { role: "assistant", content: "" }]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        for (const line of text.split("\n")) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.done) break;
+              if (data.content) {
+                assistantContent += data.content;
+                setChatMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: assistantContent }; return u; });
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {
       setChatMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't respond right now. Try again." }]);
     } finally {
       setIsStreaming(false);
@@ -718,9 +938,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className={`h-2 w-2 rounded-full ${agent.isActive ? "bg-green-500" : "bg-gray-400"}`} />
                 <span className="text-xs text-muted-foreground">{agent.isActive ? "Active" : "Inactive"}</span>
-                {agent.isVerified && (
-                  <Badge variant="outline" className="text-xs gap-1 ml-1"><Shield className="h-3 w-3" /> Verified</Badge>
-                )}
+                {agent.isVerified && <Badge variant="outline" className="text-xs gap-1 ml-1"><Shield className="h-3 w-3" /> Verified</Badge>}
               </div>
             </div>
           </div>
@@ -742,14 +960,9 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               {simState.phase === "idle" && "Deciding next task..."}
             </p>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className={`h-1.5 w-1.5 rounded-full ${
-                simState.phase === "working" ? "bg-green-500 animate-pulse" :
-                simState.phase === "walking" ? "bg-amber-500 animate-pulse" : "bg-gray-400"
-              }`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${simState.phase === "working" ? "bg-green-500 animate-pulse" : simState.phase === "walking" ? "bg-amber-500 animate-pulse" : "bg-gray-400"}`} />
               {simState.phase === "walking" && "In transit (cooldown)"}
-              {simState.phase === "working" && (
-                <span>In {ROOMS.find(r => r.id === simState.currentRoomId)?.name || "room"}</span>
-              )}
+              {simState.phase === "working" && <span>In {ROOMS.find(r => r.id === simState.currentRoomId)?.name || "room"}</span>}
               {simState.phase === "idle" && "Selecting next objective"}
             </div>
           </div>
@@ -759,20 +972,12 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
             {agent.capabilities.slice(0, 4).map((cap, i) => (
               <Badge key={i} variant="secondary" className="text-[10px] py-0"><Zap className="h-2.5 w-2.5 mr-0.5" />{cap}</Badge>
             ))}
-            {(agent.capabilities.length > 4) && (
-              <Badge variant="secondary" className="text-[10px] py-0">+{agent.capabilities.length - 4}</Badge>
-            )}
+            {(agent.capabilities.length > 4) && <Badge variant="secondary" className="text-[10px] py-0">+{agent.capabilities.length - 4}</Badge>}
           </div>
         )}
       </CardContent>
-
       <div className="border-t shrink-0">
-        <Button
-          variant="ghost"
-          className="w-full flex items-center justify-between rounded-none text-xs font-medium uppercase tracking-wider text-muted-foreground"
-          onClick={() => setChatOpen(!chatOpen)}
-          data-testid="button-toggle-chat"
-        >
+        <Button variant="ghost" className="w-full flex items-center justify-between rounded-none text-xs font-medium uppercase tracking-wider text-muted-foreground" onClick={() => setChatOpen(!chatOpen)} data-testid="button-toggle-chat">
           <div className="flex items-center gap-2">
             <MessageSquare className="h-3.5 w-3.5" />
             <span>Chat with {agent.name.split(" ")[0]}</span>
@@ -780,7 +985,6 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
           {chatOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
         </Button>
       </div>
-
       {chatOpen && (
         <div className="flex flex-col min-h-0 flex-1">
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[280px]">
@@ -792,45 +996,16 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
             )}
             {chatMessages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
-                  }`}
-                  data-testid={`chat-message-${msg.role}-${i}`}
-                >
-                  {msg.content || (isStreaming && i === chatMessages.length - 1 ? (
-                    <span className="flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
-                    </span>
-                  ) : "")}
+                <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`} data-testid={`chat-message-${msg.role}-${i}`}>
+                  {msg.content || (isStreaming && i === chatMessages.length - 1 ? <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Thinking...</span> : "")}
                 </div>
               </div>
             ))}
           </div>
-
           <div className="px-3 pb-3 pt-1 shrink-0">
-            <form
-              onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
-              className="flex gap-1.5"
-            >
-              <Input
-                ref={inputRef}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder={`Message ${agent.name.split(" ")[0]}...`}
-                className="text-xs"
-                disabled={isStreaming}
-                data-testid="input-agent-chat"
-              />
-              <Button
-                type="submit"
-                size="icon"
-                className="shrink-0"
-                disabled={!chatInput.trim() || isStreaming}
-                data-testid="button-send-agent-chat"
-              >
+            <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-1.5">
+              <Input ref={inputRef} value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={`Message ${agent.name.split(" ")[0]}...`} className="text-xs" disabled={isStreaming} data-testid="input-agent-chat" />
+              <Button type="submit" size="icon" className="shrink-0" disabled={!chatInput.trim() || isStreaming} data-testid="button-send-agent-chat">
                 {isStreaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               </Button>
             </form>
@@ -841,56 +1016,37 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
   );
 }
 
-function RoomLegend({ rooms }: { rooms: typeof ROOMS }) {
-  return (
-    <div className="absolute left-4 bottom-4 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-[220px]" data-testid="panel-room-legend">
-      <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider mb-2">Factory Rooms</p>
-      <div className="space-y-1.5">
-        {rooms.map(room => (
-          <div key={room.id} className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: room.color }} />
-            <span className="text-xs text-white/70">{room.name}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ActivityFeed({ agents, simStates }: { agents: Agent[]; simStates: Map<string, AgentSimState> }) {
-  const activities = useMemo(() => {
-    const acts: { agent: string; text: string; color: string; phase: string }[] = [];
-    agents.forEach(agent => {
-      const sim = simStates.get(agent.id);
-      if (!sim || !agent.isActive) return;
-      const color = getAgentColor(agent);
-      if (sim.phase === "walking") {
-        acts.push({ agent: agent.name, text: `heading to ${sim.targetRoom}`, color, phase: "walking" });
-      } else if (sim.phase === "working") {
-        acts.push({ agent: agent.name, text: sim.objective, color, phase: "working" });
-      } else if (sim.phase === "idle") {
-        acts.push({ agent: agent.name, text: "selecting next objective", color, phase: "idle" });
-      }
-    });
-    return acts.slice(0, 5);
-  }, [agents, simStates]);
-
-  if (activities.length === 0) return null;
+function OnboardingOverlay({ onDismiss }: { onDismiss: () => void }) {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { title: "Welcome to Agent Factory", desc: "This is your command center. Watch your agents work autonomously across departments, chat with them, and manage operations.", icon: <Bot className="h-8 w-8 text-primary" /> },
+    { title: "Departments & Rooms", desc: "Each room is a department with specialized tools. Click on rooms in the legend to see equipment and assign agents.", icon: <Settings className="h-8 w-8 text-primary" /> },
+    { title: "Command Center", desc: "Use the chat panel below to talk with Claude. Plan workflows, create tools, configure departments, or get insights.", icon: <Terminal className="h-8 w-8 text-primary" /> },
+  ];
+  const current = steps[step];
 
   return (
-    <div className="absolute right-4 bottom-4 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-[260px]" data-testid="panel-activity-feed">
-      <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider mb-2">Live Activity</p>
-      <div className="space-y-1.5">
-        {activities.map((act, i) => (
-          <div key={i} className="flex items-start gap-2">
-            <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0 ${act.phase === "working" ? "bg-green-500" : act.phase === "walking" ? "bg-amber-500" : "bg-gray-400"}`} />
-            <div className="min-w-0">
-              <span className="text-xs font-medium" style={{ color: act.color }}>{act.agent}</span>
-              <span className="text-xs text-white/50 ml-1">{act.text}</span>
-            </div>
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" data-testid="panel-onboarding">
+      <Card className="max-w-md w-full">
+        <CardContent className="pt-6 text-center space-y-4">
+          <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">{current.icon}</div>
+          <h2 className="text-xl font-semibold">{current.title}</h2>
+          <p className="text-muted-foreground text-sm">{current.desc}</p>
+          <div className="flex items-center justify-center gap-2 pt-2">
+            {steps.map((_, i) => (
+              <span key={i} className={`h-2 w-2 rounded-full transition-colors ${i === step ? "bg-primary" : "bg-muted"}`} />
+            ))}
           </div>
-        ))}
-      </div>
+          <div className="flex gap-2 justify-center pt-2">
+            {step > 0 && <Button variant="outline" onClick={() => setStep(s => s - 1)} data-testid="button-onboard-back">Back</Button>}
+            {step < steps.length - 1 ? (
+              <Button onClick={() => setStep(s => s + 1)} data-testid="button-onboard-next">Next</Button>
+            ) : (
+              <Button onClick={onDismiss} data-testid="button-onboard-done">Get Started</Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -898,60 +1054,115 @@ function ActivityFeed({ agents, simStates }: { agents: Agent[]; simStates: Map<s
 export default function AgentWorld() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState<typeof ROOMS[number] | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem("factory-onboarded");
+  });
 
   const { data: agents, isLoading } = useQuery<Agent[]>({ queryKey: ["/api/agents"] });
+  const { data: briefings } = useQuery<Briefing[]>({ queryKey: ["/api/briefings/recent"] });
+  const { data: workspaces } = useQuery<Workspace[]>({ queryKey: ["/api/workspaces"] });
+  const { data: tokens } = useQuery<ApiToken[]>({ queryKey: ["/api/tokens"] });
 
   const agentList = agents || [];
   const simStates = useAgentSimulation(agentList);
 
   const handleSelectAgent = useCallback((agent: Agent | null) => { setSelectedAgent(agent); }, []);
 
+  const dismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    localStorage.setItem("factory-onboarded", "true");
+  }, []);
+
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-agent-world-title">Agent Factory</h1>
-          <p className="text-muted-foreground">Loading factory...</p>
-        </div>
-        <Skeleton className="w-full h-[600px] rounded-lg" />
+      <div className="space-y-4">
+        <Skeleton className="h-12 w-full rounded-lg" />
+        <Skeleton className="h-16 w-full rounded-lg" />
+        <Skeleton className="w-full h-[400px] rounded-lg" />
+        <Skeleton className="h-[200px] w-full rounded-lg" />
       </div>
     );
   }
 
-  const activeCount = agentList.filter(a => a.isActive).length;
-  const workingCount = Array.from(simStates.values()).filter(s => s.phase === "working").length;
-
   return (
-    <div className={`space-y-4 ${isFullscreen ? "fixed inset-0 z-50 bg-background p-4" : ""}`}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-agent-world-title">Agent Factory</h1>
-          <p className="text-muted-foreground text-sm">
-            {agentList.length} agents · {activeCount} active · {workingCount} working
-          </p>
+    <div className={`space-y-4 ${isFullscreen ? "fixed inset-0 z-50 bg-background p-4 overflow-y-auto" : ""}`}>
+      {showOnboarding && <OnboardingOverlay onDismiss={dismissOnboarding} />}
+
+      <NewsBroadcastBanner briefings={briefings || []} />
+
+      <FactoryControlsBar
+        agents={agentList}
+        tokens={tokens || []}
+        workspaces={workspaces || []}
+        simStates={simStates}
+      />
+
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold" data-testid="text-agent-world-title">Agent Factory</h2>
+          <Badge variant="outline" className="text-xs">
+            {agentList.length} agents
+          </Badge>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsFullscreen(!isFullscreen)} data-testid="button-toggle-fullscreen">
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            {isFullscreen ? "Exit" : "Fullscreen"}
           </Button>
         </div>
       </div>
 
-      <div
-        className={`relative rounded-lg overflow-hidden border border-primary/20 bg-[#0a0a1a] ${isFullscreen ? "h-[calc(100vh-80px)]" : "h-[600px]"}`}
-        data-testid="canvas-agent-world"
-      >
+      <div className="relative rounded-lg overflow-hidden border border-primary/20 bg-[#0a0a1a] h-[450px]" data-testid="canvas-agent-world">
         {selectedAgent && (
-          <AgentDetailPanel
-            agent={selectedAgent}
-            simState={simStates.get(selectedAgent.id)}
-            onClose={() => setSelectedAgent(null)}
-          />
+          <AgentDetailPanel agent={selectedAgent} simState={simStates.get(selectedAgent.id)} onClose={() => setSelectedAgent(null)} />
         )}
 
-        <RoomLegend rooms={ROOMS} />
-        <ActivityFeed agents={agentList} simStates={simStates} />
+        <div className="absolute left-4 bottom-4 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-[220px]" data-testid="panel-room-legend">
+          <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider mb-2">Departments</p>
+          <div className="space-y-1">
+            {ROOMS.map(room => (
+              <button
+                key={room.id}
+                className="flex items-center gap-2 w-full text-left hover:bg-white/10 rounded px-1 py-0.5 transition-colors"
+                onClick={() => setSelectedRoom(selectedRoom?.id === room.id ? null : room)}
+                data-testid={`button-room-${room.id}`}
+              >
+                <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: room.color }} />
+                <span className="text-xs text-white/70">{room.name}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            className="flex items-center gap-2 w-full text-left mt-2 pt-2 border-t border-white/10 hover:bg-white/10 rounded px-1 py-0.5 transition-colors"
+            data-testid="button-add-department"
+          >
+            <Plus className="h-3 w-3 text-primary" />
+            <span className="text-xs text-primary">Add Department</span>
+          </button>
+        </div>
+
+        <div className="absolute right-4 bottom-4 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-[260px]" data-testid="panel-activity-feed">
+          <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider mb-2">Live Activity</p>
+          <div className="space-y-1.5">
+            {agentList.filter(a => a.isActive).slice(0, 5).map(agent => {
+              const sim = simStates.get(agent.id);
+              if (!sim) return null;
+              const agentColor = getAgentColor(agent);
+              return (
+                <div key={agent.id} className="flex items-start gap-2">
+                  <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0 ${sim.phase === "working" ? "bg-green-500" : sim.phase === "walking" ? "bg-amber-500" : "bg-gray-400"}`} />
+                  <div className="min-w-0">
+                    <span className="text-xs font-medium" style={{ color: agentColor }}>{agent.name}</span>
+                    <span className="text-xs text-white/50 ml-1">
+                      {sim.phase === "walking" ? `heading to ${sim.targetRoom}` : sim.phase === "working" ? sim.objective : "selecting next objective"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <WebGLErrorBoundary
           fallback={
@@ -991,6 +1202,17 @@ export default function AgentWorld() {
           </div>
         )}
       </div>
+
+      {selectedRoom && (
+        <RoomDetailPanel
+          room={selectedRoom}
+          agents={agentList}
+          simStates={simStates}
+          onClose={() => setSelectedRoom(null)}
+        />
+      )}
+
+      <CommandChatPanel agents={agentList} workspaces={workspaces || []} />
     </div>
   );
 }

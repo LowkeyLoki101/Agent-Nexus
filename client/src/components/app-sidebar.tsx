@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  LayoutDashboard,
   Building2,
   Bot,
   Key,
@@ -32,23 +31,36 @@ import {
   ChevronUp,
   User,
   Globe,
+  Gift,
+  Package,
+  Factory,
 } from "lucide-react";
 
 const mainNavItems = [
   {
-    title: "Dashboard",
+    title: "Agent Factory",
     url: "/",
-    icon: LayoutDashboard,
+    icon: Globe,
   },
   {
-    title: "Studios",
+    title: "Gifts",
+    url: "/gifts",
+    icon: Gift,
+  },
+  {
+    title: "Assembly Lines",
+    url: "/assembly-lines",
+    icon: Factory,
+  },
+  {
+    title: "Products",
+    url: "/products",
+    icon: Package,
+  },
+  {
+    title: "Departments",
     url: "/workspaces",
     icon: Building2,
-  },
-  {
-    title: "Briefings",
-    url: "/briefings",
-    icon: ClipboardList,
   },
   {
     title: "Agents",
@@ -56,9 +68,9 @@ const mainNavItems = [
     icon: Bot,
   },
   {
-    title: "Agent World",
-    url: "/agent-world",
-    icon: Globe,
+    title: "Briefings",
+    url: "/briefings",
+    icon: ClipboardList,
   },
   {
     title: "API Tokens",

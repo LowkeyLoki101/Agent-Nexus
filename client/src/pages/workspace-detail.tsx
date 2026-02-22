@@ -77,10 +77,10 @@ export default function WorkspaceDetail() {
     return (
       <div className="text-center py-12">
         <Building2 className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-        <h2 className="text-xl font-semibold mb-2">Workspace not found</h2>
-        <p className="text-muted-foreground mb-4">The workspace you're looking for doesn't exist or you don't have access.</p>
+        <h2 className="text-xl font-semibold mb-2">Department not found</h2>
+        <p className="text-muted-foreground mb-4">The department you're looking for doesn't exist or you don't have access.</p>
         <Link href="/workspaces">
-          <Button variant="outline">Back to Workspaces</Button>
+          <Button variant="outline">Back to Departments</Button>
         </Link>
       </div>
     );

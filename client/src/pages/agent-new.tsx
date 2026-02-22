@@ -133,10 +133,10 @@ export default function AgentNew() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="workspace">Workspace</Label>
+              <Label htmlFor="workspace">Department</Label>
               <Select value={workspaceId} onValueChange={setWorkspaceId}>
                 <SelectTrigger data-testid="select-workspace">
-                  <SelectValue placeholder="Select a workspace" />
+                  <SelectValue placeholder="Select a department" />
                 </SelectTrigger>
                 <SelectContent>
                   {workspaces?.map((ws) => (

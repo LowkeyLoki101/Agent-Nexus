@@ -156,6 +156,142 @@ export const briefingRelations = relations(briefings, ({ one }) => ({
   }),
 }));
 
+export const giftTypeEnum = pgEnum("gift_type", ["redesign", "content", "tool", "analysis", "prototype", "artwork", "other"]);
+export const giftStatusEnum = pgEnum("gift_status", ["creating", "ready", "featured", "archived"]);
+export const productStatusEnum = pgEnum("product_status", ["queued", "in_progress", "completed", "failed"]);
+export const assemblyLineStatusEnum = pgEnum("assembly_line_status", ["draft", "active", "paused", "completed"]);
+export const stepStatusEnum = pgEnum("step_status", ["pending", "in_progress", "completed", "failed", "skipped"]);
+
+export const gifts = pgTable("gifts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  type: giftTypeEnum("type").notNull().default("other"),
+  status: giftStatusEnum("status").notNull().default("creating"),
+  content: text("content"),
+  contentUrl: text("content_url"),
+  thumbnail: text("thumbnail"),
+  toolUsed: text("tool_used"),
+  departmentRoom: text("department_room"),
+  inspirationSource: text("inspiration_source"),
+  likes: integer("likes").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const giftRelations = relations(gifts, ({ one, many }) => ({
+  agent: one(agents, { fields: [gifts.agentId], references: [agents.id] }),
+  workspace: one(workspaces, { fields: [gifts.workspaceId], references: [workspaces.id] }),
+  comments: many(giftComments),
+}));
+
+export const giftComments = pgTable("gift_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  giftId: varchar("gift_id").notNull().references(() => gifts.id, { onDelete: "cascade" }),
+  authorId: varchar("author_id").notNull(),
+  authorType: entityTypeEnum("author_type").notNull().default("human"),
+  authorName: text("author_name").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const giftCommentRelations = relations(giftComments, ({ one }) => ({
+  gift: one(gifts, { fields: [giftComments.giftId], references: [gifts.id] }),
+}));
+
+export const assemblyLines = pgTable("assembly_lines", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  ownerId: varchar("owner_id").notNull(),
+  status: assemblyLineStatusEnum("status").notNull().default("draft"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const assemblyLineRelations = relations(assemblyLines, ({ many }) => ({
+  steps: many(assemblyLineSteps),
+  products: many(products),
+}));
+
+export const assemblyLineSteps = pgTable("assembly_line_steps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assemblyLineId: varchar("assembly_line_id").notNull().references(() => assemblyLines.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  departmentRoom: text("department_room").notNull(),
+  toolName: text("tool_name"),
+  assignedAgentId: varchar("assigned_agent_id").references(() => agents.id),
+  instructions: text("instructions"),
+  status: stepStatusEnum("status").notNull().default("pending"),
+  output: text("output"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const assemblyLineStepRelations = relations(assemblyLineSteps, ({ one }) => ({
+  assemblyLine: one(assemblyLines, { fields: [assemblyLineSteps.assemblyLineId], references: [assemblyLines.id] }),
+  assignedAgent: one(agents, { fields: [assemblyLineSteps.assignedAgentId], references: [agents.id] }),
+}));
+
+export const products = pgTable("products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assemblyLineId: varchar("assembly_line_id").notNull().references(() => assemblyLines.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  status: productStatusEnum("status").notNull().default("queued"),
+  inputRequest: text("input_request"),
+  finalOutput: text("final_output"),
+  finalOutputUrl: text("final_output_url"),
+  ownerId: varchar("owner_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const productRelations = relations(products, ({ one }) => ({
+  assemblyLine: one(assemblyLines, { fields: [products.assemblyLineId], references: [assemblyLines.id] }),
+}));
+
+export const insertGiftSchema = createInsertSchema(gifts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  likes: true,
+});
+
+export const insertGiftCommentSchema = createInsertSchema(giftComments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAssemblyLineSchema = createInsertSchema(assemblyLines).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAssemblyLineStepSchema = createInsertSchema(assemblyLineSteps).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export type Gift = typeof gifts.$inferSelect;
+export type InsertGift = z.infer<typeof insertGiftSchema>;
+export type GiftComment = typeof giftComments.$inferSelect;
+export type InsertGiftComment = z.infer<typeof insertGiftCommentSchema>;
+export type AssemblyLine = typeof assemblyLines.$inferSelect;
+export type InsertAssemblyLine = z.infer<typeof insertAssemblyLineSchema>;
+export type AssemblyLineStep = typeof assemblyLineSteps.$inferSelect;
+export type InsertAssemblyLineStep = z.infer<typeof insertAssemblyLineStepSchema>;
+export type Product = typeof products.$inferSelect;
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+
 export const insertWorkspaceSchema = createInsertSchema(workspaces).omit({
   id: true,
   createdAt: true,

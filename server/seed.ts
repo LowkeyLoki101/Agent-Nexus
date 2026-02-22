@@ -23,9 +23,9 @@ export async function seedDatabase() {
     }).returning();
 
     const [contentWorkspace] = await db.insert(workspaces).values({
-      name: "Content Studio",
+      name: "Content Department",
       description: "Content creation and publishing hub for agents and humans",
-      slug: "content-studio",
+      slug: "content-dept",
       ownerId: DEMO_USER_ID,
       isPrivate: false,
     }).returning();
@@ -158,7 +158,7 @@ export async function seedDatabase() {
         action: "workspace_created",
         entityType: "workspace",
         entityId: contentWorkspace.id,
-        metadata: JSON.stringify({ name: "Content Studio" }),
+        metadata: JSON.stringify({ name: "Content Department" }),
       },
       {
         workspaceId: contentWorkspace.id,

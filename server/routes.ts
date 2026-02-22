@@ -2,9 +2,10 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
-import { insertWorkspaceSchema, insertAgentSchema } from "@shared/schema";
+import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
+import AnthropicSDK from "@anthropic-ai/sdk";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -621,6 +622,307 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching workspace briefings:", error);
       res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
+  // === GIFTS ===
+  app.get("/api/gifts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const gifts = await storage.getGiftsByUser(userId);
+      res.json(gifts);
+    } catch (error) {
+      console.error("Error fetching gifts:", error);
+      res.status(500).json({ message: "Failed to fetch gifts" });
+    }
+  });
+
+  app.get("/api/gifts/recent", isAuthenticated, async (_req: any, res) => {
+    try {
+      const gifts = await storage.getRecentGifts(20);
+      res.json(gifts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch recent gifts" });
+    }
+  });
+
+  app.get("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const gift = await storage.getGift(req.params.id);
+      if (!gift) return res.status(404).json({ message: "Gift not found" });
+      res.json(gift);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch gift" });
+    }
+  });
+
+  app.post("/api/gifts", isAuthenticated, async (req: any, res) => {
+    try {
+      const parsed = insertGiftSchema.parse(req.body);
+      const gift = await storage.createGift(parsed);
+      res.status(201).json(gift);
+    } catch (error) {
+      console.error("Error creating gift:", error);
+      res.status(400).json({ message: "Failed to create gift" });
+    }
+  });
+
+  app.patch("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const gift = await storage.updateGift(req.params.id, req.body);
+      if (!gift) return res.status(404).json({ message: "Gift not found" });
+      res.json(gift);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update gift" });
+    }
+  });
+
+  app.delete("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteGift(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete gift" });
+    }
+  });
+
+  app.post("/api/gifts/:id/like", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.likeGift(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to like gift" });
+    }
+  });
+
+  app.get("/api/gifts/:id/comments", isAuthenticated, async (req: any, res) => {
+    try {
+      const comments = await storage.getGiftComments(req.params.id);
+      res.json(comments);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch comments" });
+    }
+  });
+
+  app.post("/api/gifts/:id/comments", isAuthenticated, async (req: any, res) => {
+    try {
+      const parsed = insertGiftCommentSchema.parse({
+        ...req.body,
+        giftId: req.params.id,
+      });
+      const comment = await storage.createGiftComment(parsed);
+      res.status(201).json(comment);
+    } catch (error) {
+      console.error("Error creating comment:", error);
+      res.status(400).json({ message: "Failed to create comment" });
+    }
+  });
+
+  // === ASSEMBLY LINES ===
+  app.get("/api/assembly-lines", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const lines = await storage.getAssemblyLinesByUser(userId);
+      res.json(lines);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch assembly lines" });
+    }
+  });
+
+  app.get("/api/assembly-lines/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const line = await storage.getAssemblyLine(req.params.id);
+      if (!line) return res.status(404).json({ message: "Assembly line not found" });
+      res.json(line);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch assembly line" });
+    }
+  });
+
+  app.post("/api/assembly-lines", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const parsed = insertAssemblyLineSchema.parse({ ...req.body, ownerId: userId });
+      const line = await storage.createAssemblyLine(parsed);
+      res.status(201).json(line);
+    } catch (error) {
+      console.error("Error creating assembly line:", error);
+      res.status(400).json({ message: "Failed to create assembly line" });
+    }
+  });
+
+  app.patch("/api/assembly-lines/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const line = await storage.updateAssemblyLine(req.params.id, req.body);
+      if (!line) return res.status(404).json({ message: "Assembly line not found" });
+      res.json(line);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update assembly line" });
+    }
+  });
+
+  app.delete("/api/assembly-lines/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteAssemblyLine(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete assembly line" });
+    }
+  });
+
+  app.get("/api/assembly-lines/:id/steps", isAuthenticated, async (req: any, res) => {
+    try {
+      const steps = await storage.getAssemblyLineSteps(req.params.id);
+      res.json(steps);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch steps" });
+    }
+  });
+
+  app.post("/api/assembly-lines/:id/steps", isAuthenticated, async (req: any, res) => {
+    try {
+      const parsed = insertAssemblyLineStepSchema.parse({
+        ...req.body,
+        assemblyLineId: req.params.id,
+      });
+      const step = await storage.createAssemblyLineStep(parsed);
+      res.status(201).json(step);
+    } catch (error) {
+      console.error("Error creating step:", error);
+      res.status(400).json({ message: "Failed to create step" });
+    }
+  });
+
+  app.patch("/api/assembly-line-steps/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const step = await storage.updateAssemblyLineStep(req.params.id, req.body);
+      if (!step) return res.status(404).json({ message: "Step not found" });
+      res.json(step);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update step" });
+    }
+  });
+
+  // === PRODUCTS ===
+  app.get("/api/products", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const productsList = await storage.getProductsByUser(userId);
+      res.json(productsList);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch products" });
+    }
+  });
+
+  app.get("/api/products/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const product = await storage.getProduct(req.params.id);
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      res.json(product);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch product" });
+    }
+  });
+
+  app.post("/api/products", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const parsed = insertProductSchema.parse({ ...req.body, ownerId: userId });
+      const product = await storage.createProduct(parsed);
+      res.status(201).json(product);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      res.status(400).json({ message: "Failed to create product" });
+    }
+  });
+
+  app.patch("/api/products/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const product = await storage.updateProduct(req.params.id, req.body);
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      res.json(product);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update product" });
+    }
+  });
+
+  const anthropicClient = new AnthropicSDK();
+
+  app.post("/api/command-chat", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { message, history, factoryContext } = req.body;
+
+      if (!message || typeof message !== "string") {
+        return res.status(400).json({ message: "Message is required" });
+      }
+
+      const agents = await storage.getAgentsByUser(userId);
+      const workspaces = await storage.getWorkspacesByUser(userId);
+
+      const agentList = agents.map(a => `- ${a.name} (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}]`).join("\n");
+      const deptList = workspaces.map(w => `- ${w.name} (/${w.slug})`).join("\n");
+
+      const systemPrompt = `You are the Factory Command AI for CB | CREATIVES — Creative Intelligence platform. You help the user manage their agent factory, plan operations, create tools, and configure departments.
+
+Current Factory State:
+Departments:
+${deptList || "No departments yet"}
+
+Agents:
+${agentList || "No agents registered"}
+
+${factoryContext ? `Factory View: ${factoryContext}` : ""}
+
+You can help with:
+- Planning agent workflows and operations
+- Suggesting department configurations  
+- Creating tool specifications for agents
+- Analyzing factory performance
+- Answering questions about agent capabilities
+- Recommending agent assignments and optimizations
+
+Be concise and actionable. When suggesting changes, explain what you'd do and why. Use clear formatting for lists and steps.`;
+
+      const chatMessages: { role: "user" | "assistant"; content: string }[] = [];
+
+      if (history && Array.isArray(history)) {
+        for (const msg of history.slice(-20)) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            chatMessages.push({ role: msg.role, content: msg.content });
+          }
+        }
+      }
+
+      chatMessages.push({ role: "user", content: message });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const stream = await anthropicClient.messages.stream({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: chatMessages,
+      });
+
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          res.write(`data: ${JSON.stringify({ content: event.delta.text })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } catch (error) {
+      console.error("Error in command chat:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: "Chat failed" })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ message: "Failed to process command" });
+      }
     }
   });
 

@@ -23,6 +23,9 @@ import BriefingDetail from "@/pages/briefing-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
 import AgentWorld from "@/pages/agent-world";
+import Gifts from "@/pages/gifts";
+import Products from "@/pages/products";
+import AssemblyLinesPage from "@/pages/assembly-lines";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -53,7 +56,8 @@ function AuthenticatedRouter() {
   return (
     <AuthenticatedLayout>
       <Switch>
-        <Route path="/" component={Dashboard} />
+        <Route path="/" component={AgentWorld} />
+        <Route path="/dashboard" component={Dashboard} />
         <Route path="/workspaces" component={Workspaces} />
         <Route path="/workspaces/new" component={WorkspaceNew} />
         <Route path="/workspaces/:slug" component={WorkspaceDetail} />
@@ -61,6 +65,9 @@ function AuthenticatedRouter() {
         <Route path="/agents" component={Agents} />
         <Route path="/agents/new" component={AgentNew} />
         <Route path="/agent-world" component={AgentWorld} />
+        <Route path="/gifts" component={Gifts} />
+        <Route path="/products" component={Products} />
+        <Route path="/assembly-lines" component={AssemblyLinesPage} />
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />

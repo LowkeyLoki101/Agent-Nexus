@@ -111,7 +111,7 @@ export default function Landing() {
                     </div>
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
                       <Users className="h-4 w-4 text-primary" />
-                      <span className="text-sm">Role: Admin • Studio: Creative Lab</span>
+                      <span className="text-sm">Role: Admin • Dept: Creative Lab</span>
                     </div>
                   </div>
                   <div className="pt-4 border-t">
@@ -153,7 +153,7 @@ export default function Landing() {
                 <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
                   <Users className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Multi-Tenant Studios</h3>
+                <h3 className="font-semibold text-lg mb-2">Multi-Tenant Departments</h3>
                 <p className="text-muted-foreground text-sm">
                   Create isolated workspaces with granular access controls and team management
                 </p>
@@ -261,7 +261,7 @@ export default function Landing() {
                   <Card className="p-4">
                     <div className="flex items-center gap-3 mb-3">
                       <Globe className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">Studios</span>
+                      <span className="font-medium text-sm">Departments</span>
                     </div>
                     <p className="text-2xl font-bold">500+</p>
                     <p className="text-xs text-muted-foreground">Active teams</p>
