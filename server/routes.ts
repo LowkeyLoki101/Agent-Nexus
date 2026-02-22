@@ -5,7 +5,6 @@ import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integra
 import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
-import AnthropicSDK from "@anthropic-ai/sdk";
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -1265,7 +1264,10 @@ export async function registerRoutes(
     }
   });
 
-  const anthropicClient = new AnthropicSDK();
+  const commandChatOpenai = new OpenAI({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  });
 
   app.post("/api/command-chat", isAuthenticated, async (req: any, res) => {
     try {
@@ -1303,7 +1305,9 @@ You can help with:
 
 Be concise and actionable. When suggesting changes, explain what you'd do and why. Use clear formatting for lists and steps.`;
 
-      const chatMessages: { role: "user" | "assistant"; content: string }[] = [];
+      const chatMessages: { role: "user" | "assistant" | "system"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+      ];
 
       if (history && Array.isArray(history)) {
         for (const msg of history.slice(-20)) {
@@ -1319,16 +1323,17 @@ Be concise and actionable. When suggesting changes, explain what you'd do and wh
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      const stream = await anthropicClient.messages.stream({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        system: systemPrompt,
+      const stream = await commandChatOpenai.chat.completions.create({
+        model: "gpt-4o-mini",
         messages: chatMessages,
+        stream: true,
+        max_tokens: 1024,
       });
 
-      for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          res.write(`data: ${JSON.stringify({ content: event.delta.text })}\n\n`);
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
         }
       }
 
