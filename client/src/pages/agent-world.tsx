@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import ReactMarkdown from "react-markdown";
 import {
   Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity,
   Send, MessageSquare, ChevronDown, ChevronUp, Loader2,
@@ -838,7 +839,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
           <div className="flex items-center gap-2">
             <Terminal className="h-4 w-4 text-primary" />
             <span className="text-sm font-medium">Factory Command Center</span>
-            <Badge variant="outline" className="text-[10px]">Claude</Badge>
+            <Badge variant="outline" className="text-[10px]">Creative Intelligence</Badge>
           </div>
           {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
         </Button>
@@ -852,7 +853,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
                 <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
                 <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
                 <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
-                  Chat with Claude to plan operations, create agent tools, configure departments, or get factory insights.
+                  Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights.
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center mt-4">
                   {["Show factory status", "Plan a new workflow", "Create a web scraper tool"].map(suggestion => (
@@ -875,7 +876,13 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
                 <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
                   msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
                 }`} data-testid={`command-message-${msg.role}-${i}`}>
-                  {msg.content || (isStreaming && i === chatMessages.length - 1 ? (
+                  {msg.content ? (
+                    msg.role === "assistant" ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_pre]:text-xs [&_pre]:bg-background/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : msg.content
+                  ) : (isStreaming && i === chatMessages.length - 1 ? (
                     <span className="flex items-center gap-1">
                       <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
                     </span>
@@ -892,7 +899,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask Claude to plan operations, create tools, or configure the factory..."
+                placeholder="Ask Creative Intelligence to plan operations, create tools, or configure the factory..."
                 className="min-h-[40px] max-h-[100px] text-sm resize-none"
                 rows={1}
                 disabled={isStreaming}
@@ -1082,7 +1089,7 @@ function OnboardingOverlay({ onDismiss }: { onDismiss: () => void }) {
   const steps = [
     { title: "Welcome to Agent Factory", desc: "This is your command center. Watch your agents work autonomously across departments, chat with them, and manage operations.", icon: <Bot className="h-8 w-8 text-primary" /> },
     { title: "Departments & Rooms", desc: "Each room is a department with specialized tools. Click on rooms in the legend to see equipment and assign agents.", icon: <Settings className="h-8 w-8 text-primary" /> },
-    { title: "Command Center", desc: "Use the chat panel below to talk with Claude. Plan workflows, create tools, configure departments, or get insights.", icon: <Terminal className="h-8 w-8 text-primary" /> },
+    { title: "Command Center", desc: "Use the chat panel below to talk with Creative Intelligence. Plan workflows, create tools, configure departments, or get insights.", icon: <Terminal className="h-8 w-8 text-primary" /> },
   ];
   const current = steps[step];
 
