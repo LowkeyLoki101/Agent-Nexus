@@ -252,6 +252,44 @@ export const productRelations = relations(products, ({ one }) => ({
   assemblyLine: one(assemblyLines, { fields: [products.assemblyLineId], references: [assemblyLines.id] }),
 }));
 
+export const draftStatusEnum = pgEnum("draft_status", ["draft", "ready_for_review", "approved", "rejected"]);
+
+export const agentNotes = pgTable("agent_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  relatedPath: text("related_path"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const agentNoteRelations = relations(agentNotes, ({ one }) => ({
+  agent: one(agents, { fields: [agentNotes.agentId], references: [agents.id] }),
+  workspace: one(workspaces, { fields: [agentNotes.workspaceId], references: [workspaces.id] }),
+}));
+
+export const agentFileDrafts = pgTable("agent_file_drafts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+  filePath: text("file_path").notNull(),
+  content: text("content").notNull(),
+  description: text("description"),
+  diffSummary: text("diff_summary"),
+  status: draftStatusEnum("status").notNull().default("draft"),
+  reviewerId: varchar("reviewer_id"),
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const agentFileDraftRelations = relations(agentFileDrafts, ({ one }) => ({
+  agent: one(agents, { fields: [agentFileDrafts.agentId], references: [agents.id] }),
+  workspace: one(workspaces, { fields: [agentFileDrafts.workspaceId], references: [workspaces.id] }),
+}));
+
 export const insertGiftSchema = createInsertSchema(gifts).omit({
   id: true,
   createdAt: true,
@@ -324,6 +362,23 @@ export const insertBriefingSchema = createInsertSchema(briefings).omit({
   createdAt: true,
   updatedAt: true,
 });
+
+export const insertAgentNoteSchema = createInsertSchema(agentNotes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAgentFileDraftSchema = createInsertSchema(agentFileDrafts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type AgentNote = typeof agentNotes.$inferSelect;
+export type InsertAgentNote = z.infer<typeof insertAgentNoteSchema>;
+export type AgentFileDraft = typeof agentFileDrafts.$inferSelect;
+export type InsertAgentFileDraft = z.infer<typeof insertAgentFileDraftSchema>;
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;

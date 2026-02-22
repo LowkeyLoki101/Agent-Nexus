@@ -34,6 +34,8 @@ import {
   Gift,
   Package,
   Factory,
+  BookOpen,
+  Wrench,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -56,6 +58,16 @@ const mainNavItems = [
     title: "Products",
     url: "/products",
     icon: Package,
+  },
+  {
+    title: "Library",
+    url: "/library",
+    icon: BookOpen,
+  },
+  {
+    title: "Workstation",
+    url: "/workstation",
+    icon: Wrench,
   },
   {
     title: "Departments",

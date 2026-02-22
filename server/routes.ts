@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
-import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema } from "@shared/schema";
+import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
 import AnthropicSDK from "@anthropic-ai/sdk";
@@ -843,6 +843,181 @@ export async function registerRoutes(
       res.json(product);
     } catch (error) {
       res.status(500).json({ message: "Failed to update product" });
+    }
+  });
+
+  // Library routes - read-only file browsing
+  app.get("/api/library/files", isAuthenticated, async (_req: any, res) => {
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+      const rootDir = process.cwd();
+      const ignoreDirs = new Set(["node_modules", ".git", ".cache", "dist", ".local", ".config", ".upm", ".replit", "attached_assets"]);
+      const ignoreFiles = new Set([".DS_Store", "Thumbs.db"]);
+
+      interface FileEntry {
+        name: string;
+        path: string;
+        type: "file" | "directory";
+        size?: number;
+        children?: FileEntry[];
+      }
+
+      function scanDir(dirPath: string, relativePath: string = ""): FileEntry[] {
+        const entries: FileEntry[] = [];
+        try {
+          const items = fs.readdirSync(dirPath, { withFileTypes: true });
+          for (const item of items) {
+            if (ignoreDirs.has(item.name) || ignoreFiles.has(item.name)) continue;
+            if (item.name.startsWith(".") && item.name !== ".replit") continue;
+            const fullPath = path.join(dirPath, item.name);
+            const relPath = relativePath ? `${relativePath}/${item.name}` : item.name;
+            if (item.isDirectory()) {
+              entries.push({ name: item.name, path: relPath, type: "directory", children: scanDir(fullPath, relPath) });
+            } else {
+              const stats = fs.statSync(fullPath);
+              entries.push({ name: item.name, path: relPath, type: "file", size: stats.size });
+            }
+          }
+        } catch {}
+        return entries.sort((a, b) => {
+          if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      }
+
+      res.json(scanDir(rootDir));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to scan files" });
+    }
+  });
+
+  app.get("/api/library/file", isAuthenticated, async (req: any, res) => {
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+      const filePath = req.query.path as string;
+      if (!filePath) return res.status(400).json({ message: "Path is required" });
+
+      const rootDir = process.cwd();
+      const fullPath = path.resolve(rootDir, filePath);
+      if (!fullPath.startsWith(rootDir)) return res.status(403).json({ message: "Access denied" });
+      const blockedPaths = ["node_modules", ".git", ".cache", ".local", ".config", ".upm", ".env", "dist"];
+      if (blockedPaths.some(bp => fullPath.includes(bp))) return res.status(403).json({ message: "Access denied" });
+      const basename = path.basename(filePath);
+      if (basename.startsWith(".") && basename !== ".replit") return res.status(403).json({ message: "Access denied" });
+
+      if (!fs.existsSync(fullPath)) return res.status(404).json({ message: "File not found" });
+      const stats = fs.statSync(fullPath);
+      if (stats.size > 500000) return res.status(413).json({ message: "File too large to preview (>500KB)" });
+
+      const content = fs.readFileSync(fullPath, "utf-8");
+      const ext = path.extname(filePath).toLowerCase();
+      res.json({ path: filePath, content, size: stats.size, extension: ext });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to read file" });
+    }
+  });
+
+  // Agent Notes routes
+  app.get("/api/agent-notes", isAuthenticated, async (req: any, res) => {
+    try {
+      const agentId = req.query.agentId as string | undefined;
+      const notes = await storage.getAgentNotes(agentId);
+      res.json(notes);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch notes" });
+    }
+  });
+
+  app.post("/api/agent-notes", isAuthenticated, async (req: any, res) => {
+    try {
+      const parsed = insertAgentNoteSchema.parse(req.body);
+      const agent = await storage.getAgent(parsed.agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const userId = req.user.claims.sub;
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const note = await storage.createAgentNote(parsed);
+      res.status(201).json(note);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      res.status(500).json({ message: "Failed to create note" });
+    }
+  });
+
+  app.patch("/api/agent-notes/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const note = await storage.updateAgentNote(req.params.id, req.body);
+      if (!note) return res.status(404).json({ message: "Note not found" });
+      res.json(note);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update note" });
+    }
+  });
+
+  app.delete("/api/agent-notes/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteAgentNote(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete note" });
+    }
+  });
+
+  // Agent File Drafts routes
+  app.get("/api/agent-drafts", isAuthenticated, async (req: any, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const drafts = await storage.getAgentFileDrafts(status);
+      res.json(drafts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch drafts" });
+    }
+  });
+
+  app.get("/api/agent-drafts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const draft = await storage.getAgentFileDraft(req.params.id);
+      if (!draft) return res.status(404).json({ message: "Draft not found" });
+      res.json(draft);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch draft" });
+    }
+  });
+
+  app.post("/api/agent-drafts", isAuthenticated, async (req: any, res) => {
+    try {
+      const parsed = insertAgentFileDraftSchema.parse(req.body);
+      const agent = await storage.getAgent(parsed.agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const userId = req.user.claims.sub;
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const draft = await storage.createAgentFileDraft(parsed);
+      res.status(201).json(draft);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      res.status(500).json({ message: "Failed to create draft" });
+    }
+  });
+
+  app.patch("/api/agent-drafts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const draft = await storage.updateAgentFileDraft(req.params.id, req.body);
+      if (!draft) return res.status(404).json({ message: "Draft not found" });
+      res.json(draft);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update draft" });
+    }
+  });
+
+  app.delete("/api/agent-drafts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteAgentFileDraft(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete draft" });
     }
   });
 

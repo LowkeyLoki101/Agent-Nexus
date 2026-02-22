@@ -32,6 +32,12 @@ import {
   type InsertAssemblyLineStep,
   type Product,
   type InsertProduct,
+  agentNotes,
+  agentFileDrafts,
+  type AgentNote,
+  type InsertAgentNote,
+  type AgentFileDraft,
+  type InsertAgentFileDraft,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
@@ -104,6 +110,19 @@ export interface IStorage {
   getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
+
+  getAgentNotes(agentId?: string): Promise<AgentNote[]>;
+  getAgentNote(id: string): Promise<AgentNote | undefined>;
+  createAgentNote(note: InsertAgentNote): Promise<AgentNote>;
+  updateAgentNote(id: string, updates: Partial<InsertAgentNote>): Promise<AgentNote | undefined>;
+  deleteAgentNote(id: string): Promise<void>;
+
+  getAgentFileDrafts(status?: string): Promise<AgentFileDraft[]>;
+  getAgentFileDraft(id: string): Promise<AgentFileDraft | undefined>;
+  getAgentFileDraftsByAgent(agentId: string): Promise<AgentFileDraft[]>;
+  createAgentFileDraft(draft: InsertAgentFileDraft): Promise<AgentFileDraft>;
+  updateAgentFileDraft(id: string, updates: Partial<InsertAgentFileDraft>): Promise<AgentFileDraft | undefined>;
+  deleteAgentFileDraft(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -432,6 +451,62 @@ export class DatabaseStorage implements IStorage {
   async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined> {
     const [updated] = await db.update(products).set(updates).where(eq(products.id, id)).returning();
     return updated;
+  }
+
+  async getAgentNotes(agentId?: string): Promise<AgentNote[]> {
+    if (agentId) {
+      return db.select().from(agentNotes).where(eq(agentNotes.agentId, agentId)).orderBy(desc(agentNotes.updatedAt));
+    }
+    return db.select().from(agentNotes).orderBy(desc(agentNotes.updatedAt));
+  }
+
+  async getAgentNote(id: string): Promise<AgentNote | undefined> {
+    const [note] = await db.select().from(agentNotes).where(eq(agentNotes.id, id));
+    return note;
+  }
+
+  async createAgentNote(note: InsertAgentNote): Promise<AgentNote> {
+    const [created] = await db.insert(agentNotes).values(note).returning();
+    return created;
+  }
+
+  async updateAgentNote(id: string, updates: Partial<InsertAgentNote>): Promise<AgentNote | undefined> {
+    const [updated] = await db.update(agentNotes).set({ ...updates, updatedAt: new Date() }).where(eq(agentNotes.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAgentNote(id: string): Promise<void> {
+    await db.delete(agentNotes).where(eq(agentNotes.id, id));
+  }
+
+  async getAgentFileDrafts(status?: string): Promise<AgentFileDraft[]> {
+    if (status) {
+      return db.select().from(agentFileDrafts).where(eq(agentFileDrafts.status, status as any)).orderBy(desc(agentFileDrafts.updatedAt));
+    }
+    return db.select().from(agentFileDrafts).orderBy(desc(agentFileDrafts.updatedAt));
+  }
+
+  async getAgentFileDraft(id: string): Promise<AgentFileDraft | undefined> {
+    const [draft] = await db.select().from(agentFileDrafts).where(eq(agentFileDrafts.id, id));
+    return draft;
+  }
+
+  async getAgentFileDraftsByAgent(agentId: string): Promise<AgentFileDraft[]> {
+    return db.select().from(agentFileDrafts).where(eq(agentFileDrafts.agentId, agentId)).orderBy(desc(agentFileDrafts.updatedAt));
+  }
+
+  async createAgentFileDraft(draft: InsertAgentFileDraft): Promise<AgentFileDraft> {
+    const [created] = await db.insert(agentFileDrafts).values(draft).returning();
+    return created;
+  }
+
+  async updateAgentFileDraft(id: string, updates: Partial<InsertAgentFileDraft>): Promise<AgentFileDraft | undefined> {
+    const [updated] = await db.update(agentFileDrafts).set({ ...updates, updatedAt: new Date() }).where(eq(agentFileDrafts.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAgentFileDraft(id: string): Promise<void> {
+    await db.delete(agentFileDrafts).where(eq(agentFileDrafts.id, id));
   }
 }
 

@@ -26,6 +26,8 @@ import AgentWorld from "@/pages/agent-world";
 import Gifts from "@/pages/gifts";
 import Products from "@/pages/products";
 import AssemblyLinesPage from "@/pages/assembly-lines";
+import Library from "@/pages/library";
+import Workstation from "@/pages/workstation";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -68,6 +70,8 @@ function AuthenticatedRouter() {
         <Route path="/gifts" component={Gifts} />
         <Route path="/products" component={Products} />
         <Route path="/assembly-lines" component={AssemblyLinesPage} />
+        <Route path="/library" component={Library} />
+        <Route path="/workstation" component={Workstation} />
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
