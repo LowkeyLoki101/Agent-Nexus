@@ -75,6 +75,8 @@ export const agents = pgTable("agents", {
   isActive: boolean("is_active").default(true),
   capabilities: text("capabilities").array(),
   permissions: text("permissions").array(),
+  heygenAvatarId: text("heygen_avatar_id"),
+  elevenLabsVoiceId: text("elevenlabs_voice_id"),
   createdById: varchar("created_by_id").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

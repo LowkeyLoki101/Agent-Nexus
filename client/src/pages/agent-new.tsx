@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { ArrowLeft, Bot, X } from "lucide-react";
+import { ArrowLeft, Bot, X, Video, Mic } from "lucide-react";
 import { Link } from "wouter";
 import type { Workspace } from "@shared/schema";
 
@@ -42,6 +42,8 @@ export default function AgentNew() {
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [newCapability, setNewCapability] = useState("");
+  const [heygenAvatarId, setHeygenAvatarId] = useState("");
+  const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState("");
 
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
@@ -54,6 +56,8 @@ export default function AgentNew() {
       workspaceId: string; 
       capabilities: string[];
       isActive: boolean;
+      heygenAvatarId?: string;
+      elevenLabsVoiceId?: string;
     }) => {
       return apiRequest("POST", "/api/agents", data);
     },
@@ -95,7 +99,11 @@ export default function AgentNew() {
       });
       return;
     }
-    createMutation.mutate({ name, description, workspaceId, capabilities, isActive });
+    createMutation.mutate({ 
+      name, description, workspaceId, capabilities, isActive,
+      heygenAvatarId: heygenAvatarId || undefined,
+      elevenLabsVoiceId: elevenLabsVoiceId || undefined,
+    });
   };
 
   return (
@@ -200,6 +208,44 @@ export default function AgentNew() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-4 rounded-lg border bg-muted/30">
+              <div className="flex items-center gap-2 mb-2">
+                <Video className="h-4 w-4 text-primary" />
+                <Label className="text-sm font-medium">Digital Identity (Media)</Label>
+              </div>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Give this agent a unique digital avatar and voice for video broadcasts
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="heygenAvatarId" className="text-xs flex items-center gap-1.5">
+                    <Video className="h-3 w-3" /> HeyGen Avatar ID
+                  </Label>
+                  <Input
+                    id="heygenAvatarId"
+                    placeholder="e.g. Kristin_pubblic_2_20240108"
+                    value={heygenAvatarId}
+                    onChange={(e) => setHeygenAvatarId(e.target.value)}
+                    className="text-sm"
+                    data-testid="input-heygen-avatar-id"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="elevenLabsVoiceId" className="text-xs flex items-center gap-1.5">
+                    <Mic className="h-3 w-3" /> ElevenLabs Voice ID
+                  </Label>
+                  <Input
+                    id="elevenLabsVoiceId"
+                    placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+                    value={elevenLabsVoiceId}
+                    onChange={(e) => setElevenLabsVoiceId(e.target.value)}
+                    className="text-sm"
+                    data-testid="input-elevenlabs-voice-id"
+                  />
+                </div>
               </div>
             </div>
 

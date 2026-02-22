@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Plus, 
@@ -11,7 +12,13 @@ import {
   Search,
   Shield,
   Activity,
-  MoreHorizontal
+  MoreHorizontal,
+  Video,
+  Mic,
+  Settings,
+  Save,
+  Loader2,
+  Check,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -22,6 +29,124 @@ import {
 import { Link } from "wouter";
 import { useState } from "react";
 import type { Agent } from "@shared/schema";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+function AgentMediaSettings({ agent }: { agent: Agent }) {
+  const { toast } = useToast();
+  const [heygenAvatarId, setHeygenAvatarId] = useState(agent.heygenAvatarId || "");
+  const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState(agent.elevenLabsVoiceId || "");
+  const [isOpen, setIsOpen] = useState(false);
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("PATCH", `/api/agents/${agent.id}`, {
+        heygenAvatarId: heygenAvatarId || null,
+        elevenLabsVoiceId: elevenLabsVoiceId || null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      toast({ title: "Media identity updated", description: `${agent.name}'s digital identity saved.` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const hasMediaIds = agent.heygenAvatarId || agent.elevenLabsVoiceId;
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors w-full"
+        data-testid={`button-media-settings-${agent.id}`}
+      >
+        <Settings className="h-3 w-3" />
+        <span>{hasMediaIds ? "Media identity configured" : "Configure media identity"}</span>
+        {hasMediaIds && (
+          <div className="flex items-center gap-1 ml-auto">
+            {agent.heygenAvatarId && (
+              <Badge variant="secondary" className="text-[10px] gap-0.5 px-1.5 py-0">
+                <Video className="h-2.5 w-2.5" /> Avatar
+              </Badge>
+            )}
+            {agent.elevenLabsVoiceId && (
+              <Badge variant="secondary" className="text-[10px] gap-0.5 px-1.5 py-0">
+                <Mic className="h-2.5 w-2.5" /> Voice
+              </Badge>
+            )}
+          </div>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-3 p-3 rounded-lg border bg-muted/30" data-testid={`panel-media-settings-${agent.id}`}>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs font-medium flex items-center gap-1.5">
+          <Video className="h-3.5 w-3.5 text-primary" /> Digital Identity
+        </Label>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs"
+          onClick={() => setIsOpen(false)}
+        >
+          Close
+        </Button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`heygen-${agent.id}`} className="text-[11px] flex items-center gap-1 text-muted-foreground">
+            <Video className="h-3 w-3" /> HeyGen Avatar ID
+          </Label>
+          <Input
+            id={`heygen-${agent.id}`}
+            placeholder="e.g. Kristin_pubblic_2_20240108"
+            value={heygenAvatarId}
+            onChange={(e) => setHeygenAvatarId(e.target.value)}
+            className="h-8 text-xs"
+            data-testid={`input-heygen-${agent.id}`}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`voice-${agent.id}`} className="text-[11px] flex items-center gap-1 text-muted-foreground">
+            <Mic className="h-3 w-3" /> ElevenLabs Voice ID
+          </Label>
+          <Input
+            id={`voice-${agent.id}`}
+            placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+            value={elevenLabsVoiceId}
+            onChange={(e) => setElevenLabsVoiceId(e.target.value)}
+            className="h-8 text-xs"
+            data-testid={`input-voice-${agent.id}`}
+          />
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          className="h-7 text-xs gap-1"
+          onClick={() => updateMutation.mutate()}
+          disabled={updateMutation.isPending}
+          data-testid={`button-save-media-${agent.id}`}
+        >
+          {updateMutation.isPending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : updateMutation.isSuccess ? (
+            <Check className="h-3 w-3" />
+          ) : (
+            <Save className="h-3 w-3" />
+          )}
+          {updateMutation.isPending ? "Saving..." : updateMutation.isSuccess ? "Saved" : "Save"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default function Agents() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -148,6 +273,9 @@ export default function Agents() {
                     )}
                   </div>
                 )}
+
+                <AgentMediaSettings agent={agent} />
+
                 <div className="flex items-center gap-4 pt-2 border-t text-sm text-muted-foreground">
                   <div className="flex items-center gap-1.5">
                     <Activity className="h-4 w-4" />

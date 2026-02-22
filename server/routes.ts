@@ -242,6 +242,19 @@ export async function registerRoutes(
     workspaceId: z.string().min(1),
     capabilities: z.array(z.string()).optional().default([]),
     isActive: z.boolean().optional().default(true),
+    heygenAvatarId: z.string().max(200).optional().nullable(),
+    elevenLabsVoiceId: z.string().max(200).optional().nullable(),
+  });
+
+  const updateAgentSchema = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional().nullable(),
+    avatar: z.string().optional().nullable(),
+    isActive: z.boolean().optional(),
+    capabilities: z.array(z.string()).optional(),
+    permissions: z.array(z.string()).optional(),
+    heygenAvatarId: z.string().max(200).optional().nullable(),
+    elevenLabsVoiceId: z.string().max(200).optional().nullable(),
   });
 
   app.post("/api/agents", isAuthenticated, async (req: any, res) => {
@@ -256,7 +269,7 @@ export async function registerRoutes(
         });
       }
 
-      const { name, description, workspaceId, capabilities, isActive } = validation.data;
+      const { name, description, workspaceId, capabilities, isActive, heygenAvatarId, elevenLabsVoiceId } = validation.data;
 
       const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
       if (!access.hasAccess) {
@@ -272,6 +285,8 @@ export async function registerRoutes(
         isActive: isActive ?? true,
         isVerified: false,
         createdById: userId,
+        heygenAvatarId: heygenAvatarId || null,
+        elevenLabsVoiceId: elevenLabsVoiceId || null,
       });
 
       await storage.createAuditLog({
@@ -289,6 +304,40 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error creating agent:", error);
       res.status(500).json({ message: "Failed to create agent" });
+    }
+  });
+
+  app.patch("/api/agents/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const agent = await storage.getAgent(req.params.id);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const validation = updateAgentSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+      }
+
+      const updated = await storage.updateAgent(req.params.id, validation.data);
+
+      await storage.createAuditLog({
+        workspaceId: agent.workspaceId,
+        userId,
+        action: "agent_updated",
+        entityType: "agent",
+        entityId: agent.id,
+        metadata: JSON.stringify({ fields: Object.keys(validation.data) }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating agent:", error);
+      res.status(500).json({ message: "Failed to update agent" });
     }
   });
 
@@ -887,7 +936,11 @@ export async function registerRoutes(
       if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
 
       const text = req.body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 2000)}`;
-      const voiceId = req.body.voiceId || "21m00Tcm4TlvDq8ikWAM"; // Rachel voice default
+      let voiceId = req.body.voiceId || "21m00Tcm4TlvDq8ikWAM";
+      if (briefing.authorAgentId) {
+        const agent = await storage.getAgent(briefing.authorAgentId);
+        if (agent?.elevenLabsVoiceId) voiceId = agent.elevenLabsVoiceId;
+      }
 
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
         method: "POST",
@@ -935,7 +988,13 @@ export async function registerRoutes(
       if (!apiKey) return res.status(500).json({ message: "HeyGen API key not configured" });
 
       const text = req.body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 1500)}`;
-      const avatarId = req.body.avatarId || "Kristin_pubblic_2_20240108";
+      let avatarId = req.body.avatarId || "Kristin_pubblic_2_20240108";
+      let voiceIdForVideo = req.body.voiceId || "1bd001e7e50f421d891986aad5e3f8d2";
+      if (briefing.authorAgentId) {
+        const agent = await storage.getAgent(briefing.authorAgentId);
+        if (agent?.heygenAvatarId) avatarId = agent.heygenAvatarId;
+        if (agent?.elevenLabsVoiceId) voiceIdForVideo = agent.elevenLabsVoiceId;
+      }
 
       const response = await fetch("https://api.heygen.com/v2/video/generate", {
         method: "POST",
@@ -946,7 +1005,7 @@ export async function registerRoutes(
         body: JSON.stringify({
           video_inputs: [{
             character: { type: "avatar", avatar_id: avatarId, avatar_style: "normal" },
-            voice: { type: "text", input_text: text.slice(0, 2000), voice_id: "1bd001e7e50f421d891986aad5e3f8d2" },
+            voice: { type: "text", input_text: text.slice(0, 2000), voice_id: voiceIdForVideo },
           }],
           dimension: { width: 1280, height: 720 },
         }),
