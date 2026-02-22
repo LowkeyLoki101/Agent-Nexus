@@ -59,6 +59,7 @@ function AuthenticatedRouter() {
     <AuthenticatedLayout>
       <Switch>
         <Route path="/" component={AgentWorld} />
+        <Route path="/factory" component={AgentWorld} />
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/workspaces" component={Workspaces} />
         <Route path="/workspaces/new" component={WorkspaceNew} />

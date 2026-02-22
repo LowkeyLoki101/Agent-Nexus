@@ -846,6 +846,149 @@ export async function registerRoutes(
     }
   });
 
+  // Media generation routes for Newsroom
+  const mediaOpenai = new OpenAI({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  });
+
+  app.post("/api/briefings/:id/generate-image", isAuthenticated, async (req: any, res) => {
+    try {
+      const briefing = await storage.getBriefing(req.params.id);
+      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
+
+      const prompt = req.body.prompt || `News article thumbnail for: ${briefing.title}. ${briefing.summary || ""}. Professional news broadcast style, modern, clean design with gold accent colors.`;
+      
+      const response = await mediaOpenai.images.generate({
+        model: "dall-e-3",
+        prompt: prompt.slice(0, 1000),
+        n: 1,
+        size: "1792x1024",
+        quality: "standard",
+      });
+
+      const imageUrl = response.data?.[0]?.url;
+      if (!imageUrl) return res.status(500).json({ message: "Failed to generate image" });
+
+      const updated = await storage.updateBriefing(briefing.id, { imageUrl, thumbnailUrl: imageUrl });
+      res.json({ imageUrl, briefing: updated });
+    } catch (error: any) {
+      console.error("Image generation error:", error);
+      res.status(500).json({ message: error.message || "Failed to generate image" });
+    }
+  });
+
+  app.post("/api/briefings/:id/generate-audio", isAuthenticated, async (req: any, res) => {
+    try {
+      const briefing = await storage.getBriefing(req.params.id);
+      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
+
+      const apiKey = process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
+
+      const text = req.body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 2000)}`;
+      const voiceId = req.body.voiceId || "21m00Tcm4TlvDq8ikWAM"; // Rachel voice default
+
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: text.slice(0, 5000),
+          model_id: "eleven_monolingual_v1",
+          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return res.status(500).json({ message: `ElevenLabs error: ${errText}` });
+      }
+
+      const audioBuffer = Buffer.from(await response.arrayBuffer());
+      const fs = await import("fs");
+      const path = await import("path");
+      const audioDir = path.join(process.cwd(), "client", "public", "audio");
+      if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+
+      const filename = `broadcast-${briefing.id}-${Date.now()}.mp3`;
+      const filePath = path.join(audioDir, filename);
+      fs.writeFileSync(filePath, audioBuffer);
+
+      const audioUrl = `/audio/${filename}`;
+      const updated = await storage.updateBriefing(briefing.id, { audioUrl });
+      res.json({ audioUrl, briefing: updated });
+    } catch (error: any) {
+      console.error("Audio generation error:", error);
+      res.status(500).json({ message: error.message || "Failed to generate audio" });
+    }
+  });
+
+  app.post("/api/briefings/:id/generate-video", isAuthenticated, async (req: any, res) => {
+    try {
+      const briefing = await storage.getBriefing(req.params.id);
+      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
+
+      const apiKey = process.env.HEYGEN_API_KEY;
+      if (!apiKey) return res.status(500).json({ message: "HeyGen API key not configured" });
+
+      const text = req.body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 1500)}`;
+      const avatarId = req.body.avatarId || "Kristin_pubblic_2_20240108";
+
+      const response = await fetch("https://api.heygen.com/v2/video/generate", {
+        method: "POST",
+        headers: {
+          "X-Api-Key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          video_inputs: [{
+            character: { type: "avatar", avatar_id: avatarId, avatar_style: "normal" },
+            voice: { type: "text", input_text: text.slice(0, 2000), voice_id: "1bd001e7e50f421d891986aad5e3f8d2" },
+          }],
+          dimension: { width: 1280, height: 720 },
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return res.status(500).json({ message: `HeyGen error: ${errText}` });
+      }
+
+      const result: any = await response.json();
+      const videoId = result.data?.video_id;
+
+      if (videoId) {
+        const updated = await storage.updateBriefing(briefing.id, { videoUrl: `heygen:${videoId}` });
+        res.json({ videoId, status: "processing", briefing: updated });
+      } else {
+        res.status(500).json({ message: "No video ID returned" });
+      }
+    } catch (error: any) {
+      console.error("Video generation error:", error);
+      res.status(500).json({ message: error.message || "Failed to generate video" });
+    }
+  });
+
+  app.get("/api/briefings/latest-broadcast", async (_req, res) => {
+    try {
+      const allBriefings = await storage.getBriefingsByWorkspace("newsroom-001");
+      const published = allBriefings.filter(b => b.status === "published");
+      const withAudio = published.filter(b => b.audioUrl);
+      const featured = published.filter(b => b.featured);
+      
+      res.json({
+        latestAudio: withAudio[0] || null,
+        featured: featured[0] || published[0] || null,
+        recent: published.slice(0, 10),
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch broadcast" });
+    }
+  });
+
   // Library routes - read-only file browsing
   app.get("/api/library/files", isAuthenticated, async (_req: any, res) => {
     try {
@@ -863,7 +1006,7 @@ export async function registerRoutes(
         children?: FileEntry[];
       }
 
-      function scanDir(dirPath: string, relativePath: string = ""): FileEntry[] {
+      const scanDir = (dirPath: string, relativePath: string = ""): FileEntry[] => {
         const entries: FileEntry[] = [];
         try {
           const items = fs.readdirSync(dirPath, { withFileTypes: true });

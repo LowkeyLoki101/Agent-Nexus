@@ -16,6 +16,7 @@ import {
   Radio, Plus, Key, Wrench, Globe as GlobeIcon, Search as SearchIcon,
   FileText, Code, Palette, Brain, Users, Coffee, Settings,
   ArrowRight, Newspaper, Gauge, Terminal,
+  Play, Pause, Volume2, VolumeX,
 } from "lucide-react";
 
 function detectWebGL(): boolean {
@@ -513,6 +514,9 @@ function getToolIcon(iconType: string) {
 
 function NewsBroadcastBanner({ briefings }: { briefings: Briefing[] }) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     if (briefings.length <= 1) return;
@@ -521,6 +525,38 @@ function NewsBroadcastBanner({ briefings }: { briefings: Briefing[] }) {
     }, 6000);
     return () => clearInterval(interval);
   }, [briefings.length]);
+
+  const currentAudioUrl = useMemo(() => {
+    if (briefings.length === 0) return null;
+    const current = briefings[currentIndex];
+    if (current?.audioUrl) return current.audioUrl;
+    const sorted = [...briefings].filter(b => b.audioUrl).sort((a, b) => 
+      new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+    return sorted.length > 0 ? sorted[0].audioUrl : null;
+  }, [briefings, currentIndex]);
+
+  useEffect(() => {
+    if (audioRef.current && isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, [currentIndex]);
+
+  const togglePlay = useCallback(() => {
+    if (!audioRef.current || !currentAudioUrl) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+    }
+  }, [isPlaying, currentAudioUrl]);
+
+  const toggleMute = useCallback(() => {
+    if (audioRef.current) audioRef.current.muted = !isMuted;
+    setIsMuted(!isMuted);
+  }, [isMuted]);
 
   if (briefings.length === 0) {
     return (
@@ -546,6 +582,31 @@ function NewsBroadcastBanner({ briefings }: { briefings: Briefing[] }) {
 
   return (
     <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20 rounded-lg p-3 flex items-center gap-3" data-testid="panel-news-broadcast">
+      {currentAudioUrl && (
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            onClick={togglePlay}
+            aria-label={isPlaying ? "Pause broadcast" : "Play broadcast"}
+            data-testid="button-broadcast-play"
+          >
+            {isPlaying ? <Pause className="h-4 w-4 text-primary" /> : <Play className="h-4 w-4 text-primary" />}
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            onClick={toggleMute}
+            aria-label={isMuted ? "Unmute broadcast" : "Mute broadcast"}
+            data-testid="button-broadcast-mute"
+          >
+            {isMuted ? <VolumeX className="h-3 w-3 text-muted-foreground" /> : <Volume2 className="h-3 w-3 text-primary" />}
+          </Button>
+          <audio ref={audioRef} src={currentAudioUrl} onEnded={() => setIsPlaying(false)} />
+        </div>
+      )}
       <div className="flex items-center gap-2 shrink-0">
         <Radio className="h-4 w-4 text-primary animate-pulse" />
         <span className="text-xs font-bold uppercase tracking-wider text-primary">LIVE</span>

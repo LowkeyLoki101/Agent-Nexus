@@ -10,6 +10,7 @@ export const entityTypeEnum = pgEnum("entity_type", ["human", "agent"]);
 export const tokenStatusEnum = pgEnum("token_status", ["active", "revoked", "expired"]);
 export const briefingStatusEnum = pgEnum("briefing_status", ["draft", "published", "archived"]);
 export const briefingPriorityEnum = pgEnum("briefing_priority", ["low", "medium", "high", "urgent"]);
+export const articleTypeEnum = pgEnum("article_type", ["breaking", "feature", "interview", "investigation", "recap", "bulletin"]);
 
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
@@ -145,6 +146,13 @@ export const briefings = pgTable("briefings", {
   priority: briefingPriorityEnum("priority").notNull().default("medium"),
   tags: text("tags").array(),
   createdById: varchar("created_by_id").notNull(),
+  imageUrl: text("image_url"),
+  audioUrl: text("audio_url"),
+  videoUrl: text("video_url"),
+  thumbnailUrl: text("thumbnail_url"),
+  articleType: articleTypeEnum("article_type").default("bulletin"),
+  featured: boolean("featured").default(false),
+  authorAgentId: varchar("author_agent_id").references(() => agents.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
