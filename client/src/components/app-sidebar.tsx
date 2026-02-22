@@ -31,6 +31,7 @@ import {
   LogOut,
   ChevronUp,
   User,
+  Globe,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -53,6 +54,11 @@ const mainNavItems = [
     title: "Agents",
     url: "/agents",
     icon: Bot,
+  },
+  {
+    title: "Agent World",
+    url: "/agent-world",
+    icon: Globe,
   },
   {
     title: "API Tokens",

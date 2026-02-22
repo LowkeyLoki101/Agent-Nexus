@@ -22,6 +22,7 @@ import BriefingNew from "@/pages/briefing-new";
 import BriefingDetail from "@/pages/briefing-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
+import AgentWorld from "@/pages/agent-world";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -59,6 +60,7 @@ function AuthenticatedRouter() {
         <Route path="/workspaces/:slug/agents/new" component={AgentNew} />
         <Route path="/agents" component={Agents} />
         <Route path="/agents/new" component={AgentNew} />
+        <Route path="/agent-world" component={AgentWorld} />
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
