@@ -2,12 +2,76 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
-import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema } from "@shared/schema";
+import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema, insertDiscussionTopicSchema, insertDiscussionMessageSchema } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as path from "path";
 import multer from "multer";
+
+const BROADCAST_MAX_WORDS = 60;
+
+function truncateToWordLimit(text: string, maxWords: number): string {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return text;
+  return words.slice(0, maxWords).join(" ") + ".";
+}
+
+async function generateBriefingAudio(briefingId: string): Promise<string | null> {
+  try {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      console.log("Auto-audio skipped: ELEVENLABS_API_KEY not configured");
+      return null;
+    }
+
+    const briefing = await storage.getBriefing(briefingId);
+    if (!briefing) return null;
+
+    const rawText = `${briefing.title}. ${briefing.summary || briefing.content}`;
+    const text = truncateToWordLimit(rawText, BROADCAST_MAX_WORDS);
+
+    let voiceId = "21m00Tcm4TlvDq8ikWAM";
+    if (briefing.authorAgentId) {
+      const agent = await storage.getAgent(briefing.authorAgentId);
+      if (agent?.elevenLabsVoiceId) voiceId = agent.elevenLabsVoiceId;
+    }
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Auto-audio ElevenLabs error:", await response.text());
+      return null;
+    }
+
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
+    const audioDir = path.join(process.cwd(), "client", "public", "audio");
+    if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+
+    const filename = `broadcast-${briefingId}-${Date.now()}.mp3`;
+    const filePath = path.join(audioDir, filename);
+    fs.writeFileSync(filePath, audioBuffer);
+
+    const audioUrl = `/audio/${filename}`;
+    await storage.updateBriefing(briefingId, { audioUrl });
+    console.log(`Auto-audio generated for briefing ${briefingId}: ${audioUrl}`);
+    return audioUrl;
+  } catch (error) {
+    console.error("Auto-audio generation error:", error);
+    return null;
+  }
+}
 
 async function checkWorkspaceAccess(
   userId: string,
@@ -564,6 +628,10 @@ export async function registerRoutes(
         userAgent: req.get("user-agent"),
       });
 
+      if (briefing.status === "published" && !briefing.audioUrl) {
+        generateBriefingAudio(briefing.id).catch(() => {});
+      }
+
       res.status(201).json(briefing);
     } catch (error) {
       console.error("Error creating briefing:", error);
@@ -615,6 +683,11 @@ export async function registerRoutes(
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
+
+      const wasPublished = briefing.status !== "published" && updated?.status === "published";
+      if (wasPublished && !updated?.audioUrl) {
+        generateBriefingAudio(id).catch(() => {});
+      }
 
       res.json(updated);
     } catch (error) {
@@ -1107,8 +1180,9 @@ Respond with ONLY valid JSON in this exact format:
       const apiKey = process.env.ELEVENLABS_API_KEY;
       if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
 
-      const text = req.body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 2000)}`;
-      let voiceId = req.body.voiceId || "21m00Tcm4TlvDq8ikWAM";
+      const body = req.body ?? {};
+      const text = body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 2000)}`;
+      let voiceId = body.voiceId || "21m00Tcm4TlvDq8ikWAM";
       if (briefing.authorAgentId) {
         const agent = await storage.getAgent(briefing.authorAgentId);
         if (agent?.elevenLabsVoiceId) voiceId = agent.elevenLabsVoiceId;
@@ -1159,9 +1233,10 @@ Respond with ONLY valid JSON in this exact format:
       const apiKey = process.env.HEYGEN_API_KEY;
       if (!apiKey) return res.status(500).json({ message: "HeyGen API key not configured" });
 
-      const text = req.body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 1500)}`;
-      let avatarId = req.body.avatarId || "Kristin_pubblic_2_20240108";
-      let voiceIdForVideo = req.body.voiceId || "1bd001e7e50f421d891986aad5e3f8d2";
+      const vBody = req.body ?? {};
+      const text = vBody.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 1500)}`;
+      let avatarId = vBody.avatarId || "Kristin_pubblic_2_20240108";
+      let voiceIdForVideo = vBody.voiceId || "1bd001e7e50f421d891986aad5e3f8d2";
       if (briefing.authorAgentId) {
         const agent = await storage.getAgent(briefing.authorAgentId);
         if (agent?.heygenAvatarId) avatarId = agent.heygenAvatarId;
@@ -1721,6 +1796,162 @@ Stay in character as this specific agent. Be conversational and natural, like a 
       } else {
         res.status(500).json({ message: "Failed to chat with agent" });
       }
+    }
+  });
+
+  // === Discussion Topics & Message Boards ===
+  
+  app.get("/api/workspaces/:workspaceId/topics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { workspaceId } = req.params;
+      const access = await checkWorkspaceAccess(userId, workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const topics = await storage.getTopicsByWorkspace(workspaceId);
+      res.json(topics);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch topics" });
+    }
+  });
+
+  app.post("/api/workspaces/:workspaceId/topics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { workspaceId } = req.params;
+      const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const schema = z.object({
+        title: z.string().min(1).max(200),
+        body: z.string().optional(),
+        authorAgentId: z.string().optional().nullable(),
+      });
+      const validation = schema.safeParse(req.body);
+      if (!validation.success) return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+
+      const topic = await storage.createTopic({
+        workspaceId,
+        title: validation.data.title,
+        body: validation.data.body || null,
+        authorId: userId,
+        authorAgentId: validation.data.authorAgentId || null,
+      });
+      res.status(201).json(topic);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create topic" });
+    }
+  });
+
+  app.patch("/api/topics/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const topic = await storage.getTopic(req.params.id);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      const memberAccess = await checkWorkspaceAccess(userId, topic.workspaceId);
+      if (!memberAccess.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const adminAccess = await checkWorkspaceAccess(userId, topic.workspaceId, ["owner", "admin"]);
+      if (!adminAccess.hasAccess && topic.authorId !== userId) return res.status(403).json({ message: "Access denied" });
+
+      const schema = z.object({
+        title: z.string().min(1).max(200).optional(),
+        body: z.string().optional().nullable(),
+        isPinned: z.boolean().optional(),
+        isClosed: z.boolean().optional(),
+      });
+      const validation = schema.safeParse(req.body);
+      if (!validation.success) return res.status(400).json({ message: "Validation error" });
+
+      const updated = await storage.updateTopic(req.params.id, validation.data);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update topic" });
+    }
+  });
+
+  app.delete("/api/topics/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const topic = await storage.getTopic(req.params.id);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      const memberAccess = await checkWorkspaceAccess(userId, topic.workspaceId);
+      if (!memberAccess.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const adminAccess = await checkWorkspaceAccess(userId, topic.workspaceId, ["owner", "admin"]);
+      if (!adminAccess.hasAccess && topic.authorId !== userId) return res.status(403).json({ message: "Access denied" });
+      await storage.deleteTopic(req.params.id);
+      res.json({ message: "Topic deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete topic" });
+    }
+  });
+
+  app.get("/api/topics/:topicId/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const topic = await storage.getTopic(req.params.topicId);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      const access = await checkWorkspaceAccess(userId, topic.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const messages = await storage.getMessagesByTopic(req.params.topicId);
+      res.json(messages);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/topics/:topicId/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const topic = await storage.getTopic(req.params.topicId);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      if (topic.isClosed) return res.status(400).json({ message: "Topic is closed" });
+      const access = await checkWorkspaceAccess(userId, topic.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      const schema = z.object({
+        content: z.string().min(1),
+        authorAgentId: z.string().optional().nullable(),
+      });
+      const validation = schema.safeParse(req.body);
+      if (!validation.success) return res.status(400).json({ message: "Validation error" });
+
+      const message = await storage.createMessage({
+        topicId: req.params.topicId,
+        content: validation.data.content,
+        authorId: userId,
+        authorAgentId: validation.data.authorAgentId || null,
+      });
+      res.status(201).json(message);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create message" });
+    }
+  });
+
+  app.delete("/api/messages/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteMessage(req.params.id);
+      res.json({ message: "Message deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete message" });
+    }
+  });
+
+  // GET all topics across all user's workspaces
+  app.get("/api/topics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      const allTopics: any[] = [];
+      for (const ws of workspaces) {
+        const topics = await storage.getTopicsByWorkspace(ws.id);
+        allTopics.push(...topics.map(t => ({ ...t, workspaceName: ws.name })));
+      }
+      allTopics.sort((a, b) => {
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      res.json(allTopics);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch topics" });
     }
   });
 

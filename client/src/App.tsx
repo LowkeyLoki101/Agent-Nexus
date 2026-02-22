@@ -28,6 +28,7 @@ import Products from "@/pages/products";
 import AssemblyLinesPage from "@/pages/assembly-lines";
 import Library from "@/pages/library";
 import Workstation from "@/pages/workstation";
+import Boards from "@/pages/boards";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -76,6 +77,7 @@ function AuthenticatedRouter() {
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
+        <Route path="/boards" component={Boards} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />

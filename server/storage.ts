@@ -38,6 +38,12 @@ import {
   type InsertAgentNote,
   type AgentFileDraft,
   type InsertAgentFileDraft,
+  discussionTopics,
+  discussionMessages,
+  type DiscussionTopic,
+  type InsertDiscussionTopic,
+  type DiscussionMessage,
+  type InsertDiscussionMessage,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
@@ -123,6 +129,15 @@ export interface IStorage {
   createAgentFileDraft(draft: InsertAgentFileDraft): Promise<AgentFileDraft>;
   updateAgentFileDraft(id: string, updates: Partial<InsertAgentFileDraft>): Promise<AgentFileDraft | undefined>;
   deleteAgentFileDraft(id: string): Promise<void>;
+
+  getTopicsByWorkspace(workspaceId: string): Promise<DiscussionTopic[]>;
+  getTopic(id: string): Promise<DiscussionTopic | undefined>;
+  createTopic(data: InsertDiscussionTopic): Promise<DiscussionTopic>;
+  updateTopic(id: string, data: Partial<InsertDiscussionTopic>): Promise<DiscussionTopic | undefined>;
+  deleteTopic(id: string): Promise<void>;
+  getMessagesByTopic(topicId: string): Promise<DiscussionMessage[]>;
+  createMessage(data: InsertDiscussionMessage): Promise<DiscussionMessage>;
+  deleteMessage(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -507,6 +522,42 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAgentFileDraft(id: string): Promise<void> {
     await db.delete(agentFileDrafts).where(eq(agentFileDrafts.id, id));
+  }
+
+  async getTopicsByWorkspace(workspaceId: string): Promise<DiscussionTopic[]> {
+    return db.select().from(discussionTopics).where(eq(discussionTopics.workspaceId, workspaceId)).orderBy(desc(discussionTopics.isPinned), desc(discussionTopics.createdAt));
+  }
+
+  async getTopic(id: string): Promise<DiscussionTopic | undefined> {
+    const [topic] = await db.select().from(discussionTopics).where(eq(discussionTopics.id, id));
+    return topic;
+  }
+
+  async createTopic(data: InsertDiscussionTopic): Promise<DiscussionTopic> {
+    const [topic] = await db.insert(discussionTopics).values(data).returning();
+    return topic;
+  }
+
+  async updateTopic(id: string, data: Partial<InsertDiscussionTopic>): Promise<DiscussionTopic | undefined> {
+    const [topic] = await db.update(discussionTopics).set({ ...data, updatedAt: new Date() }).where(eq(discussionTopics.id, id)).returning();
+    return topic;
+  }
+
+  async deleteTopic(id: string): Promise<void> {
+    await db.delete(discussionTopics).where(eq(discussionTopics.id, id));
+  }
+
+  async getMessagesByTopic(topicId: string): Promise<DiscussionMessage[]> {
+    return db.select().from(discussionMessages).where(eq(discussionMessages.topicId, topicId)).orderBy(asc(discussionMessages.createdAt));
+  }
+
+  async createMessage(data: InsertDiscussionMessage): Promise<DiscussionMessage> {
+    const [message] = await db.insert(discussionMessages).values(data).returning();
+    return message;
+  }
+
+  async deleteMessage(id: string): Promise<void> {
+    await db.delete(discussionMessages).where(eq(discussionMessages.id, id));
   }
 }
 

@@ -25,6 +25,7 @@ import {
   Bot,
   Loader2,
   ChevronRight,
+  SkipForward,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useRef, useEffect } from "react";
@@ -322,6 +323,119 @@ function TickerBar({ briefings }: { briefings: Briefing[] }) {
   );
 }
 
+function AutoplayQueue({ briefings }: { briefings: Briefing[] }) {
+  const audioQueue = briefings.filter(b => b.audioUrl);
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  const currentTrack = currentIndex >= 0 ? audioQueue[currentIndex] : null;
+
+  const playQueue = () => {
+    if (audioQueue.length === 0) return;
+    if (currentIndex < 0) {
+      setCurrentIndex(0);
+    }
+    setIsPlaying(true);
+  };
+
+  const skipForward = () => {
+    if (currentIndex < audioQueue.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+      setIsPlaying(true);
+    } else {
+      setCurrentIndex(-1);
+      setIsPlaying(false);
+      setProgress(0);
+    }
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      if (currentIndex < 0 && audioQueue.length > 0) {
+        setCurrentIndex(0);
+      }
+      setIsPlaying(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!audioRef.current || !currentTrack) return;
+    audioRef.current.src = currentTrack.audioUrl!;
+    if (isPlaying) {
+      audioRef.current.play().catch(() => setIsPlaying(false));
+    }
+  }, [currentIndex, currentTrack?.id]);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.play().catch(() => setIsPlaying(false));
+    } else {
+      audioRef.current.pause();
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const updateProgress = () => {
+      if (audio.duration) setProgress((audio.currentTime / audio.duration) * 100);
+    };
+    audio.addEventListener("timeupdate", updateProgress);
+    return () => audio.removeEventListener("timeupdate", updateProgress);
+  }, []);
+
+  if (audioQueue.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden" data-testid="panel-autoplay-queue">
+      <div className="flex items-center gap-3 p-3">
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant={isPlaying ? "default" : "outline"} className="h-8 w-8 p-0" onClick={togglePlay} data-testid="button-autoplay-toggle">
+            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={skipForward} disabled={currentIndex < 0} data-testid="button-autoplay-skip">
+            <SkipForward className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 min-w-0">
+          {currentTrack ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Radio className="h-3 w-3 text-red-500 animate-pulse shrink-0" />
+                <span className="text-sm font-medium truncate">{currentTrack.title}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{currentIndex + 1}/{audioQueue.length}</span>
+              </div>
+              <div className="h-1 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Volume2 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">{audioQueue.length} broadcasts ready to play</span>
+              <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={playQueue} data-testid="button-play-all">Play All</Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <audio
+        ref={audioRef}
+        onEnded={skipForward}
+        data-testid="audio-autoplay"
+      />
+    </div>
+  );
+}
+
 export default function Briefings() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -384,6 +498,8 @@ export default function Briefings() {
           {hero && <HeroBroadcast briefing={hero} />}
 
           <TickerBar briefings={published.slice(0, 8)} />
+
+          <AutoplayQueue briefings={published} />
 
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
             <div className="relative flex-1 max-w-sm">

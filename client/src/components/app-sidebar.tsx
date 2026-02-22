@@ -37,6 +37,7 @@ import {
   BookOpen,
   Wrench,
   Newspaper,
+  MessageCircle,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -84,6 +85,11 @@ const mainNavItems = [
     title: "Newsroom",
     url: "/briefings",
     icon: Newspaper,
+  },
+  {
+    title: "Message Boards",
+    url: "/boards",
+    icon: MessageCircle,
   },
   {
     title: "API Tokens",

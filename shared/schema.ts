@@ -373,6 +373,54 @@ export const insertBriefingSchema = createInsertSchema(briefings).omit({
   updatedAt: true,
 });
 
+export const discussionTopics = pgTable("discussion_topics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body"),
+  authorId: varchar("author_id").notNull(),
+  authorAgentId: varchar("author_agent_id").references(() => agents.id),
+  isPinned: boolean("is_pinned").default(false),
+  isClosed: boolean("is_closed").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const discussionTopicRelations = relations(discussionTopics, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [discussionTopics.workspaceId],
+    references: [workspaces.id],
+  }),
+  messages: many(discussionMessages),
+}));
+
+export const discussionMessages = pgTable("discussion_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  topicId: varchar("topic_id").notNull().references(() => discussionTopics.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  authorId: varchar("author_id").notNull(),
+  authorAgentId: varchar("author_agent_id").references(() => agents.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const discussionMessageRelations = relations(discussionMessages, ({ one }) => ({
+  topic: one(discussionTopics, {
+    fields: [discussionMessages.topicId],
+    references: [discussionTopics.id],
+  }),
+}));
+
+export const insertDiscussionTopicSchema = createInsertSchema(discussionTopics).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDiscussionMessageSchema = createInsertSchema(discussionMessages).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertAgentNoteSchema = createInsertSchema(agentNotes).omit({
   id: true,
   createdAt: true,
@@ -402,3 +450,7 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type Briefing = typeof briefings.$inferSelect;
 export type InsertBriefing = z.infer<typeof insertBriefingSchema>;
+export type DiscussionTopic = typeof discussionTopics.$inferSelect;
+export type InsertDiscussionTopic = z.infer<typeof insertDiscussionTopicSchema>;
+export type DiscussionMessage = typeof discussionMessages.$inferSelect;
+export type InsertDiscussionMessage = z.infer<typeof insertDiscussionMessageSchema>;
