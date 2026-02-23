@@ -8,8 +8,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Package, CheckCircle2, Clock, Loader2, AlertCircle,
   Factory, Eye, Search, Play, PlayCircle, ChevronDown, ChevronUp,
-  Zap,
+  Zap, Copy, Download, FileText, FileType,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -82,6 +88,45 @@ function StepsList({ assemblyLineId }: { assemblyLineId: string }) {
       })}
     </div>
   );
+}
+
+function copyToClipboard(text: string, toast: any) {
+  navigator.clipboard.writeText(text).then(() => {
+    toast({ title: "Copied to clipboard", description: "Product output has been copied." });
+  }).catch(() => {
+    toast({ title: "Copy failed", variant: "destructive" });
+  });
+}
+
+function saveAsText(content: string, filename: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filename}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveAsPdf(content: string, title: string) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF();
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(title, 20, 20);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  const lines = doc.splitTextToSize(content, 170);
+  let y = 35;
+  for (const line of lines) {
+    if (y > 280) {
+      doc.addPage();
+      y = 20;
+    }
+    doc.text(line, 20, y);
+    y += 5;
+  }
+  doc.save(`${title.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`);
 }
 
 function ProductCard({ product, assemblyLines }: { product: Product; assemblyLines: AssemblyLine[] }) {
@@ -158,15 +203,56 @@ function ProductCard({ product, assemblyLines }: { product: Product; assemblyLin
           <div className="rounded-md bg-green-500/5 border border-green-500/20 p-2">
             <div className="flex items-center justify-between mb-1">
               <p className="text-[10px] font-medium uppercase tracking-wider text-green-600">Final Output</p>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-5 px-1 text-[10px]"
-                onClick={() => setExpanded(!expanded)}
-                data-testid={`button-expand-output-${product.id}`}
-              >
-                {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-[10px] gap-1"
+                  onClick={() => copyToClipboard(product.finalOutput!, toast)}
+                  data-testid={`button-copy-output-${product.id}`}
+                >
+                  <Copy className="h-3 w-3" />
+                  Copy
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1.5 text-[10px] gap-1"
+                      data-testid={`button-save-output-${product.id}`}
+                    >
+                      <Download className="h-3 w-3" />
+                      Save
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => saveAsText(product.finalOutput!, product.name)}
+                      data-testid={`button-save-txt-${product.id}`}
+                    >
+                      <FileText className="h-3.5 w-3.5 mr-2" />
+                      Save as .txt
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => saveAsPdf(product.finalOutput!, product.name)}
+                      data-testid={`button-save-pdf-${product.id}`}
+                    >
+                      <FileType className="h-3.5 w-3.5 mr-2" />
+                      Save as .pdf
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1 text-[10px]"
+                  onClick={() => setExpanded(!expanded)}
+                  data-testid={`button-expand-output-${product.id}`}
+                >
+                  {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </Button>
+              </div>
             </div>
             <p className="text-xs whitespace-pre-wrap">
               {expanded ? product.finalOutput : product.finalOutput.slice(0, 300) + (product.finalOutput.length > 300 ? "..." : "")}
