@@ -34,6 +34,7 @@ import NotFound from "@/pages/not-found";
 import ForgotPassword from "@/pages/forgot-password";
 import Subscribe from "@/pages/subscribe";
 import Admin from "@/pages/admin";
+import { SubscriptionBanner } from "@/components/subscription-banner";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const style = {
@@ -53,6 +54,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
           <main className="flex-1 overflow-auto p-6">
             {children}
           </main>
+          <SubscriptionBanner />
         </div>
       </div>
     </SidebarProvider>
@@ -139,10 +141,6 @@ function AppContent() {
         </div>
       </div>
     );
-  }
-
-  if (profile && !profile.isAdmin && profile.subscriptionStatus !== "active") {
-    return <Subscribe />;
   }
 
   return <AuthenticatedRouter />;

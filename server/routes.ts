@@ -364,23 +364,10 @@ export async function registerRoutes(
     }
   });
 
-  app.use("/api/workspaces", isAuthenticated, isSubscribed);
-  app.use("/api/agents", isAuthenticated, isSubscribed);
-  app.use("/api/gifts", isAuthenticated, isSubscribed);
-  app.use("/api/products", isAuthenticated, isSubscribed);
-  app.use("/api/assembly-lines", isAuthenticated, isSubscribed);
-  app.use("/api/assembly-line-steps", isAuthenticated, isSubscribed);
-  app.use("/api/briefings", isAuthenticated, isSubscribed);
-  app.use("/api/topics", isAuthenticated, isSubscribed);
-  app.use("/api/tokens", isAuthenticated, isSubscribed);
-  app.use("/api/audit-logs", isAuthenticated, isSubscribed);
-  app.use("/api/library", isAuthenticated, isSubscribed);
-  app.use("/api/agent-notes", isAuthenticated, isSubscribed);
-  app.use("/api/agent-drafts", isAuthenticated, isSubscribed);
-  app.use("/api/command-chat", isAuthenticated, isSubscribed);
-  app.use("/api/factory", isAuthenticated, isSubscribed);
+  // Note: isSubscribed middleware is available but not enforced as a blocker.
+  // The app is fully accessible; subscription prompts appear inline.
 
-  app.get("/api/workspaces", async (req: any, res) => {
+  app.get("/api/workspaces", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const workspaces = await storage.getWorkspacesByUser(userId);

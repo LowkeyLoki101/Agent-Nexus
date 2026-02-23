@@ -87,7 +87,7 @@ Authentication is handled through `server/replit_integrations/auth/` with user u
 - **Plan**: Creative Intelligence Pro — $9/month (price_1T3okiPo0Kn2QjErPumcuzCP)
 - **Coupon**: FOUNDING2026 (100% off forever, max 50 uses)
 - **Stripe Integration**: stripe-replit-sync for automatic webhook handling, schema management, and data sync
-- **Paywall**: Client-side gate in `App.tsx` + server-side `isSubscribed` middleware on all content API routes
+- **Paywall**: Non-blocking inline `SubscriptionBanner` at bottom of layout for non-subscribed users (app remains fully accessible). `isSubscribed` middleware available but not enforced.
 - **Admin Bypass**: Admin users (isAdmin=true) bypass the paywall. Admin emails auto-assigned in auth upsert
 - **Admin Emails**: emergent.intel@gmail.com, colby@emergerind.com
 - **Checkout Flow**: `/api/stripe/create-checkout` → Stripe Checkout → webhook syncs subscription → `/api/stripe/sync-subscription` on return
