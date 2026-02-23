@@ -30,6 +30,7 @@ import Library from "@/pages/library";
 import Workstation from "@/pages/workstation";
 import Boards from "@/pages/boards";
 import NotFound from "@/pages/not-found";
+import ForgotPassword from "@/pages/forgot-password";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const style = {
@@ -78,6 +79,7 @@ function AuthenticatedRouter() {
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
         <Route path="/boards" component={Boards} />
+        <Route path="/forgot-password" component={ForgotPassword} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />
@@ -101,6 +103,9 @@ function AppContent() {
   }
 
   if (!user) {
+    if (window.location.pathname === "/forgot-password") {
+      return <ForgotPassword />;
+    }
     return <Landing />;
   }
 
