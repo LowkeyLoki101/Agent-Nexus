@@ -12,14 +12,6 @@ import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClie
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
 
-const BROADCAST_MAX_WORDS = 60;
-
-function truncateToWordLimit(text: string, maxWords: number): string {
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length <= maxWords) return text;
-  return words.slice(0, maxWords).join(" ") + ".";
-}
-
 async function generateBriefingAudio(briefingId: string): Promise<string | null> {
   try {
     const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -31,8 +23,7 @@ async function generateBriefingAudio(briefingId: string): Promise<string | null>
     const briefing = await storage.getBriefing(briefingId);
     if (!briefing) return null;
 
-    const rawText = `${briefing.title}. ${briefing.summary || briefing.content}`;
-    const text = truncateToWordLimit(rawText, BROADCAST_MAX_WORDS);
+    const text = briefing.content || `${briefing.title}. ${briefing.summary || ""}`;
 
     let voiceId = "21m00Tcm4TlvDq8ikWAM";
     if (briefing.authorAgentId) {
@@ -47,7 +38,7 @@ async function generateBriefingAudio(briefingId: string): Promise<string | null>
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        text,
+        text: text.slice(0, 5000),
         model_id: "eleven_monolingual_v1",
         voice_settings: { stability: 0.5, similarity_boost: 0.75 },
       }),

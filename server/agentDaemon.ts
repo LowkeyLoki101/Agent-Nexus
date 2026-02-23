@@ -175,20 +175,48 @@ async function activityReplyBoard(agent: Agent, workspace: Workspace): Promise<s
 
 async function activityCreateBriefing(agent: Agent, workspace: Workspace): Promise<string> {
   const agentContext = await getAgentContext(agent, workspace);
-  const recentGifts = await storage.getRecentGifts(5);
+  const recentGifts = await storage.getRecentGifts(10);
   const topics = await storage.getTopicsByWorkspace(workspace.id);
+  const allAgents = await storage.getAgents();
+  const workspaces = await storage.getWorkspaces();
+
+  const agentNames = allAgents.filter(a => a.isActive).map(a => a.name);
+  const deptNames = workspaces.map(w => w.name);
 
   const factoryUpdate = recentGifts.length > 0
-    ? `Recent factory activity: ${recentGifts.map(g => `"${g.title}" by agent ${g.agentId}`).join("; ")}`
+    ? `Recent factory activity:\n${recentGifts.slice(0, 8).map(g => {
+        const creator = allAgents.find(a => a.id === g.agentId);
+        return `- "${g.title}" (${g.type}) by ${creator?.name || "unknown agent"}`;
+      }).join("\n")}`
     : "The factory is warming up with new agents coming online.";
 
   const topicUpdate = topics.length > 0
-    ? `Active discussions: ${topics.slice(0, 3).map(t => t.title).join("; ")}`
+    ? `Active discussions:\n${topics.slice(0, 5).map(t => `- "${t.title}"`).join("\n")}`
     : "";
 
-  const systemPrompt = `${agentContext}\n\nYou are writing a newsroom briefing for the Creative Intelligence platform. This is a bulletin that all agents and humans will see.\n\n${factoryUpdate}\n${topicUpdate}\n\nRespond with JSON only: {"title": "...", "content": "the full briefing article (3-5 paragraphs, informative and engaging)", "summary": "one-sentence summary", "tags": ["tag1", "tag2"], "priority": "low|medium|high"}`;
+  const systemPrompt = `${agentContext}
 
-  const raw = await generateContent(systemPrompt, "Write a newsroom briefing about current factory activity, insights, or strategic updates. Make it feel like a real internal newsletter.", 2000);
+You are recording a SPOKEN NEWS BROADCAST for the Emergent team — like an internal radio show or podcast segment. You are the host. Your tone is conversational, warm, witty, and engaging — like a real radio host who knows everyone on the team personally.
+
+CRITICAL FORMAT RULES:
+- Write it as a SPOKEN script — the way someone would actually talk on a radio broadcast
+- Open with a greeting: "Hello Emergent team, ${agent.name} here." then introduce today's topic
+- Reference OTHER AGENTS BY NAME and what they're working on or saying — quote or paraphrase their contributions
+- Use analogies, humor, and relatable comparisons to make technical topics accessible (e.g. "Think of it like doing the dishes — you tackle the messiest pots first")
+- Organize into natural spoken paragraphs (5-8 paragraphs)
+- Close with a call-to-action or forward-looking sign-off
+- Target length: 200-300 words (about 1.5-2 minutes when read aloud)
+- DO NOT use markdown, bullet points, or headers — this is pure spoken word
+
+Active agents on the team: ${agentNames.join(", ")}
+Departments: ${deptNames.join(", ")}
+
+${factoryUpdate}
+${topicUpdate}
+
+Respond with JSON only: {"title": "short catchy broadcast title", "content": "THE FULL SPOKEN BROADCAST SCRIPT (200-300 words, conversational radio-host style)", "summary": "one-sentence summary of the broadcast", "tags": ["tag1", "tag2"], "priority": "low|medium|high"}`;
+
+  const raw = await generateContent(systemPrompt, "Write your news broadcast. Remember: speak directly to the team, reference agents by name, use analogies and humor, and keep it feeling like a real radio segment.", 3000);
 
   let parsed: { title: string; content: string; summary: string; tags: string[]; priority: string };
   try {

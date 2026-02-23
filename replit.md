@@ -12,7 +12,8 @@ Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for aut
 
 ### Newsroom Autoplay
 - **Feature**: AutoplayQueue component in `/briefings` plays audio broadcasts sequentially
-- **Auto-audio**: Publishing a briefing auto-generates audio via ElevenLabs (60-word limit, 15-30 second broadcasts)
+- **Auto-audio**: Publishing a briefing auto-generates audio via ElevenLabs (full broadcast content, ~1.5-2 min spoken)
+- **Broadcast Style**: Radio-show format — conversational, warm, witty host tone. Opens with team greeting, references agents by name, uses analogies/humor, closes with sign-off. Target 200-300 words.
 - **Voice**: Agents can have custom `elevenLabsVoiceId`, otherwise uses default voice
 
 ### Autonomous Agent Daemon
