@@ -21,16 +21,38 @@ import { ArrowLeft, Bot, X, Video, Mic } from "lucide-react";
 import { Link } from "wouter";
 import type { Workspace } from "@shared/schema";
 
-const CAPABILITY_OPTIONS = [
-  "read",
-  "write",
-  "execute",
-  "publish",
-  "research",
-  "analyze",
-  "communicate",
-  "manage_tokens",
+const CAPABILITY_CATALOG: { id: string; label: string; description: string; examples: string }[] = [
+  { id: "read", label: "Read", description: "Access and process documents, files, and data sources", examples: "PDFs, databases, web pages, APIs" },
+  { id: "write", label: "Write", description: "Create and edit text content, documents, and reports", examples: "Articles, summaries, emails, proposals" },
+  { id: "execute", label: "Execute", description: "Run code, scripts, and automated workflows", examples: "Python scripts, shell commands, CI/CD pipelines" },
+  { id: "publish", label: "Publish", description: "Push content live to websites, channels, or feeds", examples: "Blog posts, social media, newsletters, briefings" },
+  { id: "research", label: "Research", description: "Find, gather, and synthesize information from sources", examples: "Market research, literature reviews, competitive analysis" },
+  { id: "analyze", label: "Analyze", description: "Break down data, identify patterns, and draw insights", examples: "Data analysis, trend detection, sentiment analysis" },
+  { id: "communicate", label: "Communicate", description: "Engage with humans and other agents through conversation", examples: "Meetings, updates, Q&A, coordination" },
+  { id: "manage_tokens", label: "Manage Tokens", description: "Create and manage API tokens and access credentials", examples: "Token rotation, permission scoping, key management" },
+  { id: "create", label: "Create", description: "Build new artifacts, prototypes, and original work", examples: "Prototypes, mockups, creative pieces, tools" },
+  { id: "design", label: "Design", description: "Visual and UX design for interfaces and experiences", examples: "Wireframes, UI layouts, color schemes, typography" },
+  { id: "investigate", label: "Investigate", description: "Deep-dive into issues, bugs, and complex problems", examples: "Root cause analysis, debugging, forensic review" },
+  { id: "scrape", label: "Scrape", description: "Extract structured data from websites and documents", examples: "Product listings, pricing data, contact info" },
+  { id: "crawl", label: "Crawl", description: "Systematically browse and index web content", examples: "Site mapping, link discovery, content indexing" },
+  { id: "audio", label: "Audio", description: "Process, generate, and edit audio content", examples: "Podcasts, sound effects, audio transcription" },
+  { id: "tts", label: "Text-to-Speech", description: "Convert written text into spoken audio", examples: "Voiceovers, audiobooks, broadcast narration" },
+  { id: "image_generation", label: "Image Generation", description: "Create images from text prompts using AI models", examples: "Illustrations, product mockups, concept art" },
+  { id: "screenshot", label: "Screenshot", description: "Capture visual snapshots of screens and interfaces", examples: "Bug reports, visual documentation, before/after comparisons" },
+  { id: "crop", label: "Crop", description: "Edit and resize images for specific formats", examples: "Thumbnails, social media images, profile pictures" },
+  { id: "produce", label: "Produce", description: "Orchestrate multi-step content production workflows", examples: "Video editing, podcast production, campaign creation" },
+  { id: "compile", label: "Compile", description: "Aggregate and assemble content from multiple sources", examples: "Reports, dashboards, summaries, digests" },
+  { id: "discuss", label: "Discuss", description: "Engage in collaborative discussions and debates", examples: "Brainstorming, peer review, planning sessions" },
+  { id: "content_generation", label: "Content Generation", description: "Generate original content using AI models", examples: "Blog posts, marketing copy, product descriptions" },
+  { id: "code_review", label: "Code Review", description: "Review code for quality, bugs, and best practices", examples: "Pull request reviews, refactoring suggestions, linting" },
+  { id: "testing", label: "Testing", description: "Write and run tests to verify software behavior", examples: "Unit tests, integration tests, load testing" },
+  { id: "strategy", label: "Strategy", description: "Plan long-term goals, roadmaps, and approaches", examples: "Product roadmaps, go-to-market plans, OKRs" },
+  { id: "architecture", label: "Architecture", description: "Design system structures and technical foundations", examples: "System diagrams, API design, database schemas" },
+  { id: "security", label: "Security", description: "Assess and enforce security policies and practices", examples: "Vulnerability scans, access audits, compliance checks" },
+  { id: "critique", label: "Critique", description: "Evaluate work quality and provide constructive feedback", examples: "Design reviews, content editing, quality scoring" },
 ];
+
+const CAPABILITY_OPTIONS = CAPABILITY_CATALOG.map(c => c.id);
 
 export default function AgentNew() {
   const [, setLocation] = useLocation();
@@ -42,6 +64,7 @@ export default function AgentNew() {
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [newCapability, setNewCapability] = useState("");
+  const [customCapInput, setCustomCapInput] = useState("");
   const [heygenAvatarId, setHeygenAvatarId] = useState("");
   const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState("");
 
@@ -181,33 +204,68 @@ export default function AgentNew() {
 
             <div className="space-y-4">
               <Label>Capabilities</Label>
+              <p className="text-xs text-muted-foreground -mt-2">Choose from the list or type your own. Each capability defines what this agent can do.</p>
               <div className="flex flex-wrap gap-2 mb-2">
-                {capabilities.map((cap) => (
-                  <Badge key={cap} variant="secondary" className="gap-1 pr-1">
-                    {cap}
-                    <button
-                      type="button"
-                      onClick={() => removeCapability(cap)}
-                      className="ml-1 hover:bg-muted rounded-full p-0.5"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
+                {capabilities.map((cap) => {
+                  const info = CAPABILITY_CATALOG.find(c => c.id === cap);
+                  return (
+                    <Badge key={cap} variant="secondary" className="gap-1 pr-1" title={info ? `${info.description} (e.g. ${info.examples})` : cap}>
+                      {info?.label || cap}
+                      <button
+                        type="button"
+                        onClick={() => removeCapability(cap)}
+                        className="ml-1 hover:bg-muted rounded-full p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  );
+                })}
               </div>
               <div className="flex gap-2">
                 <Select value={newCapability} onValueChange={(value) => addCapability(value)}>
                   <SelectTrigger className="flex-1" data-testid="select-capability">
-                    <SelectValue placeholder="Add capability" />
+                    <SelectValue placeholder="Choose from list" />
                   </SelectTrigger>
                   <SelectContent>
-                    {CAPABILITY_OPTIONS.filter((c) => !capabilities.includes(c)).map((cap) => (
-                      <SelectItem key={cap} value={cap}>
-                        {cap}
+                    {CAPABILITY_CATALOG.filter((c) => !capabilities.includes(c.id)).map((cap) => (
+                      <SelectItem key={cap.id} value={cap.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{cap.label}</span>
+                          <span className="text-xs text-muted-foreground">{cap.description}</span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Or type a custom capability..."
+                  value={customCapInput}
+                  onChange={(e) => setCustomCapInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const val = customCapInput.trim().toLowerCase();
+                      if (val) { addCapability(val); setCustomCapInput(""); }
+                    }
+                  }}
+                  data-testid="input-custom-capability"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const val = customCapInput.trim().toLowerCase();
+                    if (val) { addCapability(val); setCustomCapInput(""); }
+                  }}
+                  disabled={!customCapInput.trim()}
+                  data-testid="button-add-capability"
+                >
+                  Add
+                </Button>
               </div>
             </div>
 

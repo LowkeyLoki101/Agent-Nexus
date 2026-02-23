@@ -41,71 +41,141 @@ class WebGLErrorBoundary extends Component<{ children: ReactNode; fallback: Reac
   }
 }
 
-const ROOM_TOOLS: Record<string, { name: string; icon: string; description: string }[]> = {
-  "research-lab": [
+function getToolsForRoom(room: FactoryRoom): { name: string; icon: string; description: string }[] {
+  const lower = room.name.toLowerCase();
+  if (lower.includes("research") || lower.includes("lab")) return [
     { name: "Web Scraper", icon: "search", description: "Scrape and analyze web content" },
     { name: "Data Analyzer", icon: "brain", description: "Process and visualize data sets" },
     { name: "Paper Reader", icon: "file", description: "Parse academic papers and extract insights" },
-  ],
-  "code-workshop": [
+  ];
+  if (lower.includes("code") || lower.includes("dev") || lower.includes("workshop") || lower.includes("ops")) return [
     { name: "Code Generator", icon: "code", description: "Generate code from specifications" },
     { name: "Test Runner", icon: "zap", description: "Execute automated test suites" },
     { name: "PR Reviewer", icon: "search", description: "Review code changes and provide feedback" },
-  ],
-  "design-studio": [
+  ];
+  if (lower.includes("design") || lower.includes("creative") || lower.includes("content")) return [
     { name: "Asset Creator", icon: "palette", description: "Generate visual assets and mockups" },
     { name: "Wireframer", icon: "file", description: "Create wireframes from descriptions" },
     { name: "Style Guide", icon: "palette", description: "Maintain brand consistency" },
-  ],
-  "strategy-room": [
+  ];
+  if (lower.includes("strategy") || lower.includes("critic") || lower.includes("review")) return [
     { name: "Strategy Planner", icon: "brain", description: "Create strategic plans and roadmaps" },
-    { name: "Dependency Mapper", icon: "search", description: "Map and analyze project dependencies" },
     { name: "Risk Assessor", icon: "zap", description: "Evaluate and score project risks" },
-  ],
-  "comms-center": [
+    { name: "Dependency Mapper", icon: "search", description: "Map and analyze project dependencies" },
+  ];
+  if (lower.includes("comms") || lower.includes("forum") || lower.includes("collaboration")) return [
     { name: "Doc Writer", icon: "file", description: "Generate documentation automatically" },
     { name: "Status Reporter", icon: "zap", description: "Create status reports and updates" },
-    { name: "Security Scanner", icon: "search", description: "Scan for security vulnerabilities" },
-  ],
-  "break-room": [
+    { name: "Messenger", icon: "search", description: "Coordinate team communications" },
+  ];
+  if (lower.includes("break")) return [
     { name: "Team Pulse", icon: "brain", description: "Measure team morale and wellness" },
     { name: "Idea Board", icon: "palette", description: "Capture and vote on creative ideas" },
-  ],
-};
+  ];
+  return [
+    { name: "Task Runner", icon: "zap", description: "Execute workspace tasks" },
+    { name: "Analyzer", icon: "brain", description: "Analyze data and reports" },
+    { name: "Reporter", icon: "file", description: "Generate reports and summaries" },
+  ];
+}
 
-const ROOMS: { id: string; name: string; position: [number, number, number]; size: [number, number, number]; color: string; capabilities: string[] }[] = [
-  { id: "research-lab", name: "Research Lab", position: [-8, 0, -6], size: [5, 3, 5], color: "#3B82F6", capabilities: ["research", "analysis"] },
-  { id: "code-workshop", name: "Code Workshop", position: [0, 0, -6], size: [5, 3, 5], color: "#10B981", capabilities: ["code-review", "engineering", "testing"] },
-  { id: "design-studio", name: "Design Studio", position: [8, 0, -6], size: [5, 3, 5], color: "#F97316", capabilities: ["design", "content-creation", "writing"] },
-  { id: "strategy-room", name: "Strategy Room", position: [-8, 0, 4], size: [5, 3, 5], color: "#8B5CF6", capabilities: ["strategy", "architecture"] },
-  { id: "comms-center", name: "Comms Center", position: [0, 0, 4], size: [5, 3, 5], color: "#EC4899", capabilities: ["communication", "security"] },
-  { id: "break-room", name: "Break Room", position: [8, 0, 4], size: [5, 3, 5], color: "#E5A824", capabilities: [] },
+interface FactoryRoom {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  size: [number, number, number];
+  color: string;
+  capabilities: string[];
+}
+
+const ROOM_COLORS = [
+  "#3B82F6", "#10B981", "#F97316", "#8B5CF6", "#EC4899", "#E5A824",
+  "#06B6D4", "#EF4444", "#84CC16", "#A855F7", "#14B8A6", "#F59E0B",
+  "#6366F1", "#D946EF", "#0EA5E9", "#22C55E",
 ];
 
-const ROOM_OBJECTIVES: Record<string, string[]> = {
-  "research-lab": ["Analyzing data patterns", "Researching best practices", "Compiling report", "Reading academic papers", "Running experiments", "Reviewing findings"],
-  "code-workshop": ["Reviewing pull request", "Running test suite", "Refactoring module", "Code optimization", "Debugging issue", "Writing unit tests"],
-  "design-studio": ["Designing new feature", "Creating visual assets", "Sketching wireframes", "Iterating on mockup", "Building prototype", "Polishing UI details"],
-  "strategy-room": ["Drafting strategy brief", "Architecture review", "Planning roadmap", "Evaluating options", "Writing proposal", "Mapping dependencies"],
-  "comms-center": ["Team sync meeting", "Writing documentation", "Security audit", "Coordinating rollout", "Reviewing comms plan", "Sending status update"],
-  "break-room": ["Taking a break", "Resting", "Grabbing coffee", "Stretching", "Casual chat", "Recharging"],
+const DEFAULT_OBJECTIVES = [
+  "Working on project tasks", "Analyzing data", "Preparing deliverables",
+  "Reviewing documents", "Collaborating with team", "Brainstorming ideas",
+];
+
+const BREAK_ROOM: FactoryRoom = {
+  id: "break-room", name: "Break Room", position: [0, 0, 0], size: [5, 3, 5], color: "#E5A824", capabilities: [],
 };
 
 type ActivityAnim = "typing" | "reading" | "painting" | "presenting" | "chatting" | "resting";
-const ROOM_ANIMATION: Record<string, ActivityAnim> = {
-  "research-lab": "reading",
-  "code-workshop": "typing",
-  "design-studio": "painting",
-  "strategy-room": "presenting",
-  "comms-center": "chatting",
-  "break-room": "resting",
-};
 
-function pickObjectiveRoom(agent: Agent): typeof ROOMS[number] {
-  const caps = (agent.capabilities || []).map(c => c.toLowerCase());
-  const matching = ROOMS.filter(r => r.capabilities.some(rc => caps.some(ac => ac.includes(rc))));
-  if (matching.length > 0) return matching[Math.floor(Math.random() * matching.length)];
-  return ROOMS[Math.floor(Math.random() * ROOMS.length)];
+function getAnimationForRoom(name: string): ActivityAnim {
+  const lower = name.toLowerCase();
+  if (lower.includes("research") || lower.includes("lab")) return "reading";
+  if (lower.includes("code") || lower.includes("workshop") || lower.includes("engineer")) return "typing";
+  if (lower.includes("design") || lower.includes("studio") || lower.includes("creative")) return "painting";
+  if (lower.includes("strategy") || lower.includes("command")) return "presenting";
+  if (lower.includes("comms") || lower.includes("forum") || lower.includes("newsroom")) return "chatting";
+  if (lower.includes("break")) return "resting";
+  const anims: ActivityAnim[] = ["typing", "reading", "painting", "presenting", "chatting"];
+  return anims[Math.abs(name.charCodeAt(0)) % anims.length];
+}
+
+function getObjectivesForRoom(name: string): string[] {
+  const lower = name.toLowerCase();
+  if (lower.includes("research") || lower.includes("lab")) return ["Analyzing data patterns", "Researching best practices", "Compiling report", "Reading academic papers", "Running experiments", "Reviewing findings"];
+  if (lower.includes("code") || lower.includes("workshop") || lower.includes("engineer")) return ["Reviewing pull request", "Running test suite", "Refactoring module", "Code optimization", "Debugging issue", "Writing unit tests"];
+  if (lower.includes("design") || lower.includes("studio") || lower.includes("creative")) return ["Designing new feature", "Creating visual assets", "Sketching wireframes", "Iterating on mockup", "Building prototype", "Polishing UI details"];
+  if (lower.includes("strategy") || lower.includes("command")) return ["Drafting strategy brief", "Architecture review", "Planning roadmap", "Evaluating options", "Writing proposal", "Mapping dependencies"];
+  if (lower.includes("comms") || lower.includes("forum") || lower.includes("newsroom")) return ["Team sync meeting", "Writing documentation", "Coordinating rollout", "Reviewing comms plan", "Sending status update", "Preparing broadcast"];
+  if (lower.includes("break")) return ["Taking a break", "Resting", "Grabbing coffee", "Stretching", "Casual chat", "Recharging"];
+  if (lower.includes("critic") || lower.includes("review") || lower.includes("qa")) return ["Peer reviewing work", "Writing critique", "Finding edge cases", "Stress testing ideas", "Challenging assumptions", "Grading output quality"];
+  if (lower.includes("solar") || lower.includes("energy") || lower.includes("hardware")) return ["Running simulations", "Testing prototype", "Measuring efficiency", "Analyzing field data", "Optimizing design", "Writing technical spec"];
+  return ["Working on project tasks", "Preparing deliverables", "Reviewing documents", "Collaborating on goals", "Brainstorming solutions", "Tracking progress"];
+}
+
+function generateRooms(workspaces: Workspace[]): FactoryRoom[] {
+  if (!workspaces || workspaces.length === 0) {
+    return [
+      { id: "default-room", name: "Main Studio", position: [0, 0, -4], size: [5, 3, 5], color: "#3B82F6", capabilities: [] },
+      BREAK_ROOM,
+    ];
+  }
+
+  const cols = Math.ceil(Math.sqrt(workspaces.length + 1));
+  const spacing = 9;
+
+  const rooms: FactoryRoom[] = workspaces.map((ws, i) => {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const x = (col - (cols - 1) / 2) * spacing;
+    const z = (row - Math.floor((workspaces.length / cols) / 2)) * spacing;
+    return {
+      id: ws.id,
+      name: ws.name,
+      position: [x, 0, z] as [number, number, number],
+      size: [5, 3, 5] as [number, number, number],
+      color: ROOM_COLORS[i % ROOM_COLORS.length],
+      capabilities: [],
+    };
+  });
+
+  const lastIdx = rooms.length;
+  const row = Math.floor(lastIdx / cols);
+  const col = lastIdx % cols;
+  const bx = (col - (cols - 1) / 2) * spacing;
+  const bz = (row - Math.floor((workspaces.length / cols) / 2)) * spacing;
+  rooms.push({ ...BREAK_ROOM, position: [bx, 0, bz] });
+
+  return rooms;
+}
+
+function pickObjectiveRoom(agent: Agent, rooms: FactoryRoom[]): FactoryRoom {
+  if (rooms.length === 0) return BREAK_ROOM;
+  const agentWs = agent.workspaceId;
+  if (agentWs) {
+    const homeRoom = rooms.find(r => r.id === agentWs);
+    if (homeRoom && Math.random() < 0.6) return homeRoom;
+  }
+  const nonBreak = rooms.filter(r => r.id !== "break-room");
+  if (nonBreak.length > 0) return nonBreak[Math.floor(Math.random() * nonBreak.length)];
+  return rooms[Math.floor(Math.random() * rooms.length)];
 }
 
 interface AgentSimState {
@@ -332,7 +402,7 @@ function Bookshelf({ position }: { position: [number, number, number] }) {
   );
 }
 
-function Room({ room }: { room: typeof ROOMS[number] }) {
+function Room({ room }: { room: FactoryRoom }) {
   const [px, py, pz] = room.position;
   const [sx, sy, sz] = room.size;
   const baseY = -sy / 2;
@@ -755,24 +825,27 @@ function AgentCharacter({ agent, simState, onSelect, isSelected }: {
   );
 }
 
-function useAgentSimulation(agents: Agent[]) {
+function useAgentSimulation(agents: Agent[], rooms: FactoryRoom[]) {
   const simStates = useRef<Map<string, AgentSimState>>(new Map());
   const [, setTick] = useState(0);
+  const roomsRef = useRef(rooms);
+  roomsRef.current = rooms;
 
   useEffect(() => {
     const existing = simStates.current;
+    const currentRooms = roomsRef.current;
     agents.forEach((agent, idx) => {
       if (!existing.has(agent.id)) {
-        const startRoom = ROOMS[idx % ROOMS.length];
+        const startRoom = currentRooms[idx % currentRooms.length] || BREAK_ROOM;
         const offset = new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2);
         const startPos = new THREE.Vector3(...startRoom.position).add(offset);
         startPos.y = 0;
-        const roomObjs = ROOM_OBJECTIVES[startRoom.id] || ["Getting started"];
+        const roomObjs = getObjectivesForRoom(startRoom.name);
         existing.set(agent.id, {
           agentId: agent.id, currentPos: startPos.clone(), targetPos: startPos.clone(),
           targetRoom: startRoom.name, targetRoomId: startRoom.id, currentRoomId: startRoom.id,
           objective: roomObjs[Math.floor(Math.random() * roomObjs.length)],
-          phase: "working", animation: ROOM_ANIMATION[startRoom.id] || "typing",
+          phase: "working", animation: getAnimationForRoom(startRoom.name),
           phaseTimer: 4 + Math.random() * 8, speed: 1.2 + Math.random() * 1.0,
         });
       }
@@ -782,6 +855,7 @@ function useAgentSimulation(agents: Agent[]) {
   useEffect(() => {
     const interval = setInterval(() => {
       const states = simStates.current;
+      const currentRooms = roomsRef.current;
       const dt = 0.1;
       states.forEach((state, agentId) => {
         const agent = agents.find(a => a.id === agentId);
@@ -793,8 +867,9 @@ function useAgentSimulation(agents: Agent[]) {
           if (dist < 0.3) {
             state.currentPos.copy(state.targetPos);
             state.currentRoomId = state.targetRoomId;
-            state.animation = ROOM_ANIMATION[state.targetRoomId] || "typing";
-            const roomObjs = ROOM_OBJECTIVES[state.targetRoomId] || ["Working"];
+            const targetRoom = currentRooms.find(r => r.id === state.targetRoomId);
+            state.animation = getAnimationForRoom(targetRoom?.name || "");
+            const roomObjs = getObjectivesForRoom(targetRoom?.name || "");
             state.objective = roomObjs[Math.floor(Math.random() * roomObjs.length)];
             state.phase = "working";
             state.phaseTimer = 8 + Math.random() * 14;
@@ -806,7 +881,8 @@ function useAgentSimulation(agents: Agent[]) {
         } else if (state.phase === "working") {
           if (state.phaseTimer <= 0) {
             const shouldRest = Math.random() < 0.2 && state.currentRoomId !== "break-room";
-            const nextRoom = shouldRest ? ROOMS.find(r => r.id === "break-room")! : pickObjectiveRoom(agent);
+            const breakRoom = currentRooms.find(r => r.id === "break-room") || BREAK_ROOM;
+            const nextRoom = shouldRest ? breakRoom : pickObjectiveRoom(agent, currentRooms);
             const roomCenter = new THREE.Vector3(...nextRoom.position);
             const offset = new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5);
             state.targetPos = roomCenter.add(offset);
@@ -892,8 +968,8 @@ function FirstPersonMovement() {
   return null;
 }
 
-function Scene({ agents, selectedAgent, onSelectAgent, simStates, fpvMode }: {
-  agents: Agent[]; selectedAgent: Agent | null; onSelectAgent: (agent: Agent | null) => void; simStates: Map<string, AgentSimState>; fpvMode: boolean;
+function Scene({ agents, selectedAgent, onSelectAgent, simStates, fpvMode, rooms }: {
+  agents: Agent[]; selectedAgent: Agent | null; onSelectAgent: (agent: Agent | null) => void; simStates: Map<string, AgentSimState>; fpvMode: boolean; rooms: FactoryRoom[];
 }) {
   return (
     <>
@@ -901,10 +977,10 @@ function Scene({ agents, selectedAgent, onSelectAgent, simStates, fpvMode }: {
       <directionalLight position={[15, 20, 10]} intensity={0.5} castShadow />
       <directionalLight position={[-10, 15, -5]} intensity={0.2} />
       <hemisphereLight color="#1a1a3e" groundColor="#0a0a1a" intensity={0.3} />
-      <fog attach="fog" args={["#0a0a1a", 20, 45]} />
+      <fog attach="fog" args={["#0a0a1a", 20, 55]} />
       <FactoryEnvironment />
       <FactorySign />
-      {ROOMS.map(room => <Room key={room.id} room={room} />)}
+      {rooms.map(room => <Room key={room.id} room={room} />)}
       {agents.map((agent) => {
         const sim = simStates.get(agent.id);
         if (!sim) return null;
@@ -916,7 +992,7 @@ function Scene({ agents, selectedAgent, onSelectAgent, simStates, fpvMode }: {
           <FirstPersonMovement />
         </>
       ) : (
-        <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={5} maxDistance={35} maxPolarAngle={Math.PI * 0.45} minPolarAngle={Math.PI * 0.1} target={[0, 1, 0]} />
+        <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={5} maxDistance={50} maxPolarAngle={Math.PI * 0.45} minPolarAngle={Math.PI * 0.1} target={[0, 1, 0]} />
       )}
     </>
   );
@@ -1113,14 +1189,14 @@ function FactoryControlsBar({ agents, tokens, workspaces, simStates }: {
 }
 
 function RoomDetailPanel({ room, agents, simStates, onClose, onAssignAgent }: {
-  room: typeof ROOMS[number]; agents: Agent[]; simStates: Map<string, AgentSimState>;
+  room: FactoryRoom; agents: Agent[]; simStates: Map<string, AgentSimState>;
   onClose: () => void; onAssignAgent?: (agentId: string, toolName: string) => void;
 }) {
   const roomAgents = agents.filter(a => {
     const sim = simStates.get(a.id);
     return sim && sim.currentRoomId === room.id && sim.phase === "working";
   });
-  const tools = ROOM_TOOLS[room.id] || [];
+  const tools = getToolsForRoom(room);
 
   return (
     <Card className="border-2" style={{ borderColor: room.color + "50" }} data-testid={`panel-room-detail-${room.id}`}>
@@ -1583,7 +1659,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
         body: JSON.stringify({
           message: msg,
           history: chatMessages,
-          factoryContext: `${agents.length} agents, ${workspaces.length} departments, ${ROOMS.length} rooms`,
+          factoryContext: `${agents.length} agents, ${workspaces.length} departments`,
           uploadedFiles: uploadedFiles.map(f => ({ name: f.name, type: f.type, size: f.size, preview: f.preview })),
         }),
       });
@@ -1853,8 +1929,8 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
     setIsStreaming(true);
     const isWalking = simState?.phase === "walking";
     const currentRoom = simState
-      ? isWalking ? ROOMS.find(r => r.id === simState.targetRoomId)?.name || "the factory"
-        : ROOMS.find(r => r.id === simState.currentRoomId)?.name || "the factory"
+      ? isWalking ? simState.targetRoom || "the factory"
+        : simState.targetRoom || "the factory"
       : "the factory";
     const currentObjective = simState?.objective || "general tasks";
     const currentActivity = simState?.animation === "resting" ? "resting" : isWalking ? "walking" : "working";
@@ -1933,7 +2009,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className={`h-1.5 w-1.5 rounded-full ${simState.phase === "working" ? "bg-green-500 animate-pulse" : simState.phase === "walking" ? "bg-amber-500 animate-pulse" : "bg-gray-400"}`} />
               {simState.phase === "walking" && "In transit (cooldown)"}
-              {simState.phase === "working" && <span>In {ROOMS.find(r => r.id === simState.currentRoomId)?.name || "room"}</span>}
+              {simState.phase === "working" && <span>In {simState.targetRoom || "room"}</span>}
               {simState.phase === "idle" && "Selecting next objective"}
             </div>
           </div>
@@ -2026,7 +2102,7 @@ export default function AgentWorld() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fpvMode, setFpvMode] = useState(false);
-  const [selectedRoom, setSelectedRoom] = useState<typeof ROOMS[number] | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<FactoryRoom | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("factory-onboarded");
   });
@@ -2037,7 +2113,8 @@ export default function AgentWorld() {
   const { data: tokens } = useQuery<ApiToken[]>({ queryKey: ["/api/tokens"] });
 
   const agentList = agents || [];
-  const simStates = useAgentSimulation(agentList);
+  const factoryRooms = useMemo(() => generateRooms(workspaces || []), [workspaces]);
+  const simStates = useAgentSimulation(agentList, factoryRooms);
 
   const handleSelectAgent = useCallback((agent: Agent | null) => { setSelectedAgent(agent); }, []);
 
@@ -2115,7 +2192,7 @@ export default function AgentWorld() {
           {detectWebGL() ? (
             <Canvas camera={{ position: [18, 14, 18], fov: 50, near: 0.1, far: 100 }} style={{ background: "#0a0a1a" }} dpr={[1, 2]} shadows>
               <Suspense fallback={null}>
-                <Scene agents={agentList} selectedAgent={selectedAgent} onSelectAgent={handleSelectAgent} simStates={simStates} fpvMode={fpvMode} />
+                <Scene agents={agentList} selectedAgent={selectedAgent} onSelectAgent={handleSelectAgent} simStates={simStates} fpvMode={fpvMode} rooms={factoryRooms} />
               </Suspense>
             </Canvas>
           ) : (
@@ -2151,7 +2228,7 @@ export default function AgentWorld() {
         <div className="rounded-lg border border-border bg-card p-3" data-testid="panel-room-legend">
           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Departments</p>
           <div className="space-y-1">
-            {ROOMS.map(room => (
+            {factoryRooms.map(room => (
               <button
                 key={room.id}
                 className="flex items-center gap-2 w-full text-left hover:bg-muted rounded px-1 py-0.5 transition-colors"
