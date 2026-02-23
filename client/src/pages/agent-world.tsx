@@ -2063,13 +2063,6 @@ export default function AgentWorld() {
 
       <NewsBroadcastBanner briefings={briefings || []} />
 
-      <FactoryControlsBar
-        agents={agentList}
-        tokens={tokens || []}
-        workspaces={workspaces || []}
-        simStates={simStates}
-      />
-
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold" data-testid="text-agent-world-title">Agent Factory</h2>
@@ -2146,6 +2139,13 @@ export default function AgentWorld() {
           </div>
         )}
       </div>
+
+      <FactoryControlsBar
+        agents={agentList}
+        tokens={tokens || []}
+        workspaces={workspaces || []}
+        simStates={simStates}
+      />
 
       <div className="grid grid-cols-2 gap-3 mt-3">
         <div className="rounded-lg border border-border bg-card p-3" data-testid="panel-room-legend">
