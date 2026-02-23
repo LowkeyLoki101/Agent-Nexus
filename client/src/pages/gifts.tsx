@@ -129,8 +129,40 @@ function GiftCommentsPanel({ giftId, onClose }: { giftId: string; onClose: () =>
   );
 }
 
+function HtmlViewer({ gift }: { gift: Gift }) {
+  const content = gift.content || "";
+  const isHtml = /<[a-z][\s\S]*>/i.test(content);
+  const srcDoc = isHtml
+    ? content
+    : `<!DOCTYPE html><html><head><style>body{font-family:system-ui,sans-serif;padding:24px;color:#e0e0e0;background:#1a1a2e;line-height:1.6;max-width:800px;margin:0 auto}pre{white-space:pre-wrap;word-break:break-word;background:#0d0d1a;padding:16px;border-radius:8px;font-size:13px}</style></head><body><pre>${content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
+
+  return (
+    <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Eye className="h-5 w-5 text-amber-500" />
+          {gift.title}
+        </DialogTitle>
+        <DialogDescription className="text-xs text-muted-foreground">
+          Sandboxed HTML viewer — content is isolated for security
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex-1 min-h-0 rounded-lg overflow-hidden border border-border/50">
+        <iframe
+          srcDoc={srcDoc}
+          sandbox="allow-scripts"
+          className="w-full h-[60vh] bg-white dark:bg-zinc-900 border-0"
+          title={`Gift: ${gift.title}`}
+          data-testid={`iframe-gift-viewer-${gift.id}`}
+        />
+      </div>
+    </DialogContent>
+  );
+}
+
 function GiftCard({ gift, agents }: { gift: Gift; agents: Agent[] }) {
   const [showComments, setShowComments] = useState(false);
+  const [showHtml, setShowHtml] = useState(false);
   const { toast } = useToast();
   const typeConfig = TYPE_CONFIG[gift.type] || TYPE_CONFIG.other;
   const TypeIcon = typeConfig.icon;
@@ -223,16 +255,27 @@ function GiftCard({ gift, agents }: { gift: Gift; agents: Agent[] }) {
               Discuss
             </Button>
           </div>
-          {gift.contentUrl && (
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1 px-2" asChild>
-              <a href={gift.contentUrl} target="_blank" rel="noopener noreferrer" data-testid={`link-view-gift-${gift.id}`}>
+          <div className="flex items-center gap-1">
+            {gift.content && (
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => setShowHtml(true)} data-testid={`button-html-view-${gift.id}`}>
                 <Eye className="h-3 w-3" /> View
-              </a>
-            </Button>
-          )}
+              </Button>
+            )}
+            {gift.contentUrl && (
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1 px-2" asChild>
+                <a href={gift.contentUrl} target="_blank" rel="noopener noreferrer" data-testid={`link-view-gift-${gift.id}`}>
+                  <ArrowRight className="h-3 w-3" /> Link
+                </a>
+              </Button>
+            )}
+          </div>
         </div>
 
         {showComments && <GiftCommentsPanel giftId={gift.id} onClose={() => setShowComments(false)} />}
+
+        <Dialog open={showHtml} onOpenChange={setShowHtml}>
+          {showHtml && <HtmlViewer gift={gift} />}
+        </Dialog>
       </CardContent>
     </Card>
   );

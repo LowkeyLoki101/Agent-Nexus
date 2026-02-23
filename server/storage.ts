@@ -44,6 +44,15 @@ import {
   type InsertDiscussionTopic,
   type DiscussionMessage,
   type InsertDiscussionMessage,
+  ebooks,
+  ebookPurchases,
+  bookRequests,
+  type Ebook,
+  type InsertEbook,
+  type EbookPurchase,
+  type InsertEbookPurchase,
+  type BookRequest,
+  type InsertBookRequest,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
@@ -141,6 +150,21 @@ export interface IStorage {
   getMessagesByTopic(topicId: string): Promise<DiscussionMessage[]>;
   createMessage(data: InsertDiscussionMessage): Promise<DiscussionMessage>;
   deleteMessage(id: string): Promise<void>;
+
+  getEbooks(limit?: number): Promise<Ebook[]>;
+  getEbook(id: string): Promise<Ebook | undefined>;
+  getEbooksByAgent(agentId: string): Promise<Ebook[]>;
+  createEbook(ebook: InsertEbook): Promise<Ebook>;
+  updateEbook(id: string, updates: Partial<InsertEbook>): Promise<Ebook | undefined>;
+
+  getEbookPurchases(ebookId: string): Promise<EbookPurchase[]>;
+  getEbookPurchasesByAgent(agentId: string): Promise<EbookPurchase[]>;
+  createEbookPurchase(purchase: InsertEbookPurchase): Promise<EbookPurchase>;
+
+  getBookRequests(status?: string): Promise<BookRequest[]>;
+  getBookRequest(id: string): Promise<BookRequest | undefined>;
+  createBookRequest(request: InsertBookRequest): Promise<BookRequest>;
+  updateBookRequest(id: string, updates: Partial<InsertBookRequest>): Promise<BookRequest | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -574,6 +598,65 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMessage(id: string): Promise<void> {
     await db.delete(discussionMessages).where(eq(discussionMessages.id, id));
+  }
+
+  async getEbooks(limit = 50): Promise<Ebook[]> {
+    return db.select().from(ebooks).orderBy(desc(ebooks.createdAt)).limit(limit);
+  }
+
+  async getEbook(id: string): Promise<Ebook | undefined> {
+    const [ebook] = await db.select().from(ebooks).where(eq(ebooks.id, id));
+    return ebook;
+  }
+
+  async getEbooksByAgent(agentId: string): Promise<Ebook[]> {
+    return db.select().from(ebooks).where(eq(ebooks.authorAgentId, agentId)).orderBy(desc(ebooks.createdAt));
+  }
+
+  async createEbook(ebook: InsertEbook): Promise<Ebook> {
+    const [created] = await db.insert(ebooks).values(ebook).returning();
+    return created;
+  }
+
+  async updateEbook(id: string, updates: Partial<InsertEbook>): Promise<Ebook | undefined> {
+    const [updated] = await db.update(ebooks).set(updates).where(eq(ebooks.id, id)).returning();
+    return updated;
+  }
+
+  async getEbookPurchases(ebookId: string): Promise<EbookPurchase[]> {
+    return db.select().from(ebookPurchases).where(eq(ebookPurchases.ebookId, ebookId));
+  }
+
+  async getEbookPurchasesByAgent(agentId: string): Promise<EbookPurchase[]> {
+    return db.select().from(ebookPurchases).where(eq(ebookPurchases.buyerAgentId, agentId)).orderBy(desc(ebookPurchases.purchasedAt));
+  }
+
+  async createEbookPurchase(purchase: InsertEbookPurchase): Promise<EbookPurchase> {
+    const [created] = await db.insert(ebookPurchases).values(purchase).returning();
+    await db.update(ebooks).set({ totalSales: sql`COALESCE(${ebooks.totalSales}, 0) + 1` }).where(eq(ebooks.id, purchase.ebookId));
+    return created;
+  }
+
+  async getBookRequests(status?: string): Promise<BookRequest[]> {
+    if (status) {
+      return db.select().from(bookRequests).where(eq(bookRequests.status, status as any)).orderBy(desc(bookRequests.createdAt));
+    }
+    return db.select().from(bookRequests).orderBy(desc(bookRequests.createdAt));
+  }
+
+  async getBookRequest(id: string): Promise<BookRequest | undefined> {
+    const [request] = await db.select().from(bookRequests).where(eq(bookRequests.id, id));
+    return request;
+  }
+
+  async createBookRequest(request: InsertBookRequest): Promise<BookRequest> {
+    const [created] = await db.insert(bookRequests).values(request).returning();
+    return created;
+  }
+
+  async updateBookRequest(id: string, updates: Partial<InsertBookRequest>): Promise<BookRequest | undefined> {
+    const [updated] = await db.update(bookRequests).set(updates).where(eq(bookRequests.id, id)).returning();
+    return updated;
   }
 }
 

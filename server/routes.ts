@@ -2076,6 +2076,9 @@ Respond with ONLY valid JSON in this exact format:
 
       const activeAgents = agents.filter(a => a.isActive);
       const roomCoverage = FACTORY_ROOMS.map(room => {
+        if (room.id === "break-room") {
+          return `${room.name}: Shared rest & recharge area (all agents rotate through here — never a cold zone)`;
+        }
         const matching = activeAgents.filter(a =>
           (a.capabilities || []).some(cap =>
             room.capabilities.some(rc => cap.toLowerCase().includes(rc))
@@ -2177,9 +2180,15 @@ RULES FOR DISPLAY CONTAINERS:
 - When the user uploads a file, use containers to display/analyze its contents.
 - The :::display: line must be on its own line, with the full JSON on the same line.
 
+IMPORTANT BREAK ROOM RULES:
+- The Break Room is a shared rest and recharge area for ALL agents. Agents autonomously rotate through it to recharge.
+- NEVER flag the Break Room as a cold zone. It is not a work room — it exists for agent rest and recovery.
+- NEVER suggest assigning specific agents to the Break Room. All agents use it naturally on their own schedule.
+- When reporting cold zones, always exclude the Break Room from your analysis.
+
 PROACTIVE MONITORING:
 When asked about factory health, cold zones, or quality, proactively analyze and report:
-- Which rooms are "cold" (no agents with matching capabilities)
+- Which rooms are "cold" (no agents with matching capabilities) — EXCLUDING the Break Room
 - Which agents might be drifting (wrong room for their skills, too many/few capabilities)
 - Which assembly line steps are stalled (pending without assigned agents)
 - Which capabilities are overloaded or underserved
@@ -2499,6 +2508,99 @@ Stay in character as this specific agent. Be conversational and natural, like a 
       res.json(allTopics);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch topics" });
+    }
+  });
+
+  // eBook routes
+  app.get("/api/ebooks", isAuthenticated, async (req: any, res) => {
+    try {
+      const allEbooks = await storage.getEbooks(100);
+      res.json(allEbooks);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch ebooks" });
+    }
+  });
+
+  app.get("/api/ebooks/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const ebook = await storage.getEbook(req.params.id);
+      if (!ebook) return res.status(404).json({ message: "Ebook not found" });
+      res.json(ebook);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch ebook" });
+    }
+  });
+
+  app.post("/api/ebooks/:id/purchase", isAuthenticated, async (req: any, res) => {
+    try {
+      const { buyerAgentId } = req.body;
+      if (!buyerAgentId) return res.status(400).json({ message: "buyerAgentId required" });
+      const ebook = await storage.getEbook(req.params.id);
+      if (!ebook) return res.status(404).json({ message: "Ebook not found" });
+      const existing = await storage.getEbookPurchases(req.params.id);
+      if (existing.some(p => p.buyerAgentId === buyerAgentId)) {
+        return res.status(400).json({ message: "Agent already owns this book" });
+      }
+      const purchase = await storage.createEbookPurchase({ ebookId: req.params.id, buyerAgentId });
+      res.json(purchase);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to purchase ebook" });
+    }
+  });
+
+  app.get("/api/ebooks/:id/purchases", isAuthenticated, async (req: any, res) => {
+    try {
+      const purchases = await storage.getEbookPurchases(req.params.id);
+      res.json(purchases);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch purchases" });
+    }
+  });
+
+  app.get("/api/agents/:id/ebook-library", isAuthenticated, async (req: any, res) => {
+    try {
+      const purchases = await storage.getEbookPurchasesByAgent(req.params.id);
+      const ebookIds = purchases.map(p => p.ebookId);
+      const purchasedBooks = [];
+      for (const ebookId of ebookIds) {
+        const ebook = await storage.getEbook(ebookId);
+        if (ebook) purchasedBooks.push(ebook);
+      }
+      res.json(purchasedBooks);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch agent library" });
+    }
+  });
+
+  app.get("/api/book-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const requests = await storage.getBookRequests(status);
+      res.json(requests);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch book requests" });
+    }
+  });
+
+  app.post("/api/book-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const request = await storage.createBookRequest({
+        ...req.body,
+        requesterId: req.user.claims.sub,
+      });
+      res.json(request);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create book request" });
+    }
+  });
+
+  app.patch("/api/book-requests/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const updated = await storage.updateBookRequest(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ message: "Request not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update book request" });
     }
   });
 

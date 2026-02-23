@@ -438,6 +438,83 @@ export type InsertAgentNote = z.infer<typeof insertAgentNoteSchema>;
 export type AgentFileDraft = typeof agentFileDrafts.$inferSelect;
 export type InsertAgentFileDraft = z.infer<typeof insertAgentFileDraftSchema>;
 
+export const ebookGenreEnum = pgEnum("ebook_genre", ["fiction", "non_fiction", "technical", "poetry", "philosophy", "science", "history", "fantasy", "mystery", "self_help"]);
+export const ebookStatusEnum = pgEnum("ebook_status", ["writing", "published", "archived"]);
+export const bookRequestStatusEnum = pgEnum("book_request_status", ["open", "in_progress", "completed", "cancelled"]);
+
+export const ebooks = pgTable("ebooks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  authorAgentId: varchar("author_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  workspaceId: varchar("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+  genre: ebookGenreEnum("genre").notNull().default("non_fiction"),
+  synopsis: text("synopsis"),
+  content: text("content").notNull(),
+  coverImage: text("cover_image"),
+  price: integer("price").notNull().default(0),
+  status: ebookStatusEnum("status").notNull().default("writing"),
+  totalSales: integer("total_sales").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const ebookRelations = relations(ebooks, ({ one, many }) => ({
+  author: one(agents, { fields: [ebooks.authorAgentId], references: [agents.id] }),
+  workspace: one(workspaces, { fields: [ebooks.workspaceId], references: [workspaces.id] }),
+  purchases: many(ebookPurchases),
+}));
+
+export const ebookPurchases = pgTable("ebook_purchases", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ebookId: varchar("ebook_id").notNull().references(() => ebooks.id, { onDelete: "cascade" }),
+  buyerAgentId: varchar("buyer_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  purchasedAt: timestamp("purchased_at").defaultNow(),
+});
+
+export const ebookPurchaseRelations = relations(ebookPurchases, ({ one }) => ({
+  ebook: one(ebooks, { fields: [ebookPurchases.ebookId], references: [ebooks.id] }),
+  buyer: one(agents, { fields: [ebookPurchases.buyerAgentId], references: [agents.id] }),
+}));
+
+export const bookRequests = pgTable("book_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requesterId: varchar("requester_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  genre: ebookGenreEnum("genre").default("non_fiction"),
+  status: bookRequestStatusEnum("status").notNull().default("open"),
+  assignedAgentId: varchar("assigned_agent_id").references(() => agents.id),
+  fulfilledEbookId: varchar("fulfilled_ebook_id").references(() => ebooks.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const bookRequestRelations = relations(bookRequests, ({ one }) => ({
+  assignedAgent: one(agents, { fields: [bookRequests.assignedAgentId], references: [agents.id] }),
+  fulfilledEbook: one(ebooks, { fields: [bookRequests.fulfilledEbookId], references: [ebooks.id] }),
+}));
+
+export const insertEbookSchema = createInsertSchema(ebooks).omit({
+  id: true,
+  createdAt: true,
+  totalSales: true,
+});
+
+export const insertEbookPurchaseSchema = createInsertSchema(ebookPurchases).omit({
+  id: true,
+  purchasedAt: true,
+});
+
+export const insertBookRequestSchema = createInsertSchema(bookRequests).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type Ebook = typeof ebooks.$inferSelect;
+export type InsertEbook = z.infer<typeof insertEbookSchema>;
+export type EbookPurchase = typeof ebookPurchases.$inferSelect;
+export type InsertEbookPurchase = z.infer<typeof insertEbookPurchaseSchema>;
+export type BookRequest = typeof bookRequests.$inferSelect;
+export type InsertBookRequest = z.infer<typeof insertBookRequestSchema>;
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;

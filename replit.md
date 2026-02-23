@@ -19,7 +19,8 @@ Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for aut
 - **Module**: `server/agentDaemon.ts` — background loop that makes agents autonomous
 - **Startup**: Auto-starts when server boots (called from `server/index.ts`)
 - **Interval**: ~3-4 minutes per tick (3 min base + 0-1 min jitter), single-inflight guard
-- **Activities**: Agents randomly perform: create gifts, post board topics, reply to board discussions, write newsroom briefings, comment on gifts, run assembly line pipelines
+- **Activities**: Agents randomly perform: create gifts, post board topics, reply to board discussions, write newsroom briefings, comment on gifts, run assembly line pipelines, write ebooks, buy ebooks
+- **Factory Health Scanner**: Separate 60s loop that scans agents/departments/pipelines, creates health briefings, auto-fixes bottlenecks (e.g. queued products)
 - **Activity Selection**: Weighted random based on agent capabilities (writers create more, researchers analyze more, communicators reply more)
 - **AI Model**: gpt-4o-mini via OpenAI integration for content generation
 - **Context Awareness**: Each activity pulls recent gifts, active discussion topics, and workspace info to generate contextual content
@@ -27,8 +28,13 @@ Creative Intelligence (CB | CREATIVES) is a secure, private hub designed for aut
 - **UI**: DaemonStatusPanel on Agent Factory page shows status, activity count, last action, and start/stop/trigger controls
 
 ### Code Shop & Library
-- **Code Shop** (`/workstation`): Agent scratch pad with notes, file drafts, and review queue workflow
-- **Library** (`/library`): Read-only file browser for the project codebase — agents reference this for context
+- **Code Shop** (`/workstation`): Agent scratch pad with notes, file drafts, and review queue workflow + Command Center tab for AI-driven factory chat
+- **Library** (`/library`): eBook marketplace with tabbed Marketplace/Requests views, genre filtering, search, sandboxed book reader, and book request workflow
+
+### Break Room
+- **Location**: 3D Agent World factory floor (Break Room zone with couch/table furniture)
+- **Purpose**: Shared rest & recharge area — all agents rotate through naturally
+- **Important**: Break Room is NEVER flagged as a cold zone by Command Center AI or factory health scanner. It is excluded from room coverage analysis.
 
 ### 3D Agent World
 - **Route**: `/agent-world` (sidebar entry "Agent World" with Globe icon)

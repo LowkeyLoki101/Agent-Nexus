@@ -70,7 +70,7 @@ const mainNavItems = [
     icon: Wrench,
   },
   {
-    title: "Library",
+    title: "eBook Library",
     url: "/library",
     icon: BookOpen,
   },

@@ -1,16 +1,17 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState } from "react";
-import type { AgentNote, AgentFileDraft, Agent } from "@shared/schema";
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { AgentNote, AgentFileDraft, Agent, Workspace } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { StickyNote, FileCode, ClipboardCheck, Plus, Trash2, Check, X, Bot, FolderOpen, Loader2 } from "lucide-react";
+import { StickyNote, FileCode, ClipboardCheck, Plus, Trash2, Check, X, Bot, FolderOpen, Loader2, Terminal, Send, Zap } from "lucide-react";
 
 const DRAFT_STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
   draft: { label: "Draft", variant: "secondary" },
@@ -485,6 +486,178 @@ function ReviewQueueTab() {
   );
 }
 
+interface CmdMessage { role: "user" | "assistant"; content: string }
+
+function CommandCenterTab() {
+  const CMD_KEY = "workstation-cmd-history";
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<CmdMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem(CMD_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [isStreaming, setIsStreaming] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { data: agents } = useQuery<Agent[]>({ queryKey: ["/api/agents"] });
+  const { data: workspaces } = useQuery<Workspace[]>({ queryKey: ["/api/workspaces"] });
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!isStreaming && messages.length > 0) {
+      try { localStorage.setItem(CMD_KEY, JSON.stringify(messages.slice(-50))); } catch {}
+    }
+  }, [messages, isStreaming]);
+
+  const clearHistory = useCallback(() => {
+    setMessages([]);
+    try { localStorage.removeItem(CMD_KEY); } catch {}
+  }, []);
+
+  const sendMessage = useCallback(async () => {
+    const msg = input.trim();
+    if (!msg || isStreaming) return;
+
+    const userMsg: CmdMessage = { role: "user", content: msg };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
+    setIsStreaming(true);
+
+    try {
+      const response = await fetch("/api/command-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          message: msg,
+          history: messages,
+          factoryContext: `${(agents || []).length} agents, ${(workspaces || []).length} departments`,
+          uploadedFiles: [],
+        }),
+      });
+
+      if (!response.ok) throw new Error("Chat failed");
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader");
+
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+      setMessages(prev => [...prev, { role: "assistant", content: "" }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        const lines = text.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.done) break;
+              if (data.content) {
+                assistantContent += data.content;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: assistantContent };
+                  return updated;
+                });
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't respond right now. Try again." }]);
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [input, isStreaming, messages, agents, workspaces]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <Card className="border-primary/20" data-testid="card-command-center">
+      <CardContent className="p-0">
+        <div ref={scrollRef} className="h-[400px] overflow-y-auto px-4 py-3 space-y-3">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
+              <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
+              <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
+                Chat with Creative Intelligence to plan operations, create tools, configure departments, or get factory insights.
+              </p>
+              <div className="flex flex-wrap gap-2 justify-center mt-4">
+                {["Show factory health", "Check for cold zones", "Assign agents to rooms", "Review productivity"].map(suggestion => (
+                  <Button
+                    key={suggestion}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setInput(suggestion)}
+                    data-testid={`button-cmd-suggestion-${suggestion.split(" ").slice(0, 2).join("-").toLowerCase()}`}
+                  >
+                    {suggestion}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+              }`} data-testid={`cmd-message-${msg.role}-${i}`}>
+                {msg.content ? (
+                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                ) : (isStreaming && i === messages.length - 1 ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                  </span>
+                ) : "")}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-4 pb-3 pt-1 border-t">
+          <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2 items-end">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about operations, architecture, agents, or tools..."
+              className="min-h-[40px] max-h-[100px] text-sm resize-none"
+              rows={1}
+              disabled={isStreaming}
+              data-testid="input-cmd-center"
+            />
+            <Button type="submit" size="icon" className="shrink-0 self-end" disabled={!input.trim() || isStreaming} data-testid="button-send-cmd">
+              {isStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </form>
+          {messages.length > 0 && (
+            <div className="flex justify-end mt-1">
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-6 px-2" onClick={clearHistory} disabled={isStreaming} data-testid="button-clear-cmd-history">
+                <Trash2 className="h-3 w-3 mr-1" /> Clear history
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Workstation() {
   return (
     <div className="space-y-6">
@@ -507,6 +680,10 @@ export default function Workstation() {
             <ClipboardCheck className="h-4 w-4" />
             Review Queue
           </TabsTrigger>
+          <TabsTrigger value="command" className="gap-1.5" data-testid="tab-command">
+            <Terminal className="h-4 w-4" />
+            Command Center
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="notes">
@@ -517,6 +694,9 @@ export default function Workstation() {
         </TabsContent>
         <TabsContent value="review">
           <ReviewQueueTab />
+        </TabsContent>
+        <TabsContent value="command">
+          <CommandCenterTab />
         </TabsContent>
       </Tabs>
     </div>
