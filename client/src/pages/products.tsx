@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import type { Product, AssemblyLine, AssemblyLineStep } from "@shared/schema";
+import type { Product, AssemblyLine, AssemblyLineStep, Workspace } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,13 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof
   failed: { label: "Failed", color: "text-red-500", icon: AlertCircle },
 };
 
+function useDepartmentName() {
+  const { data: workspaces } = useQuery<Workspace[]>({ queryKey: ["/api/workspaces"] });
+  return (slug: string) => workspaces?.find(w => w.slug === slug)?.name || slug;
+}
+
 function StepsList({ assemblyLineId }: { assemblyLineId: string }) {
+  const getDepartmentName = useDepartmentName();
   const { data: steps } = useQuery<AssemblyLineStep[]>({
     queryKey: ["/api/assembly-lines", assemblyLineId, "steps"],
     queryFn: () => fetch(`/api/assembly-lines/${assemblyLineId}/steps`, { credentials: "include" }).then(r => r.json()),
@@ -58,7 +64,7 @@ function StepsList({ assemblyLineId }: { assemblyLineId: string }) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium">{step.departmentRoom}</span>
+                <span className="text-xs font-medium">{getDepartmentName(step.departmentRoom)}</span>
                 {step.toolName && <Badge variant="outline" className="text-[9px]">{step.toolName}</Badge>}
                 <Badge variant="outline" className={`text-[9px] ${stepStatus.color}`}>{stepStatus.label}</Badge>
               </div>

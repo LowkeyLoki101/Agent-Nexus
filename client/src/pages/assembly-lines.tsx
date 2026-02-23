@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import type { AssemblyLine, AssemblyLineStep, Agent, Product } from "@shared/schema";
+import type { AssemblyLine, AssemblyLineStep, Agent, Product, Workspace } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,14 +21,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
-const DEPARTMENT_ROOMS = [
-  { id: "research-lab", name: "Research Lab" },
-  { id: "code-workshop", name: "Code Workshop" },
-  { id: "design-studio", name: "Design Studio" },
-  { id: "strategy-room", name: "Strategy Room" },
-  { id: "comms-center", name: "Comms Center" },
-  { id: "break-room", name: "Break Room" },
-];
+function useDepartments() {
+  const { data: workspaces } = useQuery<Workspace[]>({ queryKey: ["/api/workspaces"] });
+  const departments = (workspaces || []).map(w => ({ id: w.slug, name: w.name }));
+  const getDepartmentName = (slug: string) => departments.find(d => d.id === slug)?.name || slug;
+  return { departments, getDepartmentName };
+}
 
 const STEP_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending: { label: "Pending", color: "text-gray-500" },
@@ -109,6 +107,7 @@ function AddStepDialog({ assemblyLineId, stepCount }: { assemblyLineId: string; 
   const [instructions, setInstructions] = useState("");
   const { toast } = useToast();
   const { data: agents } = useQuery<Agent[]>({ queryKey: ["/api/agents"] });
+  const { departments } = useDepartments();
   const [agentId, setAgentId] = useState("");
 
   const createStep = useMutation({
@@ -148,7 +147,7 @@ function AddStepDialog({ assemblyLineId, stepCount }: { assemblyLineId: string; 
             <Select value={room} onValueChange={setRoom}>
               <SelectTrigger data-testid="select-step-room"><SelectValue placeholder="Select department" /></SelectTrigger>
               <SelectContent>
-                {DEPARTMENT_ROOMS.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -239,6 +238,7 @@ function CreateProductDialog({ assemblyLineId, assemblyLineName }: { assemblyLin
 function AssemblyLineCard({ line }: { line: AssemblyLine }) {
   const [expanded, setExpanded] = useState(false);
   const { toast } = useToast();
+  const { getDepartmentName } = useDepartments();
   const statusConfig = LINE_STATUS_CONFIG[line.status] || LINE_STATUS_CONFIG.draft;
 
   const { data: steps } = useQuery<AssemblyLineStep[]>({
@@ -327,7 +327,7 @@ function AssemblyLineCard({ line }: { line: AssemblyLine }) {
                     <div className="flex-1 min-w-0 rounded-lg border p-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-xs font-medium">{DEPARTMENT_ROOMS.find(d => d.id === step.departmentRoom)?.name || step.departmentRoom}</span>
+                          <span className="text-xs font-medium">{getDepartmentName(step.departmentRoom)}</span>
                           {step.toolName && <Badge variant="outline" className="text-[10px] gap-0.5"><Wrench className="h-2 w-2" />{step.toolName}</Badge>}
                         </div>
                         <span className={`text-[10px] ${stepStatus.color}`}>{stepStatus.label}</span>

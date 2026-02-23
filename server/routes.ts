@@ -1887,6 +1887,41 @@ Respond with ONLY valid JSON in this exact format:
     res.sendFile(filePath);
   });
 
+  function buildFactoryRooms(workspaces: any[]) {
+    const CAPABILITY_KEYWORDS: Record<string, string[]> = {
+      "research": ["research", "analysis"],
+      "lab": ["research", "analysis"],
+      "code": ["code-review", "engineering", "testing", "coding", "debugging"],
+      "workshop": ["code-review", "engineering", "testing", "coding", "debugging"],
+      "engineering": ["engineering", "coding", "debugging", "testing"],
+      "design": ["design", "content-creation", "writing", "creative_writing", "content_generation"],
+      "studio": ["design", "content-creation", "writing", "creative_writing", "content_generation"],
+      "creative": ["design", "content-creation", "writing", "creative_writing"],
+      "strategy": ["strategy", "architecture", "planning"],
+      "planning": ["strategy", "architecture", "planning"],
+      "comms": ["communication", "security", "communicate", "discuss", "coordinate"],
+      "communication": ["communication", "coordinate", "discuss"],
+      "break": [""],
+    };
+
+    return workspaces.map(w => {
+      const slugLower = (w.slug || "").toLowerCase();
+      const nameLower = (w.name || "").toLowerCase();
+      const combined = `${slugLower} ${nameLower}`;
+      const caps = new Set<string>();
+      for (const [keyword, keywords] of Object.entries(CAPABILITY_KEYWORDS)) {
+        if (combined.includes(keyword)) {
+          keywords.forEach(k => { if (k) caps.add(k); });
+        }
+      }
+      return {
+        id: w.slug,
+        name: w.name,
+        capabilities: Array.from(caps),
+      };
+    });
+  }
+
   app.get("/api/factory/health", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -1897,14 +1932,7 @@ Respond with ONLY valid JSON in this exact format:
       const activeAgents = agents.filter(a => a.isActive);
       const inactiveAgents = agents.filter(a => !a.isActive);
 
-      const FACTORY_ROOMS = [
-        { id: "research-lab", name: "Research Lab", capabilities: ["research", "analysis"] },
-        { id: "code-workshop", name: "Code Workshop", capabilities: ["code-review", "engineering", "testing", "coding", "debugging"] },
-        { id: "design-studio", name: "Design Studio", capabilities: ["design", "content-creation", "writing", "creative_writing", "content_generation"] },
-        { id: "strategy-room", name: "Strategy Room", capabilities: ["strategy", "architecture", "planning"] },
-        { id: "comms-center", name: "Comms Center", capabilities: ["communication", "security", "communicate", "discuss", "coordinate"] },
-        { id: "break-room", name: "Break Room", capabilities: [] },
-      ];
+      const FACTORY_ROOMS = buildFactoryRooms(workspaces);
 
       const roomAgentCounts = FACTORY_ROOMS.map(room => {
         const matching = activeAgents.filter(a =>
@@ -1917,7 +1945,7 @@ Respond with ONLY valid JSON in this exact format:
           roomName: room.name,
           agentCount: matching.length,
           agentNames: matching.map(a => a.name),
-          isCold: matching.length === 0 && room.id !== "break-room",
+          isCold: matching.length === 0 && room.id !== "break-room" && !room.name.toLowerCase().includes("break"),
         };
       });
 
@@ -2175,18 +2203,11 @@ Respond with ONLY valid JSON in this exact format:
       const agentList = agents.map(a => `- ${a.name} [id:${a.id}] (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}] [${a.isVerified ? "verified" : "unverified"}] workspace: ${workspaces.find(w => w.id === a.workspaceId)?.name || a.workspaceId}`).join("\n");
       const deptList = workspaces.map(w => `- ${w.name} [id:${w.id}] (/${w.slug}) - ${w.description || "No description"}`).join("\n");
 
-      const FACTORY_ROOMS = [
-        { id: "research-lab", name: "Research Lab", capabilities: ["research", "analysis"] },
-        { id: "code-workshop", name: "Code Workshop", capabilities: ["code-review", "engineering", "testing", "coding", "debugging"] },
-        { id: "design-studio", name: "Design Studio", capabilities: ["design", "content-creation", "writing", "creative_writing", "content_generation"] },
-        { id: "strategy-room", name: "Strategy Room", capabilities: ["strategy", "architecture", "planning"] },
-        { id: "comms-center", name: "Comms Center", capabilities: ["communication", "security", "communicate", "discuss", "coordinate"] },
-        { id: "break-room", name: "Break Room", capabilities: [] },
-      ];
+      const FACTORY_ROOMS = buildFactoryRooms(workspaces);
 
       const activeAgents = agents.filter(a => a.isActive);
       const roomCoverage = FACTORY_ROOMS.map(room => {
-        if (room.id === "break-room") {
+        if (room.id === "break-room" || room.name.toLowerCase().includes("break")) {
           return `${room.name}: Shared rest & recharge area (all agents rotate through here — never a cold zone)`;
         }
         const matching = activeAgents.filter(a =>
