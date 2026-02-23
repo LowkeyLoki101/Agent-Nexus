@@ -5,13 +5,15 @@ import { useThree } from "@react-three/fiber";
 import { useRef, useState, useMemo, useCallback, Suspense, Component, type ReactNode, useEffect } from "react";
 import * as THREE from "three";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Agent, Briefing, Workspace, ApiToken } from "@shared/schema";
+import type { Agent, Briefing, Workspace, ApiToken, AgentDiaryEntry, AgentMemory, AgentProfile } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity,
   Send, MessageSquare, ChevronDown, ChevronUp, Loader2,
@@ -20,6 +22,7 @@ import {
   ArrowRight, Newspaper, Gauge, Terminal,
   Play, Pause, Volume2, VolumeX,
   Upload, Paperclip, Table2, BarChart3, List, Image as ImageIcon, Video, Trash2,
+  BookOpen, CircleUser, CheckCircle2,
 } from "lucide-react";
 
 function detectWebGL(): boolean {
@@ -2009,35 +2012,162 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
   );
 }
 
+interface TaskAction {
+  taskType: string;
+  taskDescription: string;
+  options: { id: string; label: string; action: any }[];
+}
+
+function parseTaskAction(content: string): { cleanContent: string; taskAction: TaskAction | null } {
+  const taskBlockRegex = /```task-action\s*([\s\S]*?)```/;
+  const match = content.match(taskBlockRegex);
+  if (!match) return { cleanContent: content, taskAction: null };
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    if (parsed.taskType && parsed.options && Array.isArray(parsed.options)) {
+      const cleanContent = content.replace(taskBlockRegex, "").trim();
+      return { cleanContent, taskAction: parsed as TaskAction };
+    }
+  } catch {}
+  return { cleanContent: content, taskAction: null };
+}
+
+interface ChatMessageWithTask extends ChatMessage {
+  taskAction?: TaskAction | null;
+  taskResult?: { success: boolean; message: string } | null;
+  taskExecuting?: boolean;
+}
+
 function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState?: AgentSimState; onClose: () => void }) {
   const color = getAgentColor(agent);
-  const [chatOpen, setChatOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState("chat");
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessageWithTask[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const prevAgentId = useRef(agent.id);
 
+  const { data: diaryEntries, isLoading: diaryLoading } = useQuery<AgentDiaryEntry[]>({
+    queryKey: ["/api/agents", agent.id, "diary"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agents/${agent.id}/diary?limit=50`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch diary");
+      return res.json();
+    },
+  });
+
+  const { data: agentMemory, isLoading: memoryLoading } = useQuery<AgentMemory>({
+    queryKey: ["/api/agents", agent.id, "memory"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agents/${agent.id}/memory`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch memory");
+      return res.json();
+    },
+  });
+
+  const { data: agentProfilesList, isLoading: profilesLoading } = useQuery<AgentProfile[]>({
+    queryKey: ["/api/agents", agent.id, "profiles"],
+    queryFn: async () => {
+      const res = await fetch(`/api/agents/${agent.id}/profiles`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch profiles");
+      return res.json();
+    },
+  });
+
+  const executeTaskMutation = useMutation({
+    mutationFn: async (params: { taskType: string; taskDescription: string; selectedOption: any; messageIndex: number }) => {
+      const res = await apiRequest("POST", `/api/agents/${agent.id}/execute-task`, {
+        taskType: params.taskType,
+        taskDescription: params.taskDescription,
+        selectedOption: params.selectedOption,
+      });
+      return res.json();
+    },
+    onSuccess: (data, variables) => {
+      setChatMessages(prev => {
+        const updated = [...prev];
+        if (updated[variables.messageIndex]) {
+          updated[variables.messageIndex] = {
+            ...updated[variables.messageIndex],
+            taskExecuting: false,
+            taskResult: { success: data.success, message: data.message },
+          };
+        }
+        return updated;
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agent.id, "diary"] });
+    },
+    onError: (_error, variables) => {
+      setChatMessages(prev => {
+        const updated = [...prev];
+        if (updated[variables.messageIndex]) {
+          updated[variables.messageIndex] = {
+            ...updated[variables.messageIndex],
+            taskExecuting: false,
+            taskResult: { success: false, message: "Task execution failed. Please try again." },
+          };
+        }
+        return updated;
+      });
+    },
+  });
+
   useEffect(() => {
     if (prevAgentId.current !== agent.id) {
-      setChatMessages([]); setChatInput(""); setIsStreaming(false);
+      setChatMessages([]); setChatInput(""); setIsStreaming(false); setHistoryLoaded(false);
       prevAgentId.current = agent.id;
     }
   }, [agent.id]);
+
+  useEffect(() => {
+    if (!historyLoaded && diaryEntries && diaryEntries.length > 0) {
+      const chatEntries = diaryEntries
+        .filter(e => e.source === "chat" && e.userMessage && e.agentResponse)
+        .slice(-10)
+        .reverse();
+      if (chatEntries.length > 0) {
+        const restored: ChatMessageWithTask[] = [];
+        for (const entry of chatEntries) {
+          restored.push({ role: "user", content: entry.userMessage || "" });
+          const { cleanContent, taskAction } = parseTaskAction(entry.agentResponse || "");
+          restored.push({ role: "assistant", content: cleanContent, taskAction });
+        }
+        setChatMessages(restored);
+      }
+      setHistoryLoaded(true);
+    }
+  }, [diaryEntries, historyLoaded]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [chatMessages]);
 
   useEffect(() => {
-    if (chatOpen && inputRef.current) inputRef.current.focus();
-  }, [chatOpen]);
+    if (activeTab === "chat" && inputRef.current) inputRef.current.focus();
+  }, [activeTab]);
+
+  const handleExecuteTask = useCallback((messageIndex: number, taskAction: TaskAction, option: TaskAction["options"][0]) => {
+    setChatMessages(prev => {
+      const updated = [...prev];
+      if (updated[messageIndex]) {
+        updated[messageIndex] = { ...updated[messageIndex], taskExecuting: true };
+      }
+      return updated;
+    });
+    executeTaskMutation.mutate({
+      taskType: taskAction.taskType,
+      taskDescription: taskAction.taskDescription,
+      selectedOption: option,
+      messageIndex,
+    });
+  }, [executeTaskMutation]);
 
   const sendMessage = useCallback(async () => {
     const msg = chatInput.trim();
     if (!msg || isStreaming) return;
-    const userMsg: ChatMessage = { role: "user", content: msg };
+    const userMsg: ChatMessageWithTask = { role: "user", content: msg };
     setChatMessages(prev => [...prev, userMsg]);
     setChatInput("");
     setIsStreaming(true);
@@ -2073,12 +2203,16 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               if (data.done) break;
               if (data.content) {
                 assistantContent += data.content;
-                setChatMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: assistantContent }; return u; });
+                const { cleanContent, taskAction } = parseTaskAction(assistantContent);
+                setChatMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: cleanContent, taskAction }; return u; });
               }
             } catch {}
           }
         }
       }
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agent.id, "diary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agent.id, "memory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", agent.id, "profiles"] });
     } catch {
       setChatMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't respond right now. Try again." }]);
     } finally {
@@ -2087,7 +2221,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
   }, [chatInput, isStreaming, agent.id, chatMessages, simState]);
 
   return (
-    <Card className="absolute right-4 top-4 w-[340px] bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col max-h-[calc(100%-2rem)]" data-testid={`panel-agent-detail-${agent.id}`}>
+    <Card className="absolute right-4 top-4 w-[380px] bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col max-h-[calc(100%-2rem)]" data-testid={`panel-agent-detail-${agent.id}`}>
       <CardHeader className="pb-2 shrink-0">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
@@ -2103,7 +2237,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7" onClick={onClose} data-testid="button-close-agent-panel">
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={onClose} data-testid="button-close-agent-panel">
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -2137,18 +2271,25 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
           </div>
         )}
       </CardContent>
-      <div className="border-t shrink-0">
-        <Button variant="ghost" className="w-full flex items-center justify-between rounded-none text-xs font-medium uppercase tracking-wider text-muted-foreground" onClick={() => setChatOpen(!chatOpen)} data-testid="button-toggle-chat">
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-3.5 w-3.5" />
-            <span>Chat with {agent.name.split(" ")[0]}</span>
-          </div>
-          {chatOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-        </Button>
-      </div>
-      {chatOpen && (
-        <div className="flex flex-col min-h-0 flex-1">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[280px]">
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col min-h-0 flex-1">
+        <TabsList className="mx-3 shrink-0 grid grid-cols-4" data-testid="tabs-agent-detail">
+          <TabsTrigger value="chat" className="text-xs gap-1" data-testid="tab-chat">
+            <MessageSquare className="h-3 w-3" /> Chat
+          </TabsTrigger>
+          <TabsTrigger value="diary" className="text-xs gap-1" data-testid="tab-diary">
+            <BookOpen className="h-3 w-3" /> Diary
+          </TabsTrigger>
+          <TabsTrigger value="memory" className="text-xs gap-1" data-testid="tab-memory">
+            <Brain className="h-3 w-3" /> Memory
+          </TabsTrigger>
+          <TabsTrigger value="relationships" className="text-xs gap-1" data-testid="tab-relationships">
+            <CircleUser className="h-3 w-3" /> People
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="chat" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[300px]">
             {chatMessages.length === 0 && (
               <div className="text-center py-6">
                 <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
@@ -2156,10 +2297,47 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               </div>
             )}
             {chatMessages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`} data-testid={`chat-message-${msg.role}-${i}`}>
-                  {msg.content || (isStreaming && i === chatMessages.length - 1 ? <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Thinking...</span> : "")}
+              <div key={i}>
+                <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`} data-testid={`chat-message-${msg.role}-${i}`}>
+                    {msg.content || (isStreaming && i === chatMessages.length - 1 ? <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Thinking...</span> : "")}
+                  </div>
                 </div>
+                {msg.role === "assistant" && msg.taskAction && !msg.taskResult && !msg.taskExecuting && (
+                  <div className="mt-2 ml-1 space-y-1.5" data-testid={`task-options-${i}`}>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{msg.taskAction.taskDescription}</p>
+                    <div className="flex flex-col gap-1">
+                      {msg.taskAction.options.map((opt) => (
+                        <Button
+                          key={opt.id}
+                          variant="outline"
+                          size="sm"
+                          className="justify-start text-xs gap-2"
+                          onClick={() => handleExecuteTask(i, msg.taskAction!, opt)}
+                          data-testid={`button-task-option-${opt.id}`}
+                        >
+                          <ArrowRight className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{opt.label}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {msg.role === "assistant" && msg.taskExecuting && (
+                  <div className="mt-2 ml-1 flex items-center gap-2 text-xs text-muted-foreground" data-testid={`task-executing-${i}`}>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Executing task...</span>
+                  </div>
+                )}
+                {msg.role === "assistant" && msg.taskResult && (
+                  <div className={`mt-2 ml-1 rounded-md p-2 text-xs ${msg.taskResult.success ? "bg-green-500/10 border border-green-500/20" : "bg-red-500/10 border border-red-500/20"}`} data-testid={`task-result-${i}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      {msg.taskResult.success ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <AlertTriangle className="h-3 w-3 text-red-500" />}
+                      <span className="font-medium">{msg.taskResult.success ? "Task Completed" : "Task Failed"}</span>
+                    </div>
+                    <p className="text-muted-foreground">{msg.taskResult.message}</p>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -2171,8 +2349,117 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               </Button>
             </form>
           </div>
-        </div>
-      )}
+        </TabsContent>
+
+        <TabsContent value="diary" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
+          <div className="overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[350px]">
+            {diaryLoading && (
+              <div className="space-y-2">
+                {[1, 2, 3].map(n => <Skeleton key={n} className="h-14 w-full" />)}
+              </div>
+            )}
+            {!diaryLoading && (!diaryEntries || diaryEntries.length === 0) && (
+              <div className="text-center py-6">
+                <BookOpen className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground/50">No diary entries yet</p>
+              </div>
+            )}
+            {!diaryLoading && diaryEntries && diaryEntries.map((entry) => {
+              let ctx: any = {};
+              try { ctx = entry.sourceContext ? JSON.parse(entry.sourceContext) : {}; } catch {}
+              return (
+                <div key={entry.id} className="rounded-md border bg-muted/30 p-2 space-y-1" data-testid={`diary-entry-${entry.id}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="secondary" className="text-[9px]">{entry.source}</Badge>
+                    <span className="text-[10px] text-muted-foreground">
+                      {entry.createdAt ? new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+                    </span>
+                  </div>
+                  {ctx.room && <p className="text-[10px] text-muted-foreground">Room: {ctx.room}</p>}
+                  {entry.userMessage && (
+                    <p className="text-xs"><span className="font-medium text-muted-foreground">User:</span> {entry.userMessage.slice(0, 150)}{entry.userMessage.length > 150 ? "..." : ""}</p>
+                  )}
+                  {entry.agentResponse && (
+                    <p className="text-xs"><span className="font-medium text-muted-foreground">Agent:</span> {entry.agentResponse.slice(0, 150)}{entry.agentResponse.length > 150 ? "..." : ""}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="memory" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
+          <div className="overflow-y-auto px-3 py-2 min-h-[120px] max-h-[350px]">
+            {memoryLoading && <Skeleton className="h-24 w-full" />}
+            {!memoryLoading && agentMemory && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Brain className="h-4 w-4 text-primary" />
+                  <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Working Memory</span>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3" data-testid="text-agent-memory">
+                  <p className="text-xs leading-relaxed whitespace-pre-wrap">{agentMemory.summary}</p>
+                </div>
+                {agentMemory.updatedAt && (
+                  <p className="text-[10px] text-muted-foreground text-right">
+                    Last updated: {new Date(agentMemory.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
+              </div>
+            )}
+            {!memoryLoading && (!agentMemory || agentMemory.summary === "No memory yet.") && (
+              <div className="text-center py-6">
+                <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground/50">No memory formed yet</p>
+                <p className="text-[10px] text-muted-foreground/40 mt-1">Chat with this agent to build working memory</p>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="relationships" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
+          <div className="overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[350px]">
+            {profilesLoading && (
+              <div className="space-y-2">
+                {[1, 2].map(n => <Skeleton key={n} className="h-16 w-full" />)}
+              </div>
+            )}
+            {!profilesLoading && (!agentProfilesList || agentProfilesList.length === 0) && (
+              <div className="text-center py-6">
+                <CircleUser className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground/50">No relationship profiles yet</p>
+                <p className="text-[10px] text-muted-foreground/40 mt-1">Profiles build as the agent interacts with people</p>
+              </div>
+            )}
+            {!profilesLoading && agentProfilesList && agentProfilesList.map((profile) => (
+              <div key={profile.id} className="rounded-md border bg-muted/30 p-2.5 space-y-1.5" data-testid={`profile-${profile.id}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                      <CircleUser className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium">{profile.subjectName}</p>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="secondary" className="text-[9px] py-0">{profile.subjectType}</Badge>
+                        <span className="text-[10px] text-muted-foreground">{profile.interactionCount || 0} interactions</span>
+                      </div>
+                    </div>
+                  </div>
+                  {profile.lastInteraction && (
+                    <span className="text-[10px] text-muted-foreground shrink-0">
+                      {new Date(profile.lastInteraction).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </span>
+                  )}
+                </div>
+                {profile.notes && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">{profile.notes.slice(0, 200)}{profile.notes.length > 200 ? "..." : ""}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+      </Tabs>
     </Card>
   );
 }

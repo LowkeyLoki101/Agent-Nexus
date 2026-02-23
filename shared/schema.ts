@@ -531,3 +531,68 @@ export type DiscussionTopic = typeof discussionTopics.$inferSelect;
 export type InsertDiscussionTopic = z.infer<typeof insertDiscussionTopicSchema>;
 export type DiscussionMessage = typeof discussionMessages.$inferSelect;
 export type InsertDiscussionMessage = z.infer<typeof insertDiscussionMessageSchema>;
+
+export const diaryEntrySourceEnum = pgEnum("diary_entry_source", ["chat", "daemon", "task", "reflection"]);
+
+export const agentDiaryEntries = pgTable("agent_diary_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  userMessage: text("user_message"),
+  agentResponse: text("agent_response"),
+  source: diaryEntrySourceEnum("source").notNull().default("chat"),
+  sourceContext: text("source_context"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const agentDiaryEntryRelations = relations(agentDiaryEntries, ({ one }) => ({
+  agent: one(agents, { fields: [agentDiaryEntries.agentId], references: [agents.id] }),
+}));
+
+export const agentMemory = pgTable("agent_memory", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const agentMemoryRelations = relations(agentMemory, ({ one }) => ({
+  agent: one(agents, { fields: [agentMemory.agentId], references: [agents.id] }),
+}));
+
+export const agentProfiles = pgTable("agent_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  subjectId: varchar("subject_id").notNull(),
+  subjectName: text("subject_name").notNull(),
+  subjectType: entityTypeEnum("subject_type").notNull().default("human"),
+  notes: text("notes"),
+  lastInteraction: timestamp("last_interaction").defaultNow(),
+  interactionCount: integer("interaction_count").default(1),
+});
+
+export const agentProfileRelations = relations(agentProfiles, ({ one }) => ({
+  agent: one(agents, { fields: [agentProfiles.agentId], references: [agents.id] }),
+}));
+
+export const insertAgentDiaryEntrySchema = createInsertSchema(agentDiaryEntries).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAgentMemorySchema = createInsertSchema(agentMemory).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertAgentProfileSchema = createInsertSchema(agentProfiles).omit({
+  id: true,
+  lastInteraction: true,
+  interactionCount: true,
+});
+
+export type AgentDiaryEntry = typeof agentDiaryEntries.$inferSelect;
+export type InsertAgentDiaryEntry = z.infer<typeof insertAgentDiaryEntrySchema>;
+export type AgentMemory = typeof agentMemory.$inferSelect;
+export type InsertAgentMemory = z.infer<typeof insertAgentMemorySchema>;
+export type AgentProfile = typeof agentProfiles.$inferSelect;
+export type InsertAgentProfile = z.infer<typeof insertAgentProfileSchema>;

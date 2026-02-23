@@ -17,7 +17,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Gift as GiftIcon, Heart, MessageSquare, Bot, Palette, Code, Brain,
   FileText, Wrench, Sparkles, Search, Eye, ArrowRight, Send, X, Loader2,
-  Zap, AlertTriangle, TrendingUp, Flame, Snowflake, Grid3X3,
+  Zap, AlertTriangle, TrendingUp, Flame, Snowflake, Grid3X3, Store,
 } from "lucide-react";
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bgColor: string; icon: typeof GiftIcon }> = {
@@ -178,6 +178,14 @@ function GiftCard({ gift, agents }: { gift: Gift; agents: Agent[] }) {
     onError: () => { toast({ title: "Failed to like", variant: "destructive" }); },
   });
 
+  const sendToCodeShopMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/gifts/${gift.id}/send-to-codeshop`),
+    onSuccess: () => {
+      toast({ title: "Sent to Code Shop", description: `"${gift.title}" is now a draft in the Code Shop.` });
+    },
+    onError: () => { toast({ title: "Failed to send to Code Shop", variant: "destructive" }); },
+  });
+
   return (
     <Card className="group hover-elevate transition-all" data-testid={`card-gift-${gift.id}`}>
       {gift.thumbnail && (
@@ -256,6 +264,19 @@ function GiftCard({ gift, agents }: { gift: Gift; agents: Agent[] }) {
             </Button>
           </div>
           <div className="flex items-center gap-1">
+            {gift.content && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1 px-2"
+                onClick={() => sendToCodeShopMutation.mutate()}
+                disabled={sendToCodeShopMutation.isPending}
+                data-testid={`button-send-codeshop-${gift.id}`}
+              >
+                {sendToCodeShopMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Store className="h-3 w-3" />}
+                Code Shop
+              </Button>
+            )}
             {gift.content && (
               <Button variant="outline" size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => setShowHtml(true)} data-testid={`button-html-view-${gift.id}`}>
                 <Eye className="h-3 w-3" /> View

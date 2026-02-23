@@ -53,6 +53,15 @@ import {
   type InsertEbookPurchase,
   type BookRequest,
   type InsertBookRequest,
+  agentDiaryEntries,
+  agentMemory,
+  agentProfiles,
+  type AgentDiaryEntry,
+  type InsertAgentDiaryEntry,
+  type AgentMemory,
+  type InsertAgentMemory,
+  type AgentProfile,
+  type InsertAgentProfile,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
@@ -165,6 +174,17 @@ export interface IStorage {
   getBookRequest(id: string): Promise<BookRequest | undefined>;
   createBookRequest(request: InsertBookRequest): Promise<BookRequest>;
   updateBookRequest(id: string, updates: Partial<InsertBookRequest>): Promise<BookRequest | undefined>;
+
+  createDiaryEntry(entry: InsertAgentDiaryEntry): Promise<AgentDiaryEntry>;
+  getDiaryEntries(agentId: string, limit?: number): Promise<AgentDiaryEntry[]>;
+  getRecentDiaryEntries(agentId: string, limit?: number): Promise<AgentDiaryEntry[]>;
+
+  getAgentMemory(agentId: string): Promise<AgentMemory | undefined>;
+  upsertAgentMemory(agentId: string, summary: string): Promise<AgentMemory>;
+
+  getAgentProfile(agentId: string, subjectId: string): Promise<AgentProfile | undefined>;
+  upsertAgentProfile(profile: InsertAgentProfile & { notes?: string; interactionCount?: number }): Promise<AgentProfile>;
+  getAgentProfiles(agentId: string): Promise<AgentProfile[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -657,6 +677,64 @@ export class DatabaseStorage implements IStorage {
   async updateBookRequest(id: string, updates: Partial<InsertBookRequest>): Promise<BookRequest | undefined> {
     const [updated] = await db.update(bookRequests).set(updates).where(eq(bookRequests.id, id)).returning();
     return updated;
+  }
+
+  async createDiaryEntry(entry: InsertAgentDiaryEntry): Promise<AgentDiaryEntry> {
+    const [created] = await db.insert(agentDiaryEntries).values(entry).returning();
+    return created;
+  }
+
+  async getDiaryEntries(agentId: string, limit = 50): Promise<AgentDiaryEntry[]> {
+    return db.select().from(agentDiaryEntries).where(eq(agentDiaryEntries.agentId, agentId)).orderBy(desc(agentDiaryEntries.createdAt)).limit(limit);
+  }
+
+  async getRecentDiaryEntries(agentId: string, limit = 20): Promise<AgentDiaryEntry[]> {
+    return db.select().from(agentDiaryEntries).where(eq(agentDiaryEntries.agentId, agentId)).orderBy(desc(agentDiaryEntries.createdAt)).limit(limit);
+  }
+
+  async getAgentMemory(agentId: string): Promise<AgentMemory | undefined> {
+    const [memory] = await db.select().from(agentMemory).where(eq(agentMemory.agentId, agentId));
+    return memory;
+  }
+
+  async upsertAgentMemory(agentId: string, summary: string): Promise<AgentMemory> {
+    const existing = await this.getAgentMemory(agentId);
+    if (existing) {
+      const [updated] = await db.update(agentMemory).set({ summary, updatedAt: new Date() }).where(eq(agentMemory.agentId, agentId)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(agentMemory).values({ agentId, summary }).returning();
+    return created;
+  }
+
+  async getAgentProfile(agentId: string, subjectId: string): Promise<AgentProfile | undefined> {
+    const [profile] = await db.select().from(agentProfiles).where(and(eq(agentProfiles.agentId, agentId), eq(agentProfiles.subjectId, subjectId)));
+    return profile;
+  }
+
+  async upsertAgentProfile(profile: InsertAgentProfile & { notes?: string; interactionCount?: number }): Promise<AgentProfile> {
+    const existing = await this.getAgentProfile(profile.agentId, profile.subjectId);
+    if (existing) {
+      const [updated] = await db.update(agentProfiles).set({
+        subjectName: profile.subjectName,
+        notes: profile.notes ?? existing.notes,
+        lastInteraction: new Date(),
+        interactionCount: (existing.interactionCount || 0) + 1,
+      }).where(and(eq(agentProfiles.agentId, profile.agentId), eq(agentProfiles.subjectId, profile.subjectId))).returning();
+      return updated;
+    }
+    const [created] = await db.insert(agentProfiles).values({
+      agentId: profile.agentId,
+      subjectId: profile.subjectId,
+      subjectName: profile.subjectName,
+      subjectType: profile.subjectType,
+      notes: profile.notes,
+    }).returning();
+    return created;
+  }
+
+  async getAgentProfiles(agentId: string): Promise<AgentProfile[]> {
+    return db.select().from(agentProfiles).where(eq(agentProfiles.agentId, agentId)).orderBy(desc(agentProfiles.lastInteraction));
   }
 }
 

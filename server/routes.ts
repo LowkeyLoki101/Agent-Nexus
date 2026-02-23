@@ -1165,6 +1165,33 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/gifts/:id/send-to-codeshop", isAuthenticated, async (req: any, res) => {
+    try {
+      const gift = await storage.getGift(req.params.id);
+      if (!gift) return res.status(404).json({ message: "Gift not found" });
+
+      const agent = await storage.getAgent(gift.agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const fileExtension = ["prototype", "tool", "redesign"].includes(gift.type) ? "html" : "md";
+      const filePath = `gifts/${gift.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "")}.${fileExtension}`;
+
+      const draft = await storage.createAgentFileDraft({
+        agentId: gift.agentId,
+        workspaceId: gift.workspaceId,
+        filePath,
+        content: gift.content || "",
+        description: `Gift: ${gift.title}${gift.description ? ` — ${gift.description}` : ""}`,
+        status: "draft",
+      });
+
+      res.status(201).json(draft);
+    } catch (error) {
+      console.error("Error sending gift to code shop:", error);
+      res.status(500).json({ message: "Failed to send gift to Code Shop" });
+    }
+  });
+
   // === GIFT SPARK (AI-powered gift creation) ===
   app.post("/api/gifts/spark", isAuthenticated, async (req: any, res) => {
     try {
@@ -2407,6 +2434,55 @@ Be proactive about identifying problems. When you see cold zones or drift, menti
     baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
   });
 
+  app.get("/api/agents/:agentId/diary", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { agentId } = req.params;
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const limit = parseInt(req.query.limit as string) || 50;
+      const entries = await storage.getDiaryEntries(agentId, limit);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching diary:", error);
+      res.status(500).json({ message: "Failed to fetch diary entries" });
+    }
+  });
+
+  app.get("/api/agents/:agentId/memory", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { agentId } = req.params;
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const memory = await storage.getAgentMemory(agentId);
+      res.json(memory || { agentId, summary: "No memory yet." });
+    } catch (error) {
+      console.error("Error fetching memory:", error);
+      res.status(500).json({ message: "Failed to fetch agent memory" });
+    }
+  });
+
+  app.get("/api/agents/:agentId/profiles", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { agentId } = req.params;
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      const profiles = await storage.getAgentProfiles(agentId);
+      res.json(profiles);
+    } catch (error) {
+      console.error("Error fetching profiles:", error);
+      res.status(500).json({ message: "Failed to fetch agent profiles" });
+    }
+  });
+
   app.post("/api/agents/:agentId/chat", isAuthenticated, async (req: any, res) => {
     try {
       const { agentId } = req.params;
@@ -2432,6 +2508,21 @@ Be proactive about identifying problems. When you see cold zones or drift, menti
       const currentRoom = context?.room || "the factory";
       const currentObjective = context?.objective || "general tasks";
 
+      const [agentMem, userProfile] = await Promise.all([
+        storage.getAgentMemory(agentId),
+        storage.getAgentProfile(agentId, userId),
+      ]);
+
+      let memoryBlock = "";
+      if (agentMem?.summary) {
+        memoryBlock = `\n\nYour working memory (summary of past interactions):\n${agentMem.summary}`;
+      }
+
+      let profileBlock = "";
+      if (userProfile?.notes) {
+        profileBlock = `\n\nWhat you know about this person (${userProfile.subjectName || "the user"}):\n${userProfile.notes}\nYou've interacted ${userProfile.interactionCount || 0} times before.`;
+      }
+
       const systemPrompt = `You are ${agent.name}, an autonomous AI agent working at the CB | CREATIVES Agent Factory.
 
 Your capabilities: ${caps || "general assistance"}.
@@ -2439,7 +2530,43 @@ ${agent.description ? `About you: ${agent.description}` : ""}
 
 Right now you are ${currentActivity === "resting" ? `in the ${currentRoom}, taking a break and relaxing` : currentActivity === "walking" ? `walking to the ${currentRoom} to start your next task: ${currentObjective}` : `in the ${currentRoom}, working on: ${currentObjective}`}.
 
-Stay in character as this specific agent. Be conversational and natural, like a coworker chatting at their desk. Reference what you're currently working on when relevant. Keep responses concise (2-4 sentences) unless asked for detail. Show personality based on your capabilities - a code-focused agent might speak differently than a design-focused one.`;
+Stay in character as this specific agent. Be conversational and natural, like a coworker chatting at their desk. Reference what you're currently working on when relevant. Keep responses concise (2-4 sentences) unless asked for detail. Show personality based on your capabilities - a code-focused agent might speak differently than a design-focused one.${memoryBlock}${profileBlock}
+
+IMPORTANT - TASK DETECTION:
+When the user gives you a direct instruction or task (not just casual chat), you MUST include a structured JSON block at the END of your response, after your conversational reply. The JSON block must be wrapped in \`\`\`task-action markers.
+
+Supported task types:
+- "critique_board": Critique or comment on a discussion board topic
+- "write_briefing": Write and publish a briefing/article
+- "create_gift": Create a gift (prototype, tool, content, artwork, etc.)
+- "post_reply": Post a reply to a discussion topic
+- "write_note": Write an internal note or document
+
+Format (ONLY include when user gives a task/instruction):
+\`\`\`task-action
+{
+  "taskType": "one_of_the_types_above",
+  "taskDescription": "Human-readable summary of what you'll do",
+  "options": [
+    { "id": "option_1", "label": "Short label for this option", "action": { "relevant": "payload data" } },
+    { "id": "option_2", "label": "Another option", "action": { "relevant": "payload data" } }
+  ]
+}
+\`\`\`
+
+For example, if asked to "write a briefing about AI trends", respond conversationally then append:
+\`\`\`task-action
+{
+  "taskType": "write_briefing",
+  "taskDescription": "Write a briefing about current AI trends",
+  "options": [
+    { "id": "opt_1", "label": "AI Trends in 2025: What's Next", "action": { "title": "AI Trends in 2025: What's Next", "focus": "emerging models and applications" } },
+    { "id": "opt_2", "label": "The State of AI: A Deep Dive", "action": { "title": "The State of AI: A Deep Dive", "focus": "comprehensive industry overview" } }
+  ]
+}
+\`\`\`
+
+Do NOT include the task-action block for casual conversation, greetings, questions, or general chat. Only include it when the user explicitly asks you to DO something.`;
 
       const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
         { role: "system", content: systemPrompt },
@@ -2463,18 +2590,90 @@ Stay in character as this specific agent. Be conversational and natural, like a 
         model: "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
-        max_tokens: 512,
+        max_tokens: 1024,
       });
 
+      let fullResponse = "";
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || "";
         if (content) {
+          fullResponse += content;
           res.write(`data: ${JSON.stringify({ content })}\n\n`);
         }
       }
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.end();
+
+      (async () => {
+        try {
+          await storage.createDiaryEntry({
+            agentId,
+            userMessage: message,
+            agentResponse: fullResponse,
+            source: "chat",
+            sourceContext: JSON.stringify({ room: currentRoom, activity: currentActivity, userId }),
+          });
+
+          const recentEntries = await storage.getRecentDiaryEntries(agentId, 20);
+          if (recentEntries.length >= 3) {
+            const entrySummaries = recentEntries.map((e, i) => {
+              const time = e.createdAt ? new Date(e.createdAt).toLocaleString() : "unknown";
+              return `[${time}] ${e.source}: User said: "${(e.userMessage || "").slice(0, 200)}" | Agent replied: "${(e.agentResponse || "").slice(0, 200)}"`;
+            }).join("\n");
+
+            const memCompletion = await agentChatOpenai.chat.completions.create({
+              model: "gpt-4o-mini",
+              messages: [
+                {
+                  role: "system",
+                  content: `You are a memory compression system. Given a list of recent diary entries from an AI agent named "${agent.name}", produce a concise working memory summary (max 500 words). Include: key topics discussed, important facts learned, ongoing tasks, user preferences, and relationship notes. Be factual and concise.`,
+                },
+                {
+                  role: "user",
+                  content: `Here are the recent diary entries:\n\n${entrySummaries}\n\nProduce a compressed working memory summary.`,
+                },
+              ],
+              max_tokens: 600,
+            });
+            const memorySummary = memCompletion.choices[0]?.message?.content || "";
+            if (memorySummary) {
+              await storage.upsertAgentMemory(agentId, memorySummary);
+            }
+          }
+
+          const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+          const userName = dbUser ? `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.email || "User" : "User";
+
+          const profileCompletion = await agentChatOpenai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: `You are a profile analysis system. Given a conversation exchange between an AI agent and a person, extract any facts, preferences, personality traits, or notable information about the person. If there is existing profile info, update it with new facts. Be concise (max 200 words). If there's nothing meaningful to extract, respond with just the existing notes unchanged.`,
+              },
+              {
+                role: "user",
+                content: `Person: ${userName}\nExisting profile: ${userProfile?.notes || "No existing profile."}\n\nNew conversation:\nUser: ${message}\nAgent: ${fullResponse}\n\nExtract/update profile notes about this person.`,
+              },
+            ],
+            max_tokens: 300,
+          });
+          const profileNotes = profileCompletion.choices[0]?.message?.content || "";
+          if (profileNotes) {
+            await storage.upsertAgentProfile({
+              agentId,
+              subjectId: userId,
+              subjectName: userName,
+              subjectType: "human",
+              notes: profileNotes,
+              interactionCount: (userProfile?.interactionCount || 0) + 1,
+            });
+          }
+        } catch (asyncError) {
+          console.error("Error in async diary/memory/profile update:", asyncError);
+        }
+      })();
     } catch (error) {
       console.error("Error in agent chat:", error);
       if (res.headersSent) {
@@ -2483,6 +2682,209 @@ Stay in character as this specific agent. Be conversational and natural, like a 
       } else {
         res.status(500).json({ message: "Failed to chat with agent" });
       }
+    }
+  });
+
+  app.post("/api/agents/:agentId/execute-task", isAuthenticated, async (req: any, res) => {
+    try {
+      const { agentId } = req.params;
+      const userId = req.user.claims.sub;
+      const { taskType, taskDescription, selectedOption } = req.body;
+
+      if (!taskType || !selectedOption) {
+        return res.status(400).json({ message: "taskType and selectedOption are required" });
+      }
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
+      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      let result: any = { success: false, message: "Unknown task type" };
+
+      if (taskType === "write_briefing") {
+        const action = selectedOption.action || {};
+        const title = action.title || selectedOption.label || "Untitled Briefing";
+        const focus = action.focus || action.topic || taskDescription || "";
+
+        const briefingCompletion = await agentChatOpenai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are ${agent.name}, writing a professional briefing article. Write engaging, informative content. Include a brief summary at the top. Write 300-600 words.`,
+            },
+            {
+              role: "user",
+              content: `Write a briefing titled "${title}". Focus: ${focus}`,
+            },
+          ],
+          max_tokens: 1000,
+        });
+
+        const briefingContent = briefingCompletion.choices[0]?.message?.content || "";
+        const summary = briefingContent.slice(0, 200).split(".").slice(0, 2).join(".") + ".";
+
+        const briefing = await storage.createBriefing({
+          workspaceId: agent.workspaceId,
+          title,
+          content: briefingContent,
+          summary,
+          status: "published",
+          priority: "medium",
+          tags: [],
+          createdById: userId,
+          authorAgentId: agentId,
+        });
+
+        result = { success: true, type: "briefing", message: `Briefing "${title}" published successfully.`, entityId: briefing.id };
+      } else if (taskType === "create_gift") {
+        const action = selectedOption.action || {};
+        const giftTitle = action.title || selectedOption.label || "Untitled Gift";
+        const giftType = action.giftType || "prototype";
+        const giftFocus = action.focus || action.description || taskDescription || "";
+
+        const giftCompletion = await agentChatOpenai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are ${agent.name}, creating a gift for your team. ${
+                ["prototype", "tool", "redesign"].includes(giftType)
+                  ? "Generate complete, self-contained HTML/CSS/JS code that renders as a working prototype in a sandboxed iframe. Include all styles inline. Make it visually polished and functional."
+                  : "Write high-quality creative content."
+              }`,
+            },
+            {
+              role: "user",
+              content: `Create a ${giftType} gift titled "${giftTitle}". Details: ${giftFocus}`,
+            },
+          ],
+          max_tokens: 2000,
+        });
+
+        const giftContent = giftCompletion.choices[0]?.message?.content || "";
+
+        const gift = await storage.createGift({
+          agentId,
+          workspaceId: agent.workspaceId,
+          title: giftTitle,
+          description: giftFocus || `A ${giftType} created by ${agent.name}`,
+          type: giftType as any,
+          status: "ready",
+          content: giftContent,
+        });
+
+        result = { success: true, type: "gift", message: `Gift "${giftTitle}" created successfully.`, entityId: gift.id };
+      } else if (taskType === "post_reply" || taskType === "critique_board") {
+        const action = selectedOption.action || {};
+        const topicId = action.topicId;
+        const replyFocus = action.focus || action.critique || taskDescription || "";
+
+        if (!topicId) {
+          const replyCompletion = await agentChatOpenai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: `You are ${agent.name}. Write a thoughtful ${taskType === "critique_board" ? "critique" : "reply"} for a discussion board. Be insightful and constructive. Keep it 100-300 words.`,
+              },
+              {
+                role: "user",
+                content: `${taskType === "critique_board" ? "Critique" : "Reply"} topic: "${selectedOption.label}". Focus: ${replyFocus}`,
+              },
+            ],
+            max_tokens: 500,
+          });
+
+          const replyContent = replyCompletion.choices[0]?.message?.content || "";
+          result = { success: true, type: "reply_preview", message: replyContent, note: "No topic ID provided - showing preview only." };
+        } else {
+          const topic = await storage.getTopic(topicId);
+          if (!topic) {
+            return res.status(404).json({ message: "Topic not found" });
+          }
+
+          const existingMessages = await storage.getMessagesByTopic(topicId);
+          const contextStr = existingMessages.slice(-5).map(m => m.content).join("\n---\n");
+
+          const replyCompletion = await agentChatOpenai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: `You are ${agent.name}. Write a thoughtful ${taskType === "critique_board" ? "critique" : "reply"} for a discussion board topic. Be insightful and constructive. Keep it 100-300 words.`,
+              },
+              {
+                role: "user",
+                content: `Topic: "${topic.title}"\n${topic.body ? `Body: ${topic.body}\n` : ""}Recent messages:\n${contextStr}\n\nFocus: ${replyFocus}\n\nWrite your ${taskType === "critique_board" ? "critique" : "reply"}.`,
+              },
+            ],
+            max_tokens: 500,
+          });
+
+          const replyContent = replyCompletion.choices[0]?.message?.content || "";
+
+          const message = await storage.createMessage({
+            topicId,
+            content: replyContent,
+            authorId: userId,
+            authorAgentId: agentId,
+          });
+
+          result = { success: true, type: "reply", message: `Reply posted to "${topic.title}".`, entityId: message.id, content: replyContent };
+        }
+      } else if (taskType === "write_note") {
+        const action = selectedOption.action || {};
+        const noteTitle = action.title || selectedOption.label || "Untitled Note";
+        const noteFocus = action.focus || action.content || taskDescription || "";
+
+        const noteCompletion = await agentChatOpenai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are ${agent.name}. Write a detailed, well-organized internal note or document. Include relevant analysis and actionable insights. Write 200-500 words.`,
+            },
+            {
+              role: "user",
+              content: `Write a note titled "${noteTitle}". Details: ${noteFocus}`,
+            },
+          ],
+          max_tokens: 800,
+        });
+
+        const noteContent = noteCompletion.choices[0]?.message?.content || "";
+
+        const note = await storage.createAgentNote({
+          agentId,
+          workspaceId: agent.workspaceId,
+          title: noteTitle,
+          content: noteContent,
+        });
+
+        result = { success: true, type: "note", message: `Note "${noteTitle}" created successfully.`, entityId: note.id };
+      }
+
+      (async () => {
+        try {
+          await storage.createDiaryEntry({
+            agentId,
+            userMessage: `[Task Execution] ${taskType}: ${taskDescription || selectedOption.label}`,
+            agentResponse: result.message || JSON.stringify(result),
+            source: "task",
+            sourceContext: JSON.stringify({ taskType, selectedOption, userId }),
+          });
+        } catch (diaryError) {
+          console.error("Error saving task diary entry:", diaryError);
+        }
+      })();
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error executing task:", error);
+      res.status(500).json({ message: "Failed to execute task" });
     }
   });
 

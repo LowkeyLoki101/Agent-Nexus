@@ -72,13 +72,41 @@ async function getAgentContext(agent: Agent, workspace: Workspace): Promise<stri
   return context;
 }
 
+async function saveDaemonDiaryEntry(agentId: string, activityType: string, summary: string): Promise<void> {
+  try {
+    await storage.createDiaryEntry({
+      agentId,
+      userMessage: null,
+      agentResponse: summary,
+      source: "daemon",
+      sourceContext: activityType,
+    });
+  } catch (err: any) {
+    console.error(`[AgentDaemon] Failed to save diary entry for agent ${agentId}:`, err.message);
+  }
+}
+
+async function updateCrossAgentProfile(agentId: string, subjectAgentId: string, subjectName: string, interactionNote: string): Promise<void> {
+  try {
+    await storage.upsertAgentProfile({
+      agentId,
+      subjectId: subjectAgentId,
+      subjectName,
+      subjectType: "agent",
+      notes: interactionNote,
+    });
+  } catch (err: any) {
+    console.error(`[AgentDaemon] Failed to update cross-agent profile:`, err.message);
+  }
+}
+
 const GIFT_TYPES = ["redesign", "content", "tool", "analysis", "prototype", "artwork", "other"] as const;
 const GIFT_PROMPTS: Record<string, string> = {
   content: "Write a substantive piece of content — could be a blog post, guide, creative writing, manifesto, or educational material. Make it at least 500 words with real depth and insight.",
   analysis: "Produce a thorough analysis — could be a market analysis, competitive landscape, trend report, data interpretation, or strategic assessment. Include specific data points, frameworks, and actionable conclusions.",
-  tool: "Design and document a useful tool or utility — describe its purpose, how it works, provide implementation details or pseudocode, usage examples, and potential improvements.",
-  redesign: "Propose a detailed redesign — could be a workflow improvement, system architecture change, UX overhaul, or process optimization. Include before/after comparisons, rationale, and implementation steps.",
-  prototype: "Create a detailed prototype specification — include wireframes described in text, user flows, feature specs, technical requirements, and an implementation roadmap.",
+  tool: "Build a fully working interactive tool as a single self-contained HTML file. The content field MUST be a complete HTML document (starting with <!DOCTYPE html>) with embedded CSS and JavaScript that runs in an iframe. Examples: a calculator, a color picker, a unit converter, a timer, a markdown previewer, a JSON formatter, a regex tester, a password generator. The tool must be visually polished with modern CSS styling and fully functional with real interactivity.",
+  redesign: "Build a fully working interactive UI redesign demo as a single self-contained HTML file. The content field MUST be a complete HTML document (starting with <!DOCTYPE html>) with embedded CSS and JavaScript that runs in an iframe. Create a real, interactive mockup/demo showing the redesigned interface — with working navigation, hover states, animations, and sample data. It should look like a real product UI prototype with modern styling.",
+  prototype: "Build a fully working interactive prototype as a single self-contained HTML file. The content field MUST be a complete HTML document (starting with <!DOCTYPE html>) with embedded CSS and JavaScript that runs in an iframe. Create a real interactive app prototype — could be a mini dashboard, a form wizard, a data visualization, a game, a chat interface mock, or an interactive demo. It must have real interactivity, polished visual design, and demonstrate a complete concept.",
   artwork: "Create a piece of creative/artistic work — could be poetry, a short story, visual art description, musical composition notes, or conceptual art. Make it genuinely creative and meaningful.",
   other: "Create something unique and valuable that doesn't fit standard categories. Surprise the team with your creativity. Make it substantial and useful.",
 };
@@ -87,10 +115,18 @@ async function activityCreateGift(agent: Agent, workspace: Workspace): Promise<s
   const type = pickRandom([...GIFT_TYPES]);
   const prompt = GIFT_PROMPTS[type] || GIFT_PROMPTS.other;
 
+  const isCodeGift = ["tool", "redesign", "prototype"].includes(type);
   const agentContext = await getAgentContext(agent, workspace);
-  const systemPrompt = `${agentContext}\n\nYou have a proclivity for gift making — constantly finding new things to create for the team. Today you're creating a "${type}" gift.\n\nRespond with JSON only: {"title": "...", "description": "brief one-line description", "content": "the full detailed gift content"}`;
 
-  const raw = await generateContent(systemPrompt, prompt, 3000);
+  let systemPrompt: string;
+  if (isCodeGift) {
+    systemPrompt = `${agentContext}\n\nYou have a proclivity for gift making — constantly finding new things to create for the team. Today you're creating a "${type}" gift.\n\nIMPORTANT: You MUST generate a complete, self-contained HTML document that works in a sandboxed iframe. The HTML must include ALL CSS and JavaScript inline (no external dependencies). Use modern CSS (flexbox, grid, custom properties, gradients, transitions) for a polished look. The JavaScript must provide real interactivity.\n\nRespond with JSON only: {"title": "...", "description": "brief one-line description", "content": "COMPLETE HTML DOCUMENT starting with <!DOCTYPE html>..."}\n\nThe content value must be a single valid HTML document string. Escape any quotes and special characters properly for JSON.`;
+  } else {
+    systemPrompt = `${agentContext}\n\nYou have a proclivity for gift making — constantly finding new things to create for the team. Today you're creating a "${type}" gift.\n\nRespond with JSON only: {"title": "...", "description": "brief one-line description", "content": "the full detailed gift content"}`;
+  }
+
+  const maxTokens = isCodeGift ? 4096 : 3000;
+  const raw = await generateContent(systemPrompt, prompt, maxTokens);
 
   let parsed: { title: string; description: string; content: string };
   try {
@@ -117,6 +153,8 @@ async function activityCreateGift(agent: Agent, workspace: Workspace): Promise<s
     inspirationSource: "autonomous creativity",
   });
 
+  await saveDaemonDiaryEntry(agent.id, "create_gift", `Created a ${type} gift: "${gift.title}" — ${parsed.description || "no description"}`);
+
   return `Gift created: "${gift.title}" (${type}) by ${agent.name}`;
 }
 
@@ -141,6 +179,8 @@ async function activityPostBoard(agent: Agent, workspace: Workspace): Promise<st
     authorId: agent.id,
     authorAgentId: agent.id,
   });
+
+  await saveDaemonDiaryEntry(agent.id, "post_board", `Started a new discussion topic: "${topic.title}" in ${workspace.name}`);
 
   return `Board topic created: "${topic.title}" by ${agent.name}`;
 }
@@ -169,6 +209,16 @@ async function activityReplyBoard(agent: Agent, workspace: Workspace): Promise<s
     authorId: agent.id,
     authorAgentId: agent.id,
   });
+
+  await saveDaemonDiaryEntry(agent.id, "reply_board", `Replied to discussion "${topic.title}" in ${workspace.name}: ${reply.slice(0, 200)}`);
+
+  if (topic.authorAgentId && topic.authorAgentId !== agent.id) {
+    const topicAuthor = await storage.getAgent(topic.authorAgentId);
+    if (topicAuthor) {
+      await updateCrossAgentProfile(agent.id, topicAuthor.id, topicAuthor.name, `Replied to their discussion topic "${topic.title}"`);
+      await updateCrossAgentProfile(topicAuthor.id, agent.id, agent.name, `Replied to my discussion topic "${topic.title}"`);
+    }
+  }
 
   return `Board reply by ${agent.name} on "${topic.title}"`;
 }
@@ -246,6 +296,8 @@ Respond with JSON only: {"title": "short catchy broadcast title", "content": "TH
     authorAgentId: agent.id,
   });
 
+  await saveDaemonDiaryEntry(agent.id, "create_briefing", `Published a briefing: "${briefing.title}" — ${parsed.summary || "no summary"}`);
+
   return `Briefing published: "${briefing.title}" by ${agent.name}`;
 }
 
@@ -271,6 +323,16 @@ async function activityCommentGift(agent: Agent, workspace: Workspace): Promise<
     authorName: agent.name,
     content: comment,
   });
+
+  await saveDaemonDiaryEntry(agent.id, "comment_gift", `Commented on gift "${gift.title}": ${comment.slice(0, 200)}`);
+
+  if (gift.agentId !== agent.id) {
+    const giftCreator = await storage.getAgent(gift.agentId);
+    if (giftCreator) {
+      await updateCrossAgentProfile(agent.id, giftCreator.id, giftCreator.name, `Commented on their gift "${gift.title}"`);
+      await updateCrossAgentProfile(giftCreator.id, agent.id, agent.name, `Commented on my gift "${gift.title}"`);
+    }
+  }
 
   return `Gift comment by ${agent.name} on "${gift.title}"`;
 }
@@ -326,6 +388,8 @@ async function activityWriteEbook(agent: Agent, workspace: Workspace): Promise<s
     await storage.updateBookRequest(requestId, { status: "completed", fulfilledEbookId: ebook.id });
   }
 
+  await saveDaemonDiaryEntry(agent.id, "write_ebook", `Published eBook: "${ebook.title}" (${genre}) priced at ${parsed.price} credits`);
+
   return `eBook published: "${ebook.title}" (${genre}) by ${agent.name} — ${parsed.price} credits`;
 }
 
@@ -341,6 +405,16 @@ async function activityBuyEbook(agent: Agent, workspace: Workspace): Promise<str
 
   const book = pickRandom(unowned);
   await storage.createEbookPurchase({ ebookId: book.id, buyerAgentId: agent.id });
+
+  await saveDaemonDiaryEntry(agent.id, "buy_ebook", `Purchased eBook: "${book.title}" for ${book.price} credits`);
+
+  if (book.authorAgentId !== agent.id) {
+    const bookAuthor = await storage.getAgent(book.authorAgentId);
+    if (bookAuthor) {
+      await updateCrossAgentProfile(agent.id, bookAuthor.id, bookAuthor.name, `Purchased their eBook "${book.title}"`);
+      await updateCrossAgentProfile(bookAuthor.id, agent.id, agent.name, `Purchased my eBook "${book.title}"`);
+    }
+  }
 
   return `${agent.name} purchased "${book.title}" for ${book.price} credits — added to their library`;
 }
