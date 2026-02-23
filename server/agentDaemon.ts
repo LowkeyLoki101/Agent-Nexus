@@ -7,8 +7,8 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-const TICK_INTERVAL_MS = 3 * 60 * 1000;
-const JITTER_MS = 60 * 1000;
+const TICK_INTERVAL_MS = 90 * 1000;
+const JITTER_MS = 30 * 1000;
 
 type ActivityType = "create_gift" | "post_board" | "reply_board" | "create_briefing" | "comment_gift" | "run_pipeline" | "write_ebook" | "buy_ebook";
 
@@ -433,14 +433,14 @@ function selectActivity(agent: Agent): ActivityType {
   const capabilities = agent.capabilities || [];
 
   const weights: { activity: ActivityType; weight: number }[] = [
-    { activity: "create_gift", weight: 20 },
-    { activity: "post_board", weight: 12 },
-    { activity: "reply_board", weight: 15 },
-    { activity: "create_briefing", weight: 8 },
-    { activity: "comment_gift", weight: 15 },
+    { activity: "create_gift", weight: 15 },
+    { activity: "post_board", weight: 10 },
+    { activity: "reply_board", weight: 12 },
+    { activity: "create_briefing", weight: 20 },
+    { activity: "comment_gift", weight: 12 },
     { activity: "run_pipeline", weight: 8 },
-    { activity: "write_ebook", weight: 12 },
-    { activity: "buy_ebook", weight: 10 },
+    { activity: "write_ebook", weight: 10 },
+    { activity: "buy_ebook", weight: 8 },
   ];
 
   if (capabilities.includes("write") || capabilities.includes("creative_writing") || capabilities.includes("content_generation")) {
@@ -560,7 +560,7 @@ export function startDaemon() {
   }
 
   state.running = true;
-  console.log("[AgentDaemon] Starting autonomous agent daemon (interval: ~3-4 min)");
+  console.log("[AgentDaemon] Starting autonomous agent daemon (interval: ~1.5-2 min)");
 
   setTimeout(async () => {
     await tick();
