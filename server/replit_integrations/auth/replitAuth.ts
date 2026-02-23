@@ -50,7 +50,7 @@ function updateUserSession(
   user.expires_at = user.claims?.exp;
 }
 
-const ADMIN_EMAILS = ["emergent.intel@gmail.com"];
+const ADMIN_EMAILS = ["emergent.intel@gmail.com", "colby@emergerind.com"];
 
 async function upsertUser(claims: any) {
   const email = claims["email"];

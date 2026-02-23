@@ -83,6 +83,20 @@ Authentication is handled through `server/replit_integrations/auth/` with user u
 - **Route `/assembly-lines`**: Create and manage multi-department pipelines with step chaining
 - **Factory Integration**: Agent World (main dashboard at `/`) shows recent gifts and active assembly lines
 
+### Subscription System (Stripe)
+- **Plan**: Creative Intelligence Pro — $9/month (price_1T3okiPo0Kn2QjErPumcuzCP)
+- **Coupon**: FOUNDING2026 (100% off forever, max 50 uses)
+- **Stripe Integration**: stripe-replit-sync for automatic webhook handling, schema management, and data sync
+- **Paywall**: Client-side gate in `App.tsx` + server-side `isSubscribed` middleware on all content API routes
+- **Admin Bypass**: Admin users (isAdmin=true) bypass the paywall. Admin emails auto-assigned in auth upsert
+- **Admin Emails**: emergent.intel@gmail.com, colby@emergerind.com
+- **Checkout Flow**: `/api/stripe/create-checkout` → Stripe Checkout → webhook syncs subscription → `/api/stripe/sync-subscription` on return
+- **Billing Portal**: `/api/stripe/create-portal` for subscription management
+- **Admin Panel**: `/admin` route for managing users, roles, and subscription status
+- **Subscribe Page**: `/subscribe` shown to non-admin, non-subscribed users as paywall
+- **Key Files**: `server/stripeClient.ts`, `server/webhookHandlers.ts`, `server/seed-stripe.ts`, `client/src/pages/subscribe.tsx`, `client/src/pages/admin.tsx`
+- **Library Page**: Hidden from sidebar navigation but route preserved for AI/model context
+
 ### Role-Based Access Control
 Access control is implemented at the route level with helper functions that check workspace membership and required roles before allowing operations.
 

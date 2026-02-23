@@ -1,6 +1,7 @@
+import { useEffect } from "react";
 import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "./lib/queryClient";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -31,6 +32,8 @@ import Workstation from "@/pages/workstation";
 import Boards from "@/pages/boards";
 import NotFound from "@/pages/not-found";
 import ForgotPassword from "@/pages/forgot-password";
+import Subscribe from "@/pages/subscribe";
+import Admin from "@/pages/admin";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const style = {
@@ -82,6 +85,8 @@ function AuthenticatedRouter() {
         <Route path="/forgot-password" component={ForgotPassword} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
+        <Route path="/admin" component={Admin} />
+        <Route path="/subscribe" component={Subscribe} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>
@@ -90,6 +95,22 @@ function AuthenticatedRouter() {
 
 function AppContent() {
   const { user, isLoading } = useAuth();
+  const { data: profile, isLoading: profileLoading } = useQuery<any>({
+    queryKey: ["/api/user/profile"],
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("subscription") === "success" && user) {
+      apiRequest("POST", "/api/stripe/sync-subscription", {})
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/user/profile"] });
+          window.history.replaceState({}, "", "/");
+        })
+        .catch(console.error);
+    }
+  }, [user]);
 
   if (isLoading) {
     return (
@@ -107,6 +128,21 @@ function AppContent() {
       return <ForgotPassword />;
     }
     return <Landing />;
+  }
+
+  if (profileLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="space-y-4 text-center">
+          <Skeleton className="h-12 w-12 rounded-md mx-auto" />
+          <Skeleton className="h-4 w-32 mx-auto" />
+        </div>
+      </div>
+    );
+  }
+
+  if (profile && !profile.isAdmin && profile.subscriptionStatus !== "active") {
+    return <Subscribe />;
   }
 
   return <AuthenticatedRouter />;

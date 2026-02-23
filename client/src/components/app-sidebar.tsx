@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
 import {
   Building2,
   Bot,
@@ -38,6 +39,8 @@ import {
   Wrench,
   Newspaper,
   MessageCircle,
+  Shield,
+  CreditCard,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -101,6 +104,7 @@ const mainNavItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+  const { data: profile } = useQuery<any>({ queryKey: ["/api/user/profile"] });
 
   const isActive = (url: string) => {
     if (url === "/") return location === "/";
@@ -142,6 +146,31 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {profile?.isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Administration</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/admin")}>
+                    <Link href="/admin" data-testid="nav-admin-panel">
+                      <Shield className="h-4 w-4" />
+                      <span>Admin Panel</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/subscribe")}>
+                    <Link href="/subscribe" data-testid="nav-billing">
+                      <CreditCard className="h-4 w-4" />
+                      <span>Billing</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>

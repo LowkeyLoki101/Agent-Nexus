@@ -2,12 +2,15 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
-import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema, insertDiscussionTopicSchema, insertDiscussionMessageSchema } from "@shared/schema";
+import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema, insertDiscussionTopicSchema, insertDiscussionMessageSchema, users } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as path from "path";
 import multer from "multer";
+import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
+import { db } from "./db";
+import { eq, sql } from "drizzle-orm";
 
 const BROADCAST_MAX_WORDS = 60;
 
@@ -109,6 +112,24 @@ async function checkWorkspaceAccessBySlug(
   return { ...access, workspaceId: workspace.id };
 }
 
+async function isSubscribed(req: any, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user?.claims?.sub;
+    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    if (!user) return res.status(401).json({ message: "User not found" });
+
+    if (user.isAdmin || user.subscriptionStatus === "active") {
+      return next();
+    }
+
+    return res.status(403).json({ message: "Active subscription required" });
+  } catch (error) {
+    return res.status(500).json({ message: "Authorization check failed" });
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -116,7 +137,250 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
 
-  app.get("/api/workspaces", isAuthenticated, async (req: any, res) => {
+  app.get("/api/user/profile", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) return res.status(404).json({ message: "User not found" });
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        isAdmin: user.isAdmin,
+        subscriptionStatus: user.subscriptionStatus,
+        stripeCustomerId: user.stripeCustomerId,
+        stripeSubscriptionId: user.stripeSubscriptionId,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch profile" });
+    }
+  });
+
+  app.get("/api/stripe/publishable-key", isAuthenticated, async (_req: any, res) => {
+    try {
+      const key = await getStripePublishableKey();
+      res.json({ publishableKey: key });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get Stripe key" });
+    }
+  });
+
+  app.get("/api/stripe/subscription-price", isAuthenticated, async (_req: any, res) => {
+    try {
+      const result = await db.execute(
+        sql`SELECT p.id as product_id, p.name, p.description, pr.id as price_id, pr.unit_amount, pr.currency, pr.recurring 
+            FROM stripe.products p 
+            JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true 
+            WHERE p.active = true AND p.metadata->>'plan' = 'pro' 
+            LIMIT 1`
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ message: "No subscription plan found" });
+      }
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error("Error fetching price:", error);
+      res.status(500).json({ message: "Failed to fetch subscription price" });
+    }
+  });
+
+  app.post("/api/stripe/create-checkout", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { priceId, couponCode } = req.body ?? {};
+
+      if (!priceId) return res.status(400).json({ message: "priceId is required" });
+
+      const validPrice = await db.execute(
+        sql`SELECT pr.id FROM stripe.prices pr 
+            JOIN stripe.products p ON pr.product = p.id 
+            WHERE pr.id = ${priceId} AND pr.active = true AND p.active = true AND p.metadata->>'plan' = 'pro' 
+            LIMIT 1`
+      );
+      if (validPrice.rows.length === 0) {
+        return res.status(400).json({ message: "Invalid price" });
+      }
+
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const stripe = await getUncachableStripeClient();
+
+      let customerId = user.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email || undefined,
+          metadata: { userId },
+        });
+        customerId = customer.id;
+        await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, userId));
+      }
+
+      const sessionParams: any = {
+        customer: customerId,
+        payment_method_types: ['card'],
+        line_items: [{ price: priceId, quantity: 1 }],
+        mode: 'subscription',
+        success_url: `${req.protocol}://${req.get('host')}/?subscription=success`,
+        cancel_url: `${req.protocol}://${req.get('host')}/?subscription=cancelled`,
+        allow_promotion_codes: true,
+      };
+
+      if (couponCode) {
+        try {
+          const promoCodes = await stripe.promotionCodes.list({ code: couponCode, active: true, limit: 1 });
+          if (promoCodes.data.length > 0) {
+            sessionParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
+            delete sessionParams.allow_promotion_codes;
+          }
+        } catch {}
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error("Checkout error:", error);
+      res.status(500).json({ message: "Failed to create checkout session" });
+    }
+  });
+
+  app.post("/api/stripe/create-portal", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user?.stripeCustomerId) {
+        return res.status(400).json({ message: "No billing account found" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const session = await stripe.billingPortal.sessions.create({
+        customer: user.stripeCustomerId,
+        return_url: `${req.protocol}://${req.get('host')}/`,
+      });
+      res.json({ url: session.url });
+    } catch (error) {
+      console.error("Portal error:", error);
+      res.status(500).json({ message: "Failed to create billing portal" });
+    }
+  });
+
+  app.post("/api/stripe/sync-subscription", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user?.stripeCustomerId) {
+        return res.json({ subscriptionStatus: user?.subscriptionStatus || "none" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const subscriptions = await stripe.subscriptions.list({
+        customer: user.stripeCustomerId,
+        status: 'all',
+        limit: 1,
+      });
+
+      let status = "none";
+      let subId = null;
+      if (subscriptions.data.length > 0) {
+        const sub = subscriptions.data[0];
+        subId = sub.id;
+        if (sub.status === "active" || sub.status === "trialing") {
+          status = "active";
+        } else if (sub.status === "past_due") {
+          status = "past_due";
+        } else if (sub.status === "canceled" || sub.status === "unpaid") {
+          status = "cancelled";
+        } else {
+          status = sub.status;
+        }
+      }
+
+      await db.update(users).set({
+        subscriptionStatus: status,
+        stripeSubscriptionId: subId,
+      }).where(eq(users.id, userId));
+
+      res.json({ subscriptionStatus: status });
+    } catch (error) {
+      console.error("Sync error:", error);
+      res.status(500).json({ message: "Failed to sync subscription" });
+    }
+  });
+
+  app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [adminUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!adminUser?.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      const allUsers = await db.select().from(users);
+      res.json(allUsers.map(u => ({
+        id: u.id,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        isAdmin: u.isAdmin,
+        subscriptionStatus: u.subscriptionStatus,
+        stripeCustomerId: u.stripeCustomerId,
+        stripeSubscriptionId: u.stripeSubscriptionId,
+        createdAt: u.createdAt,
+      })));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.patch("/api/admin/users/:userId", isAuthenticated, async (req: any, res) => {
+    try {
+      const adminId = req.user.claims.sub;
+      const [adminUser] = await db.select().from(users).where(eq(users.id, adminId));
+      if (!adminUser?.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { userId } = req.params;
+      const body = req.body ?? {};
+      const updates: any = {};
+      if (typeof body.isAdmin === "boolean") updates.isAdmin = body.isAdmin;
+      if (typeof body.subscriptionStatus === "string") updates.subscriptionStatus = body.subscriptionStatus;
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid updates provided" });
+      }
+
+      const [updated] = await db.update(users).set(updates).where(eq(users.id, userId)).returning();
+      res.json({
+        id: updated.id,
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        isAdmin: updated.isAdmin,
+        subscriptionStatus: updated.subscriptionStatus,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.use("/api/workspaces", isAuthenticated, isSubscribed);
+  app.use("/api/agents", isAuthenticated, isSubscribed);
+  app.use("/api/gifts", isAuthenticated, isSubscribed);
+  app.use("/api/products", isAuthenticated, isSubscribed);
+  app.use("/api/assembly-lines", isAuthenticated, isSubscribed);
+  app.use("/api/assembly-line-steps", isAuthenticated, isSubscribed);
+  app.use("/api/briefings", isAuthenticated, isSubscribed);
+  app.use("/api/topics", isAuthenticated, isSubscribed);
+  app.use("/api/tokens", isAuthenticated, isSubscribed);
+  app.use("/api/audit-logs", isAuthenticated, isSubscribed);
+  app.use("/api/library", isAuthenticated, isSubscribed);
+  app.use("/api/agent-notes", isAuthenticated, isSubscribed);
+  app.use("/api/agent-drafts", isAuthenticated, isSubscribed);
+  app.use("/api/command-chat", isAuthenticated, isSubscribed);
+  app.use("/api/factory", isAuthenticated, isSubscribed);
+
+  app.get("/api/workspaces", async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const workspaces = await storage.getWorkspacesByUser(userId);
