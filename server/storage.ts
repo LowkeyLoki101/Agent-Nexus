@@ -108,6 +108,7 @@ export interface IStorage {
   deleteAssemblyLine(id: string): Promise<void>;
 
   getAssemblyLineSteps(assemblyLineId: string): Promise<AssemblyLineStep[]>;
+  getAssemblyLineStepById(id: string): Promise<AssemblyLineStep | undefined>;
   createAssemblyLineStep(step: InsertAssemblyLineStep): Promise<AssemblyLineStep>;
   updateAssemblyLineStep(id: string, updates: Partial<InsertAssemblyLineStep>): Promise<AssemblyLineStep | undefined>;
 
@@ -433,6 +434,11 @@ export class DatabaseStorage implements IStorage {
 
   async getAssemblyLineSteps(assemblyLineId: string): Promise<AssemblyLineStep[]> {
     return db.select().from(assemblyLineSteps).where(eq(assemblyLineSteps.assemblyLineId, assemblyLineId)).orderBy(asc(assemblyLineSteps.stepOrder));
+  }
+
+  async getAssemblyLineStepById(id: string): Promise<AssemblyLineStep | undefined> {
+    const [step] = await db.select().from(assemblyLineSteps).where(eq(assemblyLineSteps.id, id));
+    return step;
   }
 
   async createAssemblyLineStep(step: InsertAssemblyLineStep): Promise<AssemblyLineStep> {

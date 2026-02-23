@@ -2281,9 +2281,9 @@ export default function AgentWorld() {
         />
       )}
 
-      <FactoryHealthPanel />
-
       <CommandChatPanel agents={agentList} workspaces={workspaces || []} />
+
+      <FactoryHealthPanel />
     </div>
   );
 }

@@ -1391,6 +1391,72 @@ Respond with ONLY valid JSON in this exact format:
     }
   });
 
+  app.post("/api/products/:id/run", isAuthenticated, async (req: any, res) => {
+    try {
+      const { runProductThroughPipeline } = await import("./assemblyEngine");
+      const userId = req.user.claims.sub;
+      const product = await storage.getProduct(req.params.id);
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      if (product.ownerId !== userId) return res.status(403).json({ message: "Not authorized" });
+
+      res.json({ message: "Pipeline execution started", productId: product.id });
+
+      runProductThroughPipeline(product.id).then(result => {
+        console.log(`Pipeline result for "${product.name}":`, result);
+      }).catch(err => {
+        console.error(`Pipeline error for "${product.name}":`, err);
+      });
+    } catch (error: any) {
+      console.error("Error starting pipeline:", error);
+      res.status(500).json({ message: "Failed to start pipeline" });
+    }
+  });
+
+  app.post("/api/assembly-line-steps/:id/execute", isAuthenticated, async (req: any, res) => {
+    try {
+      const { executeSingleStep } = await import("./assemblyEngine");
+      const userId = req.user.claims.sub;
+      const step = await storage.getAssemblyLineStepById(req.params.id);
+      if (!step) return res.status(404).json({ success: false, message: "Step not found" });
+      const assemblyLine = await storage.getAssemblyLine(step.assemblyLineId);
+      if (!assemblyLine || assemblyLine.ownerId !== userId) return res.status(403).json({ success: false, message: "Not authorized" });
+
+      const productId = req.body?.productId;
+      const result = await executeSingleStep(req.params.id, productId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error executing step:", error);
+      res.status(500).json({ success: false, message: "Failed to execute step" });
+    }
+  });
+
+  app.post("/api/products/run-all", isAuthenticated, async (req: any, res) => {
+    try {
+      const { runProductThroughPipeline } = await import("./assemblyEngine");
+      const userId = req.user.claims.sub;
+      const productsList = await storage.getProductsByUser(userId);
+      const queued = productsList.filter(p => p.status === "queued");
+
+      if (queued.length === 0) {
+        return res.json({ message: "No queued products to run", started: 0 });
+      }
+
+      res.json({ message: `Started ${queued.length} product pipelines`, started: queued.length, products: queued.map(p => p.name) });
+
+      for (const product of queued) {
+        try {
+          const result = await runProductThroughPipeline(product.id);
+          console.log(`Pipeline result for "${product.name}":`, result);
+        } catch (err) {
+          console.error(`Pipeline error for "${product.name}":`, err);
+        }
+      }
+    } catch (error: any) {
+      console.error("Error running all products:", error);
+      res.status(500).json({ message: "Failed to run products" });
+    }
+  });
+
   // Media generation routes for Newsroom
   const mediaOpenai = new OpenAI({
     apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
