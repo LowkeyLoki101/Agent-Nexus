@@ -1457,6 +1457,120 @@ interface FactoryHealth {
   pendingAssemblySteps: { lineName: string; stepOrder: number; room: string; status: string }[];
 }
 
+function DaemonStatusPanel() {
+  const { data: status } = useQuery<{
+    running: boolean;
+    lastTick: string | null;
+    lastActivity: string | null;
+    totalActivities: number;
+    errors: number;
+  }>({
+    queryKey: ["/api/daemon/status"],
+    refetchInterval: 15000,
+  });
+
+  const startMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/daemon/start"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/daemon/status"] }),
+  });
+
+  const stopMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/daemon/stop"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/daemon/status"] }),
+  });
+
+  const triggerMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/daemon/trigger"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/daemon/status"] }),
+  });
+
+  if (!status) return null;
+
+  const timeSince = status.lastTick
+    ? `${Math.round((Date.now() - new Date(status.lastTick).getTime()) / 1000)}s ago`
+    : "never";
+
+  return (
+    <Card className="border-primary/30 bg-primary/5" data-testid="panel-daemon-status">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm">Autonomous Daemon</CardTitle>
+            <Badge
+              variant={status.running ? "default" : "secondary"}
+              className="text-[10px]"
+              data-testid="badge-daemon-status"
+            >
+              {status.running ? "Running" : "Stopped"}
+            </Badge>
+          </div>
+          <div className="flex gap-1">
+            {status.running ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => stopMutation.mutate()}
+                disabled={stopMutation.isPending}
+                data-testid="button-daemon-stop"
+              >
+                <Pause className="h-3 w-3 mr-1" />
+                Pause
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => startMutation.mutate()}
+                disabled={startMutation.isPending}
+                data-testid="button-daemon-start"
+              >
+                <Play className="h-3 w-3 mr-1" />
+                Start
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => triggerMutation.mutate()}
+              disabled={triggerMutation.isPending}
+              data-testid="button-daemon-trigger"
+            >
+              {triggerMutation.isPending ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Zap className="h-3 w-3 mr-1" />
+              )}
+              Trigger
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <div>
+            <span className="text-muted-foreground">Activities:</span>{" "}
+            <span className="font-medium" data-testid="text-daemon-activities">{status.totalActivities}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Last tick:</span>{" "}
+            <span className="font-medium">{timeSince}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Errors:</span>{" "}
+            <span className="font-medium">{status.errors}</span>
+          </div>
+        </div>
+        {status.lastActivity && (
+          <p className="text-[11px] text-muted-foreground mt-1 truncate" data-testid="text-daemon-last-activity">
+            Last: {status.lastActivity}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function FactoryHealthPanel() {
   const { data: health } = useQuery<FactoryHealth>({ queryKey: ["/api/factory/health"] });
 
@@ -2282,6 +2396,8 @@ export default function AgentWorld() {
       )}
 
       <CommandChatPanel agents={agentList} workspaces={workspaces || []} />
+
+      <DaemonStatusPanel />
 
       <FactoryHealthPanel />
     </div>

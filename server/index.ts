@@ -6,6 +6,7 @@ import { seedDatabase } from "./seed";
 import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./stripeClient";
 import { WebhookHandlers } from "./webhookHandlers";
+import { startDaemon } from "./agentDaemon";
 
 const app = express();
 const httpServer = createServer(app);
@@ -159,6 +160,7 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      startDaemon();
     },
   );
 })();

@@ -53,6 +53,7 @@ export interface IStorage {
   getWorkspace(id: string): Promise<Workspace | undefined>;
   getWorkspaceBySlug(slug: string): Promise<Workspace | undefined>;
   getWorkspacesByUser(userId: string): Promise<Workspace[]>;
+  getAllWorkspaces(): Promise<Workspace[]>;
   createWorkspace(workspace: InsertWorkspace): Promise<Workspace>;
   updateWorkspace(id: string, updates: Partial<InsertWorkspace>): Promise<Workspace | undefined>;
   
@@ -115,6 +116,7 @@ export interface IStorage {
   getProduct(id: string): Promise<Product | undefined>;
   getProductsByUser(userId: string): Promise<Product[]>;
   getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]>;
+  getQueuedProducts(): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
 
@@ -154,6 +156,10 @@ export class DatabaseStorage implements IStorage {
 
   async getWorkspacesByUser(userId: string): Promise<Workspace[]> {
     return db.select().from(workspaces).where(eq(workspaces.ownerId, userId));
+  }
+
+  async getAllWorkspaces(): Promise<Workspace[]> {
+    return db.select().from(workspaces);
   }
 
   async createWorkspace(workspace: InsertWorkspace): Promise<Workspace> {
@@ -462,6 +468,10 @@ export class DatabaseStorage implements IStorage {
 
   async getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]> {
     return db.select().from(products).where(eq(products.assemblyLineId, assemblyLineId)).orderBy(desc(products.createdAt));
+  }
+
+  async getQueuedProducts(): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.status, "queued")).orderBy(asc(products.createdAt));
   }
 
   async createProduct(product: InsertProduct): Promise<Product> {

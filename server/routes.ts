@@ -2502,5 +2502,50 @@ Stay in character as this specific agent. Be conversational and natural, like a 
     }
   });
 
+  app.get("/api/daemon/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const { getDaemonStatus } = await import("./agentDaemon");
+      res.json(getDaemonStatus());
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get daemon status" });
+    }
+  });
+
+  app.post("/api/daemon/start", isAuthenticated, async (req: any, res) => {
+    try {
+      const [adminUser] = await db.select().from(users).where(eq(users.id, req.user.claims.sub));
+      if (!adminUser?.isAdmin) return res.status(403).json({ message: "Admin only" });
+      const { startDaemon } = await import("./agentDaemon");
+      startDaemon();
+      res.json({ message: "Daemon started" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to start daemon" });
+    }
+  });
+
+  app.post("/api/daemon/stop", isAuthenticated, async (req: any, res) => {
+    try {
+      const [adminUser] = await db.select().from(users).where(eq(users.id, req.user.claims.sub));
+      if (!adminUser?.isAdmin) return res.status(403).json({ message: "Admin only" });
+      const { stopDaemon } = await import("./agentDaemon");
+      stopDaemon();
+      res.json({ message: "Daemon stopped" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to stop daemon" });
+    }
+  });
+
+  app.post("/api/daemon/trigger", isAuthenticated, async (req: any, res) => {
+    try {
+      const [adminUser] = await db.select().from(users).where(eq(users.id, req.user.claims.sub));
+      if (!adminUser?.isAdmin) return res.status(403).json({ message: "Admin only" });
+      const { triggerManualTick } = await import("./agentDaemon");
+      const result = await triggerManualTick();
+      res.json({ message: result });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to trigger activity" });
+    }
+  });
+
   return httpServer;
 }
