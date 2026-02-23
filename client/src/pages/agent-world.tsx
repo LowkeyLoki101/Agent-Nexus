@@ -2017,52 +2017,6 @@ export default function AgentWorld() {
           <AgentDetailPanel agent={selectedAgent} simState={simStates.get(selectedAgent.id)} onClose={() => setSelectedAgent(null)} />
         )}
 
-        <div className="absolute left-4 bottom-4 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-[220px]" data-testid="panel-room-legend">
-          <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider mb-2">Departments</p>
-          <div className="space-y-1">
-            {ROOMS.map(room => (
-              <button
-                key={room.id}
-                className="flex items-center gap-2 w-full text-left hover:bg-white/10 rounded px-1 py-0.5 transition-colors"
-                onClick={() => setSelectedRoom(selectedRoom?.id === room.id ? null : room)}
-                data-testid={`button-room-${room.id}`}
-              >
-                <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: room.color }} />
-                <span className="text-xs text-white/70">{room.name}</span>
-              </button>
-            ))}
-          </div>
-          <button
-            className="flex items-center gap-2 w-full text-left mt-2 pt-2 border-t border-white/10 hover:bg-white/10 rounded px-1 py-0.5 transition-colors"
-            data-testid="button-add-department"
-          >
-            <Plus className="h-3 w-3 text-primary" />
-            <span className="text-xs text-primary">Add Department</span>
-          </button>
-        </div>
-
-        <div className="absolute right-4 bottom-4 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-[260px]" data-testid="panel-activity-feed">
-          <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider mb-2">Live Activity</p>
-          <div className="space-y-1.5">
-            {agentList.filter(a => a.isActive).slice(0, 5).map(agent => {
-              const sim = simStates.get(agent.id);
-              if (!sim) return null;
-              const agentColor = getAgentColor(agent);
-              return (
-                <div key={agent.id} className="flex items-start gap-2">
-                  <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0 ${sim.phase === "working" ? "bg-green-500" : sim.phase === "walking" ? "bg-amber-500" : "bg-gray-400"}`} />
-                  <div className="min-w-0">
-                    <span className="text-xs font-medium" style={{ color: agentColor }}>{agent.name}</span>
-                    <span className="text-xs text-white/50 ml-1">
-                      {sim.phase === "walking" ? `heading to ${sim.targetRoom}` : sim.phase === "working" ? sim.objective : "selecting next objective"}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
         <WebGLErrorBoundary
           fallback={
             <div className="absolute inset-0 flex items-center justify-center z-10">
@@ -2100,6 +2054,54 @@ export default function AgentWorld() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="rounded-lg border border-border bg-card p-3" data-testid="panel-room-legend">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Departments</p>
+          <div className="space-y-1">
+            {ROOMS.map(room => (
+              <button
+                key={room.id}
+                className="flex items-center gap-2 w-full text-left hover:bg-muted rounded px-1 py-0.5 transition-colors"
+                onClick={() => setSelectedRoom(selectedRoom?.id === room.id ? null : room)}
+                data-testid={`button-room-${room.id}`}
+              >
+                <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: room.color }} />
+                <span className="text-xs">{room.name}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            className="flex items-center gap-2 w-full text-left mt-2 pt-2 border-t hover:bg-muted rounded px-1 py-0.5 transition-colors"
+            data-testid="button-add-department"
+          >
+            <Plus className="h-3 w-3 text-primary" />
+            <span className="text-xs text-primary">Add Department</span>
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-3" data-testid="panel-activity-feed">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Live Activity</p>
+          <div className="space-y-1.5">
+            {agentList.filter(a => a.isActive).slice(0, 5).map(agent => {
+              const sim = simStates.get(agent.id);
+              if (!sim) return null;
+              const agentColor = getAgentColor(agent);
+              return (
+                <div key={agent.id} className="flex items-start gap-2">
+                  <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0 ${sim.phase === "working" ? "bg-green-500" : sim.phase === "walking" ? "bg-amber-500" : "bg-gray-400"}`} />
+                  <div className="min-w-0">
+                    <span className="text-xs font-medium" style={{ color: agentColor }}>{agent.name}</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      {sim.phase === "walking" ? `heading to ${sim.targetRoom}` : sim.phase === "working" ? sim.objective : "selecting next objective"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {selectedRoom && (
