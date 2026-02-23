@@ -1,6 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Text, Billboard, RoundedBox, Sky } from "@react-three/drei";
+import { OrbitControls, PointerLockControls, Text, Billboard, RoundedBox, Sky } from "@react-three/drei";
+import { useThree } from "@react-three/fiber";
 import { useRef, useState, useMemo, useCallback, Suspense, Component, type ReactNode, useEffect } from "react";
 import * as THREE from "three";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -827,8 +828,72 @@ function useAgentSimulation(agents: Agent[]) {
   return simStates.current;
 }
 
-function Scene({ agents, selectedAgent, onSelectAgent, simStates }: {
-  agents: Agent[]; selectedAgent: Agent | null; onSelectAgent: (agent: Agent | null) => void; simStates: Map<string, AgentSimState>;
+function FirstPersonMovement() {
+  const { camera } = useThree();
+  const moveState = useRef({ forward: false, backward: false, left: false, right: false });
+  const velocity = useRef(new THREE.Vector3());
+  const direction = useRef(new THREE.Vector3());
+
+  useEffect(() => {
+    camera.position.set(0, 2.5, 15);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      switch (e.code) {
+        case "KeyW": case "ArrowUp": moveState.current.forward = true; break;
+        case "KeyS": case "ArrowDown": moveState.current.backward = true; break;
+        case "KeyA": case "ArrowLeft": moveState.current.left = true; break;
+        case "KeyD": case "ArrowRight": moveState.current.right = true; break;
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      switch (e.code) {
+        case "KeyW": case "ArrowUp": moveState.current.forward = false; break;
+        case "KeyS": case "ArrowDown": moveState.current.backward = false; break;
+        case "KeyA": case "ArrowLeft": moveState.current.left = false; break;
+        case "KeyD": case "ArrowRight": moveState.current.right = false; break;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [camera]);
+
+  useFrame((_, delta) => {
+    const speed = 8;
+    const ms = moveState.current;
+    direction.current.set(0, 0, 0);
+    if (ms.forward) direction.current.z -= 1;
+    if (ms.backward) direction.current.z += 1;
+    if (ms.left) direction.current.x -= 1;
+    if (ms.right) direction.current.x += 1;
+    direction.current.normalize();
+
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+    velocity.current.set(0, 0, 0);
+    velocity.current.addScaledVector(forward, -direction.current.z * speed * delta);
+    velocity.current.addScaledVector(right, direction.current.x * speed * delta);
+
+    camera.position.add(velocity.current);
+    camera.position.y = 2.5;
+
+    const bounds = 30;
+    camera.position.x = Math.max(-bounds, Math.min(bounds, camera.position.x));
+    camera.position.z = Math.max(-bounds, Math.min(bounds, camera.position.z));
+  });
+
+  return null;
+}
+
+function Scene({ agents, selectedAgent, onSelectAgent, simStates, fpvMode }: {
+  agents: Agent[]; selectedAgent: Agent | null; onSelectAgent: (agent: Agent | null) => void; simStates: Map<string, AgentSimState>; fpvMode: boolean;
 }) {
   return (
     <>
@@ -845,7 +910,14 @@ function Scene({ agents, selectedAgent, onSelectAgent, simStates }: {
         if (!sim) return null;
         return <AgentCharacter key={agent.id} agent={agent} simState={sim} onSelect={onSelectAgent} isSelected={selectedAgent?.id === agent.id} />;
       })}
-      <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={5} maxDistance={35} maxPolarAngle={Math.PI * 0.45} minPolarAngle={Math.PI * 0.1} target={[0, 1, 0]} />
+      {fpvMode ? (
+        <>
+          <PointerLockControls />
+          <FirstPersonMovement />
+        </>
+      ) : (
+        <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={5} maxDistance={35} maxPolarAngle={Math.PI * 0.45} minPolarAngle={Math.PI * 0.1} target={[0, 1, 0]} />
+      )}
     </>
   );
 }
@@ -1953,6 +2025,7 @@ function OnboardingOverlay({ onDismiss }: { onDismiss: () => void }) {
 export default function AgentWorld() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fpvMode, setFpvMode] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<typeof ROOMS[number] | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("factory-onboarded");
@@ -2005,6 +2078,16 @@ export default function AgentWorld() {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant={fpvMode ? "default" : "outline"}
+            size="sm"
+            className="gap-2"
+            onClick={() => setFpvMode(!fpvMode)}
+            data-testid="button-toggle-fpv"
+          >
+            <Users className="h-4 w-4" />
+            {fpvMode ? "Exit Walk" : "Walk Mode"}
+          </Button>
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsFullscreen(!isFullscreen)} data-testid="button-toggle-fullscreen">
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             {isFullscreen ? "Exit" : "Fullscreen"}
@@ -2012,9 +2095,17 @@ export default function AgentWorld() {
         </div>
       </div>
 
-      <div className="relative rounded-lg overflow-hidden border border-primary/20 bg-[#0a0a1a] h-[450px]" data-testid="canvas-agent-world">
+      <div className={`relative rounded-lg overflow-hidden border border-primary/20 bg-[#0a0a1a] ${fpvMode ? "h-[600px]" : "h-[450px]"}`} data-testid="canvas-agent-world">
         {selectedAgent && (
           <AgentDetailPanel agent={selectedAgent} simState={simStates.get(selectedAgent.id)} onClose={() => setSelectedAgent(null)} />
+        )}
+
+        {fpvMode && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 pointer-events-none" data-testid="fpv-instructions">
+            <p className="text-[11px] text-white/70 text-center">
+              <span className="text-primary font-medium">Click the 3D view</span> to look around · <span className="font-medium text-white/90">WASD</span> or <span className="font-medium text-white/90">Arrow keys</span> to move · <span className="font-medium text-white/90">Esc</span> to release mouse
+            </p>
+          </div>
         )}
 
         <WebGLErrorBoundary
@@ -2031,7 +2122,7 @@ export default function AgentWorld() {
           {detectWebGL() ? (
             <Canvas camera={{ position: [18, 14, 18], fov: 50, near: 0.1, far: 100 }} style={{ background: "#0a0a1a" }} dpr={[1, 2]} shadows>
               <Suspense fallback={null}>
-                <Scene agents={agentList} selectedAgent={selectedAgent} onSelectAgent={handleSelectAgent} simStates={simStates} />
+                <Scene agents={agentList} selectedAgent={selectedAgent} onSelectAgent={handleSelectAgent} simStates={simStates} fpvMode={fpvMode} />
               </Suspense>
             </Canvas>
           ) : (
