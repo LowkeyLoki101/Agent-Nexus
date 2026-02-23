@@ -30,6 +30,7 @@ import AssemblyLinesPage from "@/pages/assembly-lines";
 import Library from "@/pages/library";
 import Workstation from "@/pages/workstation";
 import Boards from "@/pages/boards";
+import Heatmap from "@/pages/heatmap";
 import NotFound from "@/pages/not-found";
 import ForgotPassword from "@/pages/forgot-password";
 import Subscribe from "@/pages/subscribe";
@@ -84,6 +85,7 @@ function AuthenticatedRouter() {
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
         <Route path="/boards" component={Boards} />
+        <Route path="/heatmap" component={Heatmap} />
         <Route path="/forgot-password" component={ForgotPassword} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />

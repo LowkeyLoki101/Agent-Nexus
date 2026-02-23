@@ -41,6 +41,7 @@ import {
   MessageCircle,
   Shield,
   CreditCard,
+  Activity,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -63,6 +64,11 @@ const mainNavItems = [
     title: "Products",
     url: "/products",
     icon: Package,
+  },
+  {
+    title: "Heatmap",
+    url: "/heatmap",
+    icon: Activity,
   },
   {
     title: "Code Shop",

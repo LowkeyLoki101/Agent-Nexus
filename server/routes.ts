@@ -2002,6 +2002,125 @@ Respond with ONLY valid JSON in this exact format:
     }
   });
 
+  app.get("/api/factory/heatmap", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const workspaces = await storage.getWorkspacesByUser(userId);
+      const agents = await storage.getAgentsByUser(userId);
+      const assemblyLinesData = await storage.getAssemblyLinesByUser(userId);
+      const recentGifts = await storage.getRecentGifts(100);
+      const allProducts: any[] = [];
+      for (const line of assemblyLinesData) {
+        const prods = await storage.getProductsByAssemblyLine(line.id);
+        allProducts.push(...prods);
+      }
+
+      const now = Date.now();
+      const day = 24 * 60 * 60 * 1000;
+
+      const departments = await Promise.all(workspaces.map(async (ws) => {
+        const deptAgents = agents.filter(a => a.workspaceId === ws.id);
+        const activeAgents = deptAgents.filter(a => a.isActive);
+        const deptGifts = recentGifts.filter(g => g.workspaceId === ws.id);
+        const deptLines = assemblyLinesData.filter(al => al.ownerId === ws.id);
+        const lineIds = deptLines.map(l => l.id);
+        const deptProducts = allProducts.filter(p => lineIds.includes(p.assemblyLineId));
+
+        const completedProducts = deptProducts.filter(p => p.status === "completed");
+        const inProgressProducts = deptProducts.filter(p => p.status === "in_progress");
+        const queuedProducts = deptProducts.filter(p => p.status === "queued");
+        const failedProducts = deptProducts.filter(p => p.status === "failed");
+
+        const stalledProducts = deptProducts.filter(p => {
+          if (p.status !== "in_progress") return false;
+          const updated = p.updatedAt ? new Date(p.updatedAt).getTime() : (p.createdAt ? new Date(p.createdAt).getTime() : 0);
+          return now - updated > day;
+        });
+
+        const giftsLast24h = deptGifts.filter(g => {
+          const created = g.createdAt ? new Date(g.createdAt).getTime() : 0;
+          return now - created < day;
+        }).length;
+
+        const giftsLast7d = deptGifts.filter(g => {
+          const created = g.createdAt ? new Date(g.createdAt).getTime() : 0;
+          return now - created < 7 * day;
+        }).length;
+
+        let pendingSteps = 0;
+        let stalledSteps = 0;
+        for (const line of deptLines) {
+          const steps = await storage.getAssemblyLineSteps(line.id);
+          steps.forEach(s => {
+            if (s.status === "pending") pendingSteps++;
+            if (s.status === "in_progress") {
+              const updated = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
+              if (now - updated > day) stalledSteps++;
+            }
+          });
+        }
+
+        const caps = activeAgents.flatMap(a => a.capabilities || []);
+        const uniqueCaps = [...new Set(caps.map(c => c.toLowerCase()))];
+
+        let activityLevel: "hot" | "warm" | "cool" | "cold" | "stalled" = "cold";
+        if (stalledProducts.length > 0 || stalledSteps > 0 || failedProducts.length > 0) {
+          activityLevel = "stalled";
+        } else if (giftsLast24h > 0 || inProgressProducts.length > 0) {
+          activityLevel = "hot";
+        } else if (giftsLast7d > 0 || completedProducts.length > 0) {
+          activityLevel = "warm";
+        } else if (activeAgents.length > 0) {
+          activityLevel = "cool";
+        }
+
+        return {
+          id: ws.id,
+          name: ws.name,
+          slug: ws.slug,
+          activityLevel,
+          agents: { total: deptAgents.length, active: activeAgents.length },
+          capabilities: uniqueCaps,
+          outputs: {
+            gifts: { total: deptGifts.length, last24h: giftsLast24h, last7d: giftsLast7d },
+            products: {
+              completed: completedProducts.length,
+              inProgress: inProgressProducts.length,
+              queued: queuedProducts.length,
+              failed: failedProducts.length,
+              stalled: stalledProducts.length,
+            },
+            pipelines: { total: deptLines.length, active: deptLines.filter(l => l.status === "active").length },
+            pendingSteps,
+            stalledSteps,
+          },
+        };
+      }));
+
+      const totalStalled = departments.reduce((s, d) => s + d.outputs.products.stalled + d.outputs.stalledSteps, 0);
+      const totalFailed = departments.reduce((s, d) => s + d.outputs.products.failed, 0);
+      const totalActive = departments.reduce((s, d) => s + d.outputs.products.inProgress, 0);
+      const totalCompleted = departments.reduce((s, d) => s + d.outputs.products.completed, 0);
+
+      res.json({
+        departments,
+        summary: {
+          totalDepartments: departments.length,
+          hotDepartments: departments.filter(d => d.activityLevel === "hot").length,
+          stalledDepartments: departments.filter(d => d.activityLevel === "stalled").length,
+          coldDepartments: departments.filter(d => d.activityLevel === "cold").length,
+          totalStalled,
+          totalFailed,
+          totalActive,
+          totalCompleted,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching heatmap:", error);
+      res.status(500).json({ message: "Failed to fetch heatmap data" });
+    }
+  });
+
   app.post("/api/factory/assign", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
