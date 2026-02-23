@@ -62,11 +62,6 @@ const mainNavItems = [
     icon: Package,
   },
   {
-    title: "Library",
-    url: "/library",
-    icon: BookOpen,
-  },
-  {
     title: "Workstation",
     url: "/workstation",
     icon: Wrench,

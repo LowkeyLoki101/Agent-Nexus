@@ -50,14 +50,23 @@ function updateUserSession(
   user.expires_at = user.claims?.exp;
 }
 
+const ADMIN_EMAILS = ["emergent.intel@gmail.com"];
+
 async function upsertUser(claims: any) {
-  await authStorage.upsertUser({
+  const email = claims["email"];
+  const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+  const userData: any = {
     id: claims["sub"],
-    email: claims["email"],
+    email,
     firstName: claims["first_name"],
     lastName: claims["last_name"],
     profileImageUrl: claims["profile_image_url"],
-  });
+  };
+  if (isAdmin) {
+    userData.isAdmin = true;
+    userData.subscriptionStatus = "active";
+  }
+  await authStorage.upsertUser(userData);
 }
 
 export async function setupAuth(app: Express) {
