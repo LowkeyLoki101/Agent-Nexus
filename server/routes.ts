@@ -807,9 +807,12 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Briefing not found" });
       }
 
-      const access = await checkWorkspaceAccess(userId, briefing.workspaceId);
-      if (!access.hasAccess) {
-        return res.status(403).json({ message: "Access denied" });
+      const isCreator = briefing.createdById === userId;
+      if (!isCreator) {
+        const access = await checkWorkspaceAccess(userId, briefing.workspaceId);
+        if (!access.hasAccess) {
+          return res.status(403).json({ message: "Access denied" });
+        }
       }
 
       res.json(briefing);
