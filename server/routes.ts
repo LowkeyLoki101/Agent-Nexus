@@ -1269,9 +1269,9 @@ Respond with ONLY valid JSON in this exact format:
       await storage.createAuditLog({
         userId,
         action: "gift_created",
-        resourceType: "gift",
-        resourceId: gift.id,
-        details: { agentName: agent.name, giftType: type, title: gift.title, method: "spark" },
+        entityType: "gift",
+        entityId: gift.id,
+        metadata: JSON.stringify({ agentName: agent.name, giftType: type, title: gift.title, method: "spark" }),
       });
 
       res.status(201).json(gift);
@@ -2100,14 +2100,14 @@ Respond with ONLY valid JSON in this exact format:
           steps.forEach(s => {
             if (s.status === "pending") pendingSteps++;
             if (s.status === "in_progress") {
-              const updated = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
+              const updated = s.createdAt ? new Date(s.createdAt).getTime() : 0;
               if (now - updated > day) stalledSteps++;
             }
           });
         }
 
         const caps = activeAgents.flatMap(a => a.capabilities || []);
-        const uniqueCaps = [...new Set(caps.map(c => c.toLowerCase()))];
+        const uniqueCaps = Array.from(new Set(caps.map(c => c.toLowerCase())));
 
         let activityLevel: "hot" | "warm" | "cool" | "cold" | "stalled" = "cold";
         if (stalledProducts.length > 0 || stalledSteps > 0 || failedProducts.length > 0) {
