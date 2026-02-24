@@ -7,6 +7,7 @@ import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./stripeClient";
 import { WebhookHandlers } from "./webhookHandlers";
 import { startDaemon, startHealthScanner } from "./agentDaemon";
+import { startHeraldNewsroom } from "./heraldNewsroom";
 
 const app = express();
 const httpServer = createServer(app);
@@ -161,6 +162,7 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
       startDaemon();
       startHealthScanner();
+      startHeraldNewsroom();
     },
   );
 })();

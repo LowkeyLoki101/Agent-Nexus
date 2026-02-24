@@ -62,6 +62,12 @@ import {
   type InsertAgentMemory,
   type AgentProfile,
   type InsertAgentProfile,
+  newsroomInterviews,
+  newsroomSettings,
+  type NewsroomInterview,
+  type InsertNewsroomInterview,
+  type NewsroomSettings,
+  type InsertNewsroomSettings,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
@@ -185,6 +191,14 @@ export interface IStorage {
   getAgentProfile(agentId: string, subjectId: string): Promise<AgentProfile | undefined>;
   upsertAgentProfile(profile: InsertAgentProfile & { notes?: string; interactionCount?: number }): Promise<AgentProfile>;
   getAgentProfiles(agentId: string): Promise<AgentProfile[]>;
+
+  createNewsroomInterview(interview: InsertNewsroomInterview): Promise<NewsroomInterview>;
+  updateNewsroomInterview(id: string, updates: Partial<InsertNewsroomInterview>): Promise<NewsroomInterview | undefined>;
+  getRecentNewsroomInterviews(limit?: number): Promise<NewsroomInterview[]>;
+  getLatestInterviewForAgent(agentId: string): Promise<NewsroomInterview | undefined>;
+
+  getNewsroomSettings(): Promise<NewsroomSettings | undefined>;
+  upsertNewsroomSettings(settings: Partial<InsertNewsroomSettings>): Promise<NewsroomSettings>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -735,6 +749,40 @@ export class DatabaseStorage implements IStorage {
 
   async getAgentProfiles(agentId: string): Promise<AgentProfile[]> {
     return db.select().from(agentProfiles).where(eq(agentProfiles.agentId, agentId)).orderBy(desc(agentProfiles.lastInteraction));
+  }
+
+  async createNewsroomInterview(interview: InsertNewsroomInterview): Promise<NewsroomInterview> {
+    const [created] = await db.insert(newsroomInterviews).values(interview).returning();
+    return created;
+  }
+
+  async updateNewsroomInterview(id: string, updates: Partial<InsertNewsroomInterview>): Promise<NewsroomInterview | undefined> {
+    const [updated] = await db.update(newsroomInterviews).set(updates).where(eq(newsroomInterviews.id, id)).returning();
+    return updated;
+  }
+
+  async getRecentNewsroomInterviews(limit = 20): Promise<NewsroomInterview[]> {
+    return db.select().from(newsroomInterviews).orderBy(desc(newsroomInterviews.createdAt)).limit(limit);
+  }
+
+  async getLatestInterviewForAgent(agentId: string): Promise<NewsroomInterview | undefined> {
+    const [interview] = await db.select().from(newsroomInterviews).where(eq(newsroomInterviews.agentId, agentId)).orderBy(desc(newsroomInterviews.createdAt)).limit(1);
+    return interview;
+  }
+
+  async getNewsroomSettings(): Promise<NewsroomSettings | undefined> {
+    const [settings] = await db.select().from(newsroomSettings).limit(1);
+    return settings;
+  }
+
+  async upsertNewsroomSettings(settings: Partial<InsertNewsroomSettings>): Promise<NewsroomSettings> {
+    const existing = await this.getNewsroomSettings();
+    if (existing) {
+      const [updated] = await db.update(newsroomSettings).set({ ...settings, updatedAt: new Date() }).where(eq(newsroomSettings.id, existing.id)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(newsroomSettings).values(settings as InsertNewsroomSettings).returning();
+    return created;
   }
 }
 

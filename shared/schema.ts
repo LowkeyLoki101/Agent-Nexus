@@ -596,3 +596,48 @@ export type AgentMemory = typeof agentMemory.$inferSelect;
 export type InsertAgentMemory = z.infer<typeof insertAgentMemorySchema>;
 export type AgentProfile = typeof agentProfiles.$inferSelect;
 export type InsertAgentProfile = z.infer<typeof insertAgentProfileSchema>;
+
+export const interviewStatusEnum = pgEnum("interview_status", ["pending", "complete", "failed"]);
+
+export const newsroomInterviews = pgTable("newsroom_interviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  agentName: text("agent_name").notNull(),
+  status: interviewStatusEnum("status").notNull().default("pending"),
+  questions: text("questions").array(),
+  answers: text("answers").array(),
+  excerpt: text("excerpt"),
+  model: text("model").default("gpt-4o"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const newsroomInterviewRelations = relations(newsroomInterviews, ({ one }) => ({
+  agent: one(agents, { fields: [newsroomInterviews.agentId], references: [agents.id] }),
+}));
+
+export const newsroomSettings = pgTable("newsroom_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  autoBroadcastIntervalMinutes: integer("auto_broadcast_interval_minutes").default(60),
+  autoPlayEnabled: boolean("auto_play_enabled").default(false),
+  enabled: boolean("enabled").default(true),
+  interviewCooldownMinutes: integer("interview_cooldown_minutes").default(30),
+  lastBroadcastAt: timestamp("last_broadcast_at"),
+  broadcastStatus: text("broadcast_status").default("idle"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertNewsroomInterviewSchema = createInsertSchema(newsroomInterviews).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertNewsroomSettingsSchema = createInsertSchema(newsroomSettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type NewsroomInterview = typeof newsroomInterviews.$inferSelect;
+export type InsertNewsroomInterview = z.infer<typeof insertNewsroomInterviewSchema>;
+export type NewsroomSettings = typeof newsroomSettings.$inferSelect;
+export type InsertNewsroomSettings = z.infer<typeof insertNewsroomSettingsSchema>;

@@ -2,561 +2,514 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Plus,
-  Search,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Clock,
   Radio,
   Play,
   Pause,
   Volume2,
-  VolumeX,
-  Image,
-  Mic,
-  Video,
   Newspaper,
   Zap,
   MessageSquare,
-  Shield,
-  RotateCcw,
-  Megaphone,
   Bot,
   Loader2,
-  ChevronRight,
-  SkipForward,
+  X,
+  Users,
+  Settings,
+  Mic,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useRef, useEffect } from "react";
-import type { Briefing } from "@shared/schema";
+import type { Briefing, NewsroomInterview, NewsroomSettings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const ARTICLE_TYPE_CONFIG: Record<string, { label: string; icon: typeof Zap; color: string; bg: string }> = {
-  breaking: { label: "BREAKING", icon: Zap, color: "text-red-500", bg: "bg-red-500/10 border-red-500/30" },
-  feature: { label: "FEATURE", icon: Newspaper, color: "text-blue-500", bg: "bg-blue-500/10 border-blue-500/30" },
-  interview: { label: "INTERVIEW", icon: MessageSquare, color: "text-purple-500", bg: "bg-purple-500/10 border-purple-500/30" },
-  investigation: { label: "INVESTIGATION", icon: Shield, color: "text-amber-500", bg: "bg-amber-500/10 border-amber-500/30" },
-  recap: { label: "RECAP", icon: RotateCcw, color: "text-green-500", bg: "bg-green-500/10 border-green-500/30" },
-  bulletin: { label: "BULLETIN", icon: Megaphone, color: "text-primary", bg: "bg-primary/10 border-primary/30" },
+interface AgentInterviewStatus {
+  agentId: string;
+  agentName: string;
+  lastInterviewAt: string | null;
+  cooldownMinutesRemaining: number;
+  isAvailable: boolean;
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  ANALYST: "bg-orange-500",
+  BUILDER: "bg-blue-500",
+  CRITIC: "bg-red-500",
+  STRATEGIST: "bg-green-500",
+  RESEARCHER: "bg-purple-500",
+  COLBY: "bg-amber-500",
 };
 
-const PRIORITY_DOT: Record<string, string> = {
-  urgent: "bg-red-500",
-  high: "bg-orange-500",
-  medium: "bg-blue-500",
-  low: "bg-slate-400",
-};
+function getAgentColor(name: string): string {
+  const upper = name.toUpperCase();
+  for (const [key, color] of Object.entries(STATUS_COLORS)) {
+    if (upper.includes(key)) return color;
+  }
+  const colors = ["bg-blue-500", "bg-green-500", "bg-purple-500", "bg-orange-500", "bg-red-500", "bg-cyan-500", "bg-pink-500", "bg-amber-500"];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  return colors[Math.abs(hash) % colors.length];
+}
 
-function HeroBroadcast({ briefing }: { briefing: Briefing }) {
+function timeAgo(date: string | Date | null): string {
+  if (!date) return "never";
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diff = now - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function LatestBroadcastPanel({ briefing, settings }: { briefing: Briefing | undefined; settings: NewsroomSettings | undefined }) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const { toast } = useToast();
+  const isGenerating = settings?.broadcastStatus === "generating";
 
-  const typeConfig = ARTICLE_TYPE_CONFIG[briefing.articleType || "bulletin"] || ARTICLE_TYPE_CONFIG.bulletin;
-  const TypeIcon = typeConfig.icon;
-
-  const generateImage = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/briefings/${briefing.id}/generate-image`),
+  const generateBroadcast = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/newsroom/generate-broadcast"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/briefings"] });
-      toast({ title: "Image generated for broadcast" });
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/settings"] });
+      toast({ title: "Broadcast generated" });
     },
-    onError: (e: any) => toast({ title: "Image generation failed", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Broadcast failed", description: e.message, variant: "destructive" }),
   });
 
-  const generateAudio = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/briefings/${briefing.id}/generate-audio`),
+  const interviewAll = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/newsroom/interview-all"),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/briefings"] });
-      toast({ title: "Audio broadcast generated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/interviews"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/agent-status"] });
+      toast({ title: "Interview round completed" });
     },
-    onError: (e: any) => toast({ title: "Audio generation failed", description: e.message, variant: "destructive" }),
-  });
-
-  const generateVideo = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/briefings/${briefing.id}/generate-video`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/briefings"] });
-      toast({ title: "Video generation started" });
-    },
-    onError: (e: any) => toast({ title: "Video generation failed", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Interviews failed", description: e.message, variant: "destructive" }),
   });
 
   const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
+    if (!audioRef.current || !briefing?.audioUrl) return;
+    if (isPlaying) { audioRef.current.pause(); } else { audioRef.current.play(); }
     setIsPlaying(!isPlaying);
   };
 
   return (
-    <div className="relative overflow-hidden rounded-xl border-2 border-primary/30 bg-gradient-to-br from-card via-card to-primary/5" data-testid="panel-hero-broadcast">
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-amber-500 to-primary" />
-      
-      <div className="flex flex-col lg:flex-row">
-        <div className="flex-1 p-6 lg:p-8 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/30">
-              <Radio className="h-3 w-3 text-red-500 animate-pulse" />
-              <span className="text-xs font-bold uppercase tracking-wider text-red-500">LIVE</span>
-            </div>
-            <Badge className={`text-xs ${typeConfig.bg} ${typeConfig.color}`} variant="outline">
-              <TypeIcon className="h-3 w-3 mr-1" />
-              {typeConfig.label}
-            </Badge>
-            <div className={`h-2 w-2 rounded-full ${PRIORITY_DOT[briefing.priority] || PRIORITY_DOT.medium}`} />
+    <Card className="border-primary/30" data-testid="panel-latest-broadcast">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-bold uppercase tracking-wider">Latest Broadcast</CardTitle>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={isGenerating || generateBroadcast.isPending ? "default" : "outline"}
+              className="text-xs gap-1.5"
+              onClick={() => generateBroadcast.mutate()}
+              disabled={isGenerating || generateBroadcast.isPending}
+              data-testid="button-generate-broadcast"
+            >
+              {isGenerating || generateBroadcast.isPending ? (
+                <><Loader2 className="h-3 w-3 animate-spin" /> Generating...</>
+              ) : (
+                <><Radio className="h-3 w-3" /> Generate</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs gap-1.5"
+              onClick={() => interviewAll.mutate()}
+              disabled={interviewAll.isPending}
+              data-testid="button-interviews"
+            >
+              {interviewAll.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+              Interviews
+            </Button>
+            <Button size="sm" variant="outline" className="text-xs gap-1.5" data-testid="button-auto">
+              <Settings className="h-3 w-3" /> Auto
+            </Button>
           </div>
-          
-          <h1 className="text-2xl lg:text-3xl font-bold tracking-tight leading-tight" data-testid="text-hero-title">
-            {briefing.title}
-          </h1>
-          
-          <p className="text-muted-foreground text-base lg:text-lg leading-relaxed max-w-2xl">
-            {briefing.summary || briefing.content.slice(0, 300)}
-          </p>
-
-          {briefing.tags && briefing.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {briefing.tags.map((tag, i) => (
-                <Badge key={i} variant="secondary" className="text-xs">{tag}</Badge>
-              ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {briefing ? (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base" data-testid="text-latest-broadcast-title">{briefing.title}</h3>
+              <span className="text-xs text-muted-foreground">{timeAgo(briefing.createdAt)}</span>
             </div>
-          )}
-
-          <div className="flex items-center gap-3 pt-2">
-            {briefing.audioUrl ? (
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="default" className="gap-2" onClick={togglePlay} data-testid="button-play-hero-audio">
-                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                  {isPlaying ? "Pause" : "Play Broadcast"}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => { setIsMuted(!isMuted); if (audioRef.current) audioRef.current.muted = !isMuted; }} data-testid="button-mute-hero">
-                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {briefing.summary || briefing.content.slice(0, 200)}
+            </p>
+            {briefing.audioUrl && (
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" variant="ghost" className="h-7 gap-1" onClick={togglePlay} data-testid="button-play-latest">
+                  {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                  {isPlaying ? "Pause" : "Play"}
                 </Button>
                 <audio ref={audioRef} src={briefing.audioUrl} onEnded={() => setIsPlaying(false)} />
               </div>
-            ) : (
-              <Button size="sm" variant="outline" className="gap-2" onClick={() => generateAudio.mutate()} disabled={generateAudio.isPending} data-testid="button-generate-hero-audio">
-                {generateAudio.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
-                Generate Audio
-              </Button>
             )}
-            
-            {!briefing.imageUrl && (
-              <Button size="sm" variant="outline" className="gap-2" onClick={() => generateImage.mutate()} disabled={generateImage.isPending} data-testid="button-generate-hero-image">
-                {generateImage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4" />}
-                Generate Image
-              </Button>
+            {briefing.tags && briefing.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {briefing.tags.map((tag, i) => (
+                  <Badge key={i} variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">{tag}</Badge>
+                ))}
+              </div>
             )}
-
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => generateVideo.mutate()} disabled={generateVideo.isPending} data-testid="button-generate-hero-video">
-              {generateVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
-              Generate Video
-            </Button>
-
-            <Link href={`/briefings/${briefing.id}`}>
-              <Button size="sm" variant="ghost" className="gap-1" data-testid="button-read-full-story">
-                Full Story <ChevronRight className="h-4 w-4" />
-              </Button>
-            </Link>
           </div>
-
-          <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
-            <div className="flex items-center gap-1.5">
-              <Bot className="h-3 w-3" />
-              <span>Herald Newsroom</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-3 w-3" />
-              <span>{briefing.createdAt ? new Date(briefing.createdAt).toLocaleString() : "Just now"}</span>
-            </div>
-          </div>
-        </div>
-
-        {briefing.imageUrl && (
-          <div className="lg:w-96 lg:shrink-0">
-            <img 
-              src={briefing.imageUrl} 
-              alt={briefing.title}
-              className="w-full h-48 lg:h-full object-cover"
-              data-testid="img-hero-broadcast"
-            />
+        ) : (
+          <div className="text-center py-6 text-muted-foreground">
+            <Radio className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No broadcasts yet. Generate one to get started.</p>
           </div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function ArticleCard({ briefing }: { briefing: Briefing }) {
-  const typeConfig = ARTICLE_TYPE_CONFIG[briefing.articleType || "bulletin"] || ARTICLE_TYPE_CONFIG.bulletin;
-  const TypeIcon = typeConfig.icon;
+function AutonomyPanel({ settings }: { settings: NewsroomSettings | undefined }) {
   const { toast } = useToast();
 
-  const generateImage = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/briefings/${briefing.id}/generate-image`),
+  const updateSettings = useMutation({
+    mutationFn: (updates: any) => apiRequest("PUT", "/api/newsroom/settings", updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/briefings"] });
-      toast({ title: "Image generated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/settings"] });
+      toast({ title: "Newsroom settings updated" });
     },
   });
 
-  const generateAudio = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/briefings/${briefing.id}/generate-audio`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/briefings"] });
-      toast({ title: "Audio generated" });
-    },
-  });
+  const intervalMinutes = settings?.autoBroadcastIntervalMinutes || 60;
+  const autoPlay = settings?.autoPlayEnabled || false;
+
+  const intervalOptions = [
+    { label: "Every 15 min", value: "15" },
+    { label: "Every 30 min", value: "30" },
+    { label: "Every hour", value: "60" },
+    { label: "Every 2 hours", value: "120" },
+    { label: "Every 4 hours", value: "240" },
+  ];
+
+  const nextBroadcastIn = () => {
+    if (!settings?.lastBroadcastAt) return "N/A";
+    const last = new Date(settings.lastBroadcastAt).getTime();
+    const next = last + intervalMinutes * 60 * 1000;
+    const diff = next - Date.now();
+    if (diff <= 0) return "Soon";
+    const mins = Math.ceil(diff / 60000);
+    if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    return `${mins}m`;
+  };
 
   return (
-    <Card className="hover-elevate overflow-hidden group h-full flex flex-col" data-testid={`card-article-${briefing.id}`}>
-      {briefing.imageUrl ? (
-        <div className="h-40 overflow-hidden">
-          <img src={briefing.imageUrl} alt={briefing.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-        </div>
-      ) : (
-        <div className={`h-2 ${typeConfig.color === "text-red-500" ? "bg-red-500" : typeConfig.color === "text-blue-500" ? "bg-blue-500" : typeConfig.color === "text-purple-500" ? "bg-purple-500" : typeConfig.color === "text-amber-500" ? "bg-amber-500" : typeConfig.color === "text-green-500" ? "bg-green-500" : "bg-primary"}`} />
-      )}
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2 mb-2">
-          <Badge className={`text-[10px] ${typeConfig.bg} ${typeConfig.color}`} variant="outline">
-            <TypeIcon className="h-3 w-3 mr-1" />
-            {typeConfig.label}
-          </Badge>
-          <div className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOT[briefing.priority] || PRIORITY_DOT.medium}`} />
-        </div>
-        <Link href={`/briefings/${briefing.id}`}>
-          <CardTitle className="text-base leading-tight hover:text-primary transition-colors cursor-pointer line-clamp-2" data-testid={`text-article-title-${briefing.id}`}>
-            {briefing.title}
-          </CardTitle>
-        </Link>
+    <Card data-testid="panel-autonomy">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider">Autonomy</CardTitle>
       </CardHeader>
-      <CardContent className="flex-1 flex flex-col justify-between gap-3">
-        <p className="text-sm text-muted-foreground line-clamp-3">
-          {briefing.summary || briefing.content.slice(0, 150)}
-        </p>
-        
-        <div className="space-y-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {briefing.audioUrl && (
-              <Badge variant="secondary" className="text-[10px] gap-1">
-                <Volume2 className="h-3 w-3" /> Audio
-              </Badge>
-            )}
-            {briefing.videoUrl && (
-              <Badge variant="secondary" className="text-[10px] gap-1">
-                <Video className="h-3 w-3" /> Video
-              </Badge>
-            )}
-            {!briefing.imageUrl && (
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] gap-1" onClick={() => generateImage.mutate()} disabled={generateImage.isPending} data-testid={`button-gen-img-${briefing.id}`}>
-                {generateImage.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Image className="h-3 w-3" />} +Image
-              </Button>
-            )}
-            {!briefing.audioUrl && (
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] gap-1" onClick={() => generateAudio.mutate()} disabled={generateAudio.isPending} data-testid={`button-gen-audio-${briefing.id}`}>
-                {generateAudio.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Mic className="h-3 w-3" />} +Audio
-              </Button>
-            )}
-          </div>
-
-          {briefing.tags && briefing.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {briefing.tags.slice(0, 3).map((tag, i) => (
-                <Badge key={i} variant="outline" className="text-[10px]">{tag}</Badge>
+      <CardContent className="space-y-4">
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Auto-broadcast interval</label>
+          <Select
+            value={String(intervalMinutes)}
+            onValueChange={(val) => updateSettings.mutate({ autoBroadcastIntervalMinutes: parseInt(val) })}
+          >
+            <SelectTrigger className="h-9 text-sm" data-testid="select-broadcast-interval">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {intervalOptions.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
               ))}
-            </div>
-          )}
-          
-          <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1 border-t">
-            <div className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              <span>{briefing.createdAt ? new Date(briefing.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "recently"}</span>
-            </div>
-          </div>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">Next auto-broadcast in {nextBroadcastIn()}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={autoPlay}
+            onChange={(e) => updateSettings.mutate({ autoPlayEnabled: e.target.checked })}
+            className="rounded border-muted"
+            data-testid="checkbox-autoplay"
+          />
+          <label className="text-xs text-muted-foreground">Auto-play when ready</label>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function TickerBar({ briefings }: { briefings: Briefing[] }) {
-  const [offset, setOffset] = useState(0);
+function EmergentInterviewsPanel({ agentStatuses }: { agentStatuses: AgentInterviewStatus[] }) {
+  const { toast } = useToast();
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setOffset(o => o + 1);
-    }, 50);
-    return () => clearInterval(interval);
-  }, []);
+  const interviewAgent = useMutation({
+    mutationFn: (agentId: string) => apiRequest("POST", `/api/newsroom/interview/${agentId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/interviews"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/agent-status"] });
+      toast({ title: "Interview completed" });
+    },
+    onError: (e: any) => toast({ title: "Interview failed", description: e.message, variant: "destructive" }),
+  });
 
-  if (briefings.length === 0) return null;
-
-  const tickerText = briefings.map(b => {
-    const typeConfig = ARTICLE_TYPE_CONFIG[b.articleType || "bulletin"];
-    return `${typeConfig?.label || "BULLETIN"}: ${b.title}`;
-  }).join("  ///  ");
+  const runAll = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/newsroom/interview-all"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/interviews"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/newsroom/agent-status"] });
+      toast({ title: "All interviews completed" });
+    },
+    onError: (e: any) => toast({ title: "Run all failed", description: e.message, variant: "destructive" }),
+  });
 
   return (
-    <div className="bg-primary/10 border border-primary/20 rounded-lg overflow-hidden" data-testid="panel-ticker-bar">
-      <div className="flex items-center">
-        <div className="shrink-0 px-3 py-2 bg-primary/20 flex items-center gap-2">
-          <Radio className="h-3 w-3 text-primary animate-pulse" />
-          <span className="text-xs font-bold uppercase tracking-wider text-primary">LIVE FEED</span>
+    <Card data-testid="panel-emergent-interviews">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-bold uppercase tracking-wider">Emergent Interviews</CardTitle>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-xs h-6"
+            onClick={() => runAll.mutate()}
+            disabled={runAll.isPending}
+            data-testid="button-run-all-interviews"
+          >
+            {runAll.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run All"}
+          </Button>
         </div>
-        <div className="flex-1 overflow-hidden py-2 px-4">
-          <div className="whitespace-nowrap" style={{ transform: `translateX(-${offset % (tickerText.length * 8)}px)` }}>
-            <span className="text-sm font-medium">
-              {tickerText}  ///  {tickerText}
-            </span>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {agentStatuses.map((agent) => (
+          <div key={agent.agentId} className="flex items-center justify-between" data-testid={`interview-agent-${agent.agentId}`}>
+            <div className="flex items-center gap-2">
+              <Badge className={`text-[10px] text-white ${getAgentColor(agent.agentName)}`}>
+                {agent.agentName.toUpperCase()}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              {agent.isAvailable ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs h-6 px-2"
+                  onClick={() => interviewAgent.mutate(agent.agentId)}
+                  disabled={interviewAgent.isPending}
+                  data-testid={`button-interview-${agent.agentId}`}
+                >
+                  Interview
+                </Button>
+              ) : (
+                <span className="text-xs text-muted-foreground">{agent.cooldownMinutesRemaining}m cooldown</span>
+              )}
+            </div>
           </div>
+        ))}
+        {agentStatuses.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-2">No agents available</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentExcerptsPanel({ interviews }: { interviews: NewsroomInterview[] }) {
+  const completed = interviews.filter(i => i.status === "complete" && i.excerpt);
+
+  return (
+    <Card data-testid="panel-recent-excerpts">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider">Recent Excerpts</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {completed.slice(0, 5).map((interview) => (
+          <div key={interview.id} className="space-y-1" data-testid={`excerpt-${interview.id}`}>
+            <div className="flex items-center gap-2">
+              <Badge className={`text-[10px] text-white ${getAgentColor(interview.agentName)}`}>
+                {interview.agentName.toUpperCase()}
+              </Badge>
+              <span className="text-xs text-muted-foreground">{timeAgo(interview.createdAt)}</span>
+            </div>
+            <p className="text-xs text-muted-foreground/80 italic line-clamp-2">"{interview.excerpt}"</p>
+          </div>
+        ))}
+        {completed.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-2">No excerpts yet</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function InterviewModal({ interview, onClose }: { interview: NewsroomInterview; onClose: () => void }) {
+  const questions = interview.questions || [];
+  const answers = interview.answers || [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-card border rounded-xl w-full max-w-lg mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b">
+          <div>
+            <h3 className="font-bold text-sm">INTERVIEW WITH <span className="text-primary">{interview.agentName.toUpperCase()}</span></h3>
+            <p className="text-xs text-muted-foreground">{timeAgo(interview.createdAt)} · {interview.model}</p>
+          </div>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onClose} data-testid="button-close-interview">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
+          {interview.status === "failed" ? (
+            <div className="text-center py-6">
+              <p className="text-sm text-red-500">{interview.errorMessage || "Interview failed"}</p>
+            </div>
+          ) : (
+            questions.map((q, i) => (
+              <div key={i} className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                <p className="text-xs font-medium text-primary">Q: {q}</p>
+                <p className="text-sm">{answers[i] || "No response"}</p>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function AutoplayQueue({ briefings }: { briefings: Briefing[] }) {
-  const audioQueue = briefings.filter(b => b.audioUrl);
-  const [currentIndex, setCurrentIndex] = useState(-1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const audioRef = useRef<HTMLAudioElement>(null);
+function ArchiveList({ briefings, interviews }: { briefings: Briefing[]; interviews: NewsroomInterview[] }) {
+  const [selectedInterview, setSelectedInterview] = useState<NewsroomInterview | null>(null);
 
-  const currentTrack = currentIndex >= 0 ? audioQueue[currentIndex] : null;
-
-  const playQueue = () => {
-    if (audioQueue.length === 0) return;
-    if (currentIndex < 0) {
-      setCurrentIndex(0);
-    }
-    setIsPlaying(true);
+  const getStatusBadge = (briefing: Briefing) => {
+    if (briefing.videoUrl) return <Badge className="text-[10px] bg-purple-500/20 text-purple-400 border-purple-500/30" variant="outline">VIDEO_READY</Badge>;
+    if (briefing.audioUrl) return <Badge className="text-[10px] bg-green-500/20 text-green-400 border-green-500/30" variant="outline">READY</Badge>;
+    return <Badge className="text-[10px] bg-amber-500/20 text-amber-400 border-amber-500/30" variant="outline">DRAFT</Badge>;
   };
-
-  const skipForward = () => {
-    if (currentIndex < audioQueue.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      setIsPlaying(true);
-    } else {
-      setCurrentIndex(-1);
-      setIsPlaying(false);
-      setProgress(0);
-    }
-  };
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      if (currentIndex < 0 && audioQueue.length > 0) {
-        setCurrentIndex(0);
-      }
-      setIsPlaying(true);
-    }
-  };
-
-  useEffect(() => {
-    if (!audioRef.current || !currentTrack) return;
-    audioRef.current.src = currentTrack.audioUrl!;
-    if (isPlaying) {
-      audioRef.current.play().catch(() => setIsPlaying(false));
-    }
-  }, [currentIndex, currentTrack?.id]);
-
-  useEffect(() => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.play().catch(() => setIsPlaying(false));
-    } else {
-      audioRef.current.pause();
-    }
-  }, [isPlaying]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const updateProgress = () => {
-      if (audio.duration) setProgress((audio.currentTime / audio.duration) * 100);
-    };
-    audio.addEventListener("timeupdate", updateProgress);
-    return () => audio.removeEventListener("timeupdate", updateProgress);
-  }, []);
-
-  if (audioQueue.length === 0) return null;
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden" data-testid="panel-autoplay-queue">
-      <div className="flex items-center gap-3 p-3">
-        <div className="flex items-center gap-1.5">
-          <Button size="sm" variant={isPlaying ? "default" : "outline"} className="h-8 w-8 p-0" onClick={togglePlay} data-testid="button-autoplay-toggle">
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          </Button>
-          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={skipForward} disabled={currentIndex < 0} data-testid="button-autoplay-skip">
-            <SkipForward className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="flex-1 min-w-0">
-          {currentTrack ? (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Radio className="h-3 w-3 text-red-500 animate-pulse shrink-0" />
-                <span className="text-sm font-medium truncate">{currentTrack.title}</span>
-                <span className="text-xs text-muted-foreground shrink-0">{currentIndex + 1}/{audioQueue.length}</span>
+    <Card data-testid="panel-archive">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider">Archive</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {briefings.map((briefing) => (
+          <Link key={briefing.id} href={`/briefings/${briefing.id}`}>
+            <div className="rounded-lg border p-3 space-y-1 hover:bg-muted/30 transition-colors cursor-pointer" data-testid={`archive-item-${briefing.id}`}>
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium text-sm line-clamp-1">{briefing.title}</h4>
+                <div className="flex items-center gap-2 shrink-0">
+                  {getStatusBadge(briefing)}
+                  <span className="text-xs text-muted-foreground">{timeAgo(briefing.createdAt)}</span>
+                </div>
               </div>
-              <div className="h-1 bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
-              </div>
+              <p className="text-xs text-muted-foreground line-clamp-1">
+                {briefing.summary || briefing.content.slice(0, 120)}
+              </p>
             </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Volume2 className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">{audioQueue.length} broadcasts ready to play</span>
-              <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={playQueue} data-testid="button-play-all">Play All</Button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <audio
-        ref={audioRef}
-        onEnded={skipForward}
-        data-testid="audio-autoplay"
-      />
-    </div>
+          </Link>
+        ))}
+        {briefings.length === 0 && (
+          <div className="text-center py-6 text-muted-foreground">
+            <Newspaper className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No broadcasts in the archive yet</p>
+          </div>
+        )}
+      </CardContent>
+      {selectedInterview && (
+        <InterviewModal interview={selectedInterview} onClose={() => setSelectedInterview(null)} />
+      )}
+    </Card>
   );
 }
 
 export default function Briefings() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [selectedInterview, setSelectedInterview] = useState<NewsroomInterview | null>(null);
 
-  const { data: briefings, isLoading } = useQuery<Briefing[]>({
+  const { data: briefings, isLoading: briefingsLoading } = useQuery<Briefing[]>({
     queryKey: ["/api/briefings"],
   });
 
-  const published = briefings?.filter(b => b.status === "published") || [];
-  const hero = published.find(b => b.featured) || published[0];
-  const articles = published.filter(b => b.id !== hero?.id);
-
-  const filteredArticles = articles.filter((b) => {
-    const matchesSearch = !searchQuery || 
-      b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.summary?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = typeFilter === "all" || b.articleType === typeFilter;
-    return matchesSearch && matchesType;
+  const { data: settings } = useQuery<NewsroomSettings>({
+    queryKey: ["/api/newsroom/settings"],
   });
 
-  const articleTypes = ["all", "breaking", "feature", "interview", "investigation", "recap", "bulletin"];
+  const { data: interviews } = useQuery<NewsroomInterview[]>({
+    queryKey: ["/api/newsroom/interviews"],
+    refetchInterval: 30000,
+  });
+
+  const { data: agentStatuses } = useQuery<AgentInterviewStatus[]>({
+    queryKey: ["/api/newsroom/agent-status"],
+    refetchInterval: 30000,
+  });
+
+  const published = briefings?.filter(b => b.status === "published") || [];
+  const latestBroadcast = published[0];
+  const archiveBriefings = published.slice(0, 20);
+  const completedInterviews = (interviews || []).filter(i => i.status === "complete");
+
+  if (briefingsLoading) {
+    return (
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <Skeleton className="h-48 rounded-xl" />
+            <Skeleton className="h-96 rounded-xl" />
+          </div>
+          <div className="space-y-6">
+            <Skeleton className="h-40 rounded-xl" />
+            <Skeleton className="h-64 rounded-xl" />
+            <Skeleton className="h-48 rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Newspaper className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" data-testid="text-newsroom-title">
-              The Newsroom
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Herald's broadcast headquarters — breaking news, investigations & factory updates
-            </p>
-          </div>
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-primary/10">
+          <Newspaper className="h-6 w-6 text-primary" />
         </div>
-        <Link href="/briefings/new">
-          <Button className="gap-2" data-testid="button-create-briefing">
-            <Plus className="h-4 w-4" />
-            New Story
-          </Button>
-        </Link>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight" data-testid="text-newsroom-title">
+            The Newsroom
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Herald's broadcast headquarters — autonomous investigations & factory reports
+          </p>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-6">
-          <Skeleton className="h-64 w-full rounded-xl" />
-          <Skeleton className="h-10 w-full rounded-lg" />
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Skeleton key={i} className="h-72 rounded-lg" />
-            ))}
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <LatestBroadcastPanel briefing={latestBroadcast} settings={settings} />
+          <ArchiveList briefings={archiveBriefings} interviews={completedInterviews} />
         </div>
-      ) : (
-        <>
-          {hero && <HeroBroadcast briefing={hero} />}
 
-          <TickerBar briefings={published.slice(0, 8)} />
+        <div className="space-y-6">
+          <AutonomyPanel settings={settings} />
+          <EmergentInterviewsPanel agentStatuses={agentStatuses || []} />
+          <RecentExcerptsPanel interviews={interviews || []} />
+        </div>
+      </div>
 
-          <AutoplayQueue briefings={published} />
-
-          <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search stories..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                data-testid="input-search-stories"
-              />
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {articleTypes.map((type) => {
-                const config = type !== "all" ? ARTICLE_TYPE_CONFIG[type] : null;
-                return (
-                  <Button
-                    key={type}
-                    size="sm"
-                    variant={typeFilter === type ? "default" : "outline"}
-                    className="text-xs h-8 gap-1"
-                    onClick={() => setTypeFilter(type)}
-                    data-testid={`button-filter-${type}`}
-                  >
-                    {config && <config.icon className="h-3 w-3" />}
-                    {type === "all" ? "All" : config?.label || type}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-
-          {filteredArticles.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredArticles.map((briefing) => (
-                <ArticleCard key={briefing.id} briefing={briefing} />
-              ))}
-            </div>
-          ) : (
-            <Card className="border-dashed">
-              <CardContent className="py-12">
-                <div className="text-center">
-                  <Newspaper className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-medium mb-2">
-                    {searchQuery || typeFilter !== "all" ? "No matching stories" : "No stories yet"}
-                  </h3>
-                  <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-                    {searchQuery || typeFilter !== "all"
-                      ? "Try adjusting your filters"
-                      : "Herald and the newsroom team will publish stories here"
-                    }
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </>
+      {selectedInterview && (
+        <InterviewModal interview={selectedInterview} onClose={() => setSelectedInterview(null)} />
       )}
     </div>
   );

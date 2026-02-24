@@ -3182,5 +3182,117 @@ Do NOT include the task-action block for casual conversation, greetings, questio
     }
   });
 
+  app.get("/api/newsroom/settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const settings = await storage.getNewsroomSettings();
+      if (!settings) {
+        const created = await storage.upsertNewsroomSettings({
+          autoBroadcastIntervalMinutes: 60,
+          autoPlayEnabled: false,
+          enabled: true,
+          interviewCooldownMinutes: 30,
+        });
+        return res.json(created);
+      }
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch newsroom settings" });
+    }
+  });
+
+  app.put("/api/newsroom/settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const updated = await storage.upsertNewsroomSettings(req.body);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update newsroom settings" });
+    }
+  });
+
+  app.get("/api/newsroom/interviews", isAuthenticated, async (req: any, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 20;
+      const interviews = await storage.getRecentNewsroomInterviews(limit);
+      res.json(interviews);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch interviews" });
+    }
+  });
+
+  app.get("/api/newsroom/agent-status", isAuthenticated, async (req: any, res) => {
+    try {
+      const { getAgentInterviewStatus } = await import("./heraldNewsroom");
+      const statuses = await getAgentInterviewStatus();
+      res.json(statuses);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch agent interview status" });
+    }
+  });
+
+  app.post("/api/newsroom/interview/:agentId", isAuthenticated, async (req: any, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+      const { interviewAgent } = await import("./heraldNewsroom");
+      const interview = await interviewAgent(agent);
+      res.json(interview);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Interview failed" });
+    }
+  });
+
+  app.post("/api/newsroom/interview-all", isAuthenticated, async (req: any, res) => {
+    try {
+      const { runInterviewRound } = await import("./heraldNewsroom");
+      const results = await runInterviewRound();
+      res.json({ interviews: results, count: results.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Interview round failed" });
+    }
+  });
+
+  app.post("/api/newsroom/generate-broadcast", isAuthenticated, async (req: any, res) => {
+    try {
+      const { generateBroadcast } = await import("./heraldNewsroom");
+      const briefing = await generateBroadcast();
+      if (!briefing) {
+        return res.status(400).json({ message: "No interview data available to create a broadcast" });
+      }
+      res.json(briefing);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Broadcast generation failed" });
+    }
+  });
+
+  app.get("/api/newsroom/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const { getHeraldStatus } = await import("./heraldNewsroom");
+      res.json(getHeraldStatus());
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Herald status" });
+    }
+  });
+
+  app.post("/api/newsroom/start", isAuthenticated, async (req: any, res) => {
+    try {
+      const { startHeraldNewsroom } = await import("./heraldNewsroom");
+      startHeraldNewsroom();
+      res.json({ message: "Herald newsroom started" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to start Herald" });
+    }
+  });
+
+  app.post("/api/newsroom/stop", isAuthenticated, async (req: any, res) => {
+    try {
+      const { stopHeraldNewsroom } = await import("./heraldNewsroom");
+      stopHeraldNewsroom();
+      res.json({ message: "Herald newsroom stopped" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to stop Herald" });
+    }
+  });
+
   return httpServer;
 }
