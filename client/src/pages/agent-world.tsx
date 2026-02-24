@@ -2036,6 +2036,7 @@ interface ChatMessageWithTask extends ChatMessage {
   taskAction?: TaskAction | null;
   taskResult?: { success: boolean; message: string } | null;
   taskExecuting?: boolean;
+  imagePreview?: string;
 }
 
 function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState?: AgentSimState; onClose: () => void }) {
@@ -2046,8 +2047,11 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
   const [isStreaming, setIsStreaming] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [chatImage, setChatImage] = useState<File | null>(null);
+  const [chatImagePreview, setChatImagePreview] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const prevAgentId = useRef(agent.id);
 
   const { data: diaryEntries, isLoading: diaryLoading } = useQuery<AgentDiaryEntry[]>({
@@ -2168,9 +2172,12 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
   const sendMessage = useCallback(async () => {
     const msg = chatInput.trim();
     if (!msg || isStreaming) return;
-    const userMsg: ChatMessageWithTask = { role: "user", content: msg };
+    const userMsg: ChatMessageWithTask = { role: "user", content: msg, imagePreview: chatImagePreview || undefined };
     setChatMessages(prev => [...prev, userMsg]);
     setChatInput("");
+    const currentImage = chatImage;
+    setChatImage(null);
+    setChatImagePreview(null);
     setIsStreaming(true);
     const isWalking = simState?.phase === "walking";
     const currentRoom = simState
@@ -2181,12 +2188,26 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
     const currentActivity = simState?.animation === "resting" ? "resting" : isWalking ? "walking" : "working";
 
     try {
-      const response = await fetch(`/api/agents/${agent.id}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ message: msg, history: chatMessages, context: { room: currentRoom, objective: currentObjective, activity: currentActivity } }),
-      });
+      let response: globalThis.Response;
+      if (currentImage) {
+        const formData = new FormData();
+        formData.append("message", msg);
+        formData.append("history", JSON.stringify(chatMessages));
+        formData.append("context", JSON.stringify({ room: currentRoom, objective: currentObjective, activity: currentActivity }));
+        formData.append("image", currentImage);
+        response = await fetch(`/api/agents/${agent.id}/chat`, {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+      } else {
+        response = await fetch(`/api/agents/${agent.id}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ message: msg, history: chatMessages, context: { room: currentRoom, objective: currentObjective, activity: currentActivity } }),
+        });
+      }
       if (!response.ok) throw new Error("Chat failed");
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No reader");
@@ -2219,7 +2240,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
     } finally {
       setIsStreaming(false);
     }
-  }, [chatInput, isStreaming, agent.id, chatMessages, simState]);
+  }, [chatInput, isStreaming, agent.id, chatMessages, simState, chatImage, chatImagePreview]);
 
   return (
     <Card className={`absolute bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isExpanded ? "inset-4" : "right-4 top-4 w-[380px] max-h-[calc(100%-2rem)]"}`} data-testid={`panel-agent-detail-${agent.id}`}>
@@ -2306,6 +2327,9 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               <div key={i}>
                 <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`} data-testid={`chat-message-${msg.role}-${i}`}>
+                    {msg.imagePreview && (
+                      <img src={msg.imagePreview} alt="Shared image" className="rounded mb-1.5 max-h-32 w-auto" data-testid={`chat-image-${i}`} />
+                    )}
                     {msg.content || (isStreaming && i === chatMessages.length - 1 ? <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Thinking...</span> : "")}
                   </div>
                 </div>
@@ -2347,8 +2371,40 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               </div>
             ))}
           </div>
-          <div className="px-3 pb-3 pt-1 shrink-0">
+          <div className="px-3 pb-3 pt-1 shrink-0 space-y-1.5">
+            {chatImagePreview && (
+              <div className="relative inline-block">
+                <img src={chatImagePreview} alt="Upload preview" className="rounded border max-h-20 w-auto" data-testid="img-chat-preview" />
+                <button
+                  type="button"
+                  onClick={() => { setChatImage(null); setChatImagePreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                  className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full h-4 w-4 flex items-center justify-center text-[10px] leading-none"
+                  data-testid="button-remove-chat-image"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            )}
             <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-1.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setChatImage(file);
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setChatImagePreview(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                  }
+                }}
+                data-testid="input-chat-file"
+              />
+              <Button type="button" variant="ghost" size="icon" className="shrink-0 h-9 w-9" onClick={() => fileInputRef.current?.click()} disabled={isStreaming} data-testid="button-attach-image">
+                <ImageIcon className="h-3.5 w-3.5" />
+              </Button>
               <Input ref={inputRef} value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={`Message ${agent.name.split(" ")[0]}...`} className="text-xs" disabled={isStreaming} data-testid="input-agent-chat" />
               <Button type="submit" size="icon" className="shrink-0" disabled={!chatInput.trim() || isStreaming} data-testid="button-send-agent-chat">
                 {isStreaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}

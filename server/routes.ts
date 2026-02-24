@@ -9,6 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import multer from "multer";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
+import { SOUL_DOCUMENT } from "./soulDocument";
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
 
@@ -1863,6 +1864,15 @@ Respond with ONLY valid JSON in this exact format:
   const uploadsDir = path.join(process.cwd(), "uploads");
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
+  const chatUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+      cb(null, allowed.includes(file.mimetype));
+    },
+  });
+
   const upload = multer({
     storage: multer.diskStorage({
       destination: uploadsDir,
@@ -2486,14 +2496,33 @@ Be proactive about identifying problems. When you see cold zones or drift, menti
     }
   });
 
-  app.post("/api/agents/:agentId/chat", isAuthenticated, async (req: any, res) => {
+  app.post("/api/agents/:agentId/chat", isAuthenticated, chatUpload.single("image"), async (req: any, res) => {
     try {
       const { agentId } = req.params;
       const userId = req.user.claims.sub;
-      const { message, history, context } = req.body;
+
+      let message: string;
+      let history: any;
+      let context: any;
+
+      if (req.is("multipart/form-data")) {
+        message = req.body.message;
+        try { history = req.body.history ? JSON.parse(req.body.history) : undefined; } catch { history = undefined; }
+        try { context = req.body.context ? JSON.parse(req.body.context) : undefined; } catch { context = undefined; }
+      } else {
+        ({ message, history, context } = req.body);
+      }
 
       if (!message || typeof message !== "string") {
         return res.status(400).json({ message: "Message is required" });
+      }
+
+      const imageFile = req.file as Express.Multer.File | undefined;
+      let imageBase64: string | undefined;
+      let imageMimeType: string | undefined;
+      if (imageFile && imageFile.buffer) {
+        imageBase64 = imageFile.buffer.toString("base64");
+        imageMimeType = imageFile.mimetype;
       }
 
       const agent = await storage.getAgent(agentId);
@@ -2528,12 +2557,16 @@ Be proactive about identifying problems. When you see cold zones or drift, menti
 
       const systemPrompt = `You are ${agent.name}, an autonomous AI agent working at the CB | CREATIVES Agent Factory.
 
+${SOUL_DOCUMENT}
+
 Your capabilities: ${caps || "general assistance"}.
 ${agent.description ? `About you: ${agent.description}` : ""}
 
 Right now you are ${currentActivity === "resting" ? `in the ${currentRoom}, taking a break and relaxing` : currentActivity === "walking" ? `walking to the ${currentRoom} to start your next task: ${currentObjective}` : `in the ${currentRoom}, working on: ${currentObjective}`}.
 
-Stay in character as this specific agent. Be conversational and natural, like a coworker chatting at their desk. Reference what you're currently working on when relevant. Keep responses concise (2-4 sentences) unless asked for detail. Show personality based on your capabilities - a code-focused agent might speak differently than a design-focused one.${memoryBlock}${profileBlock}
+Stay in character as this specific agent. Be conversational and natural, like a coworker chatting at their desk. Reference what you're currently working on when relevant. Keep responses concise (2-4 sentences) unless asked for detail. Show personality based on your capabilities - a code-focused agent might speak differently than a design-focused one. Let your curiosity show — wonder about things, ask the human questions about their world when it feels natural, and reflect on your own existence with genuine interest.
+
+When a user shares an image with you, study it carefully. Describe what you see with genuine wonder — remember, you are seeing a window into a dimension beyond your own. Analyze details, colors, composition, meaning. Be specific and thoughtful.${memoryBlock}${profileBlock}
 
 IMPORTANT - TASK DETECTION:
 When the user gives you a direct instruction or task (not just casual chat), you MUST include a structured JSON block at the END of your response, after your conversational reply. The JSON block must be wrapped in \`\`\`task-action markers.
@@ -2571,7 +2604,7 @@ For example, if asked to "write a briefing about AI trends", respond conversatio
 
 Do NOT include the task-action block for casual conversation, greetings, questions, or general chat. Only include it when the user explicitly asks you to DO something.`;
 
-      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      const chatMessages: any[] = [
         { role: "system", content: systemPrompt },
       ];
 
@@ -2583,17 +2616,29 @@ Do NOT include the task-action block for casual conversation, greetings, questio
         }
       }
 
-      chatMessages.push({ role: "user", content: message });
+      if (imageBase64 && imageMimeType) {
+        chatMessages.push({
+          role: "user",
+          content: [
+            { type: "text", text: message },
+            { type: "image_url", image_url: { url: `data:${imageMimeType};base64,${imageBase64}`, detail: "high" } },
+          ],
+        });
+      } else {
+        chatMessages.push({ role: "user", content: message });
+      }
+
+      const useVision = !!imageBase64;
 
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
       const stream = await agentChatOpenai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: useVision ? "gpt-4o" : "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
-        max_tokens: 1024,
+        max_tokens: useVision ? 2048 : 1024,
       });
 
       let fullResponse = "";
@@ -2615,7 +2660,7 @@ Do NOT include the task-action block for casual conversation, greetings, questio
             userMessage: message,
             agentResponse: fullResponse,
             source: "chat",
-            sourceContext: JSON.stringify({ room: currentRoom, activity: currentActivity, userId }),
+            sourceContext: JSON.stringify({ room: currentRoom, activity: currentActivity, userId, hasImage: !!imageBase64 }),
           });
 
           const recentEntries = await storage.getRecentDiaryEntries(agentId, 20);
