@@ -2045,6 +2045,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
   const [chatMessages, setChatMessages] = useState<ChatMessageWithTask[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const prevAgentId = useRef(agent.id);
@@ -2221,7 +2222,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
   }, [chatInput, isStreaming, agent.id, chatMessages, simState]);
 
   return (
-    <Card className="absolute right-4 top-4 w-[380px] bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col max-h-[calc(100%-2rem)]" data-testid={`panel-agent-detail-${agent.id}`}>
+    <Card className={`absolute bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isExpanded ? "inset-4" : "right-4 top-4 w-[380px] max-h-[calc(100%-2rem)]"}`} data-testid={`panel-agent-detail-${agent.id}`}>
       <CardHeader className="pb-2 shrink-0">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
@@ -2237,9 +2238,14 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
               </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={onClose} data-testid="button-close-agent-panel">
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setIsExpanded(!isExpanded)} data-testid="button-expand-agent-panel">
+              {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={onClose} data-testid="button-close-agent-panel">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 text-sm pb-2 shrink-0">
@@ -2289,7 +2295,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
         </TabsList>
 
         <TabsContent value="chat" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[300px]">
+          <div ref={scrollRef} className={`flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] ${isExpanded ? "" : "max-h-[300px]"}`}>
             {chatMessages.length === 0 && (
               <div className="text-center py-6">
                 <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
@@ -2352,7 +2358,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
         </TabsContent>
 
         <TabsContent value="diary" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
-          <div className="overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[350px]">
+          <div className={`overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] ${isExpanded ? "flex-1" : "max-h-[350px]"}`}>
             {diaryLoading && (
               <div className="space-y-2">
                 {[1, 2, 3].map(n => <Skeleton key={n} className="h-14 w-full" />)}
@@ -2389,7 +2395,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
         </TabsContent>
 
         <TabsContent value="memory" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
-          <div className="overflow-y-auto px-3 py-2 min-h-[120px] max-h-[350px]">
+          <div className={`overflow-y-auto px-3 py-2 min-h-[120px] ${isExpanded ? "flex-1" : "max-h-[350px]"}`}>
             {memoryLoading && <Skeleton className="h-24 w-full" />}
             {!memoryLoading && agentMemory && (
               <div className="space-y-3">
@@ -2418,7 +2424,7 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
         </TabsContent>
 
         <TabsContent value="relationships" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
-          <div className="overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] max-h-[350px]">
+          <div className={`overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] ${isExpanded ? "flex-1" : "max-h-[350px]"}`}>
             {profilesLoading && (
               <div className="space-y-2">
                 {[1, 2].map(n => <Skeleton key={n} className="h-16 w-full" />)}
