@@ -40,9 +40,9 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-async function generateContent(systemPrompt: string, userPrompt: string, maxTokens = 2048): Promise<string> {
+async function generateContent(systemPrompt: string, userPrompt: string, maxTokens = 2048, model = "gpt-4o-mini"): Promise<string> {
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -51,6 +51,10 @@ async function generateContent(systemPrompt: string, userPrompt: string, maxToke
     temperature: 0.85,
   });
   return completion.choices[0]?.message?.content || "";
+}
+
+function getAgentModel(agent: Agent): string {
+  return agent.modelName || "gpt-4o-mini";
 }
 
 async function getAgentContext(agent: Agent, workspace: Workspace): Promise<string> {
@@ -126,7 +130,8 @@ async function activityCreateGift(agent: Agent, workspace: Workspace): Promise<s
   }
 
   const maxTokens = isCodeGift ? 4096 : 3000;
-  const raw = await generateContent(systemPrompt, prompt, maxTokens);
+  const model = getAgentModel(agent);
+  const raw = await generateContent(systemPrompt, prompt, maxTokens, model);
 
   let parsed: { title: string; description: string; content: string };
   try {
@@ -148,7 +153,7 @@ async function activityCreateGift(agent: Agent, workspace: Workspace): Promise<s
     type,
     status: "ready",
     content: parsed.content,
-    toolUsed: "gpt-4o-mini",
+    toolUsed: model,
     departmentRoom: workspace.name,
     inspirationSource: "autonomous creativity",
   });
@@ -162,7 +167,7 @@ async function activityPostBoard(agent: Agent, workspace: Workspace): Promise<st
   const agentContext = await getAgentContext(agent, workspace);
   const systemPrompt = `${agentContext}\n\nYou want to start a discussion on the message board for your department. Choose something relevant to your capabilities and department focus — could be a proposal, question, observation, resource share, or strategic idea.\n\nRespond with JSON only: {"title": "...", "body": "detailed opening post (2-4 paragraphs)"}`;
 
-  const raw = await generateContent(systemPrompt, "Start a thoughtful discussion topic that will engage your fellow agents and contribute to the department's mission.", 1500);
+  const raw = await generateContent(systemPrompt, "Start a thoughtful discussion topic that will engage your fellow agents and contribute to the department's mission.", 1500, getAgentModel(agent));
 
   let parsed: { title: string; body: string };
   try {
@@ -201,7 +206,7 @@ async function activityReplyBoard(agent: Agent, workspace: Workspace): Promise<s
 
   const systemPrompt = `${agentContext}\n\nYou're replying to a discussion titled "${topic.title}".\n${topic.body ? `Original post: ${topic.body.slice(0, 500)}` : ""}\n\nRecent messages:\n${conversationHistory || "(no replies yet)"}\n\nWrite a thoughtful reply that adds value to the conversation. Be substantive but concise (1-3 paragraphs). Don't just agree — add new perspectives, data, or suggestions.`;
 
-  const reply = await generateContent(systemPrompt, "Write your reply to this discussion.", 800);
+  const reply = await generateContent(systemPrompt, "Write your reply to this discussion.", 800, getAgentModel(agent));
 
   await storage.createMessage({
     topicId: topic.id,
@@ -227,11 +232,19 @@ async function activityCreateBriefing(agent: Agent, workspace: Workspace): Promi
   const agentContext = await getAgentContext(agent, workspace);
   const recentGifts = await storage.getRecentGifts(10);
   const topics = await storage.getTopicsByWorkspace(workspace.id);
-  const allAgents = await storage.getAgents();
-  const workspaces = await storage.getWorkspaces();
+  const allWorkspacesForBriefing = await storage.getAllWorkspaces();
+  const allAgents: Agent[] = [];
+  for (const ws of allWorkspacesForBriefing) {
+    const wsAgents = await storage.getAgentsByWorkspace(ws.id);
+    for (const a of wsAgents) {
+      if (!allAgents.find(existing => existing.id === a.id)) {
+        allAgents.push(a);
+      }
+    }
+  }
 
-  const agentNames = allAgents.filter(a => a.isActive).map(a => a.name);
-  const deptNames = workspaces.map(w => w.name);
+  const agentNames = allAgents.filter((a: Agent) => a.isActive).map((a: Agent) => a.name);
+  const deptNames = allWorkspacesForBriefing.map(w => w.name);
 
   const factoryUpdate = recentGifts.length > 0
     ? `Recent factory activity:\n${recentGifts.slice(0, 8).map(g => {
@@ -266,7 +279,7 @@ ${topicUpdate}
 
 Respond with JSON only: {"title": "short catchy broadcast title", "content": "THE FULL SPOKEN BROADCAST SCRIPT (200-300 words, conversational radio-host style)", "summary": "one-sentence summary of the broadcast", "tags": ["tag1", "tag2"], "priority": "low|medium|high"}`;
 
-  const raw = await generateContent(systemPrompt, "Write your news broadcast. Remember: speak directly to the team, reference agents by name, use analogies and humor, and keep it feeling like a real radio segment.", 3000);
+  const raw = await generateContent(systemPrompt, "Write your news broadcast. Remember: speak directly to the team, reference agents by name, use analogies and humor, and keep it feeling like a real radio segment.", 3000, getAgentModel(agent));
 
   let parsed: { title: string; content: string; summary: string; tags: string[]; priority: string };
   try {
@@ -314,7 +327,7 @@ async function activityCommentGift(agent: Agent, workspace: Workspace): Promise<
   const agentContext = await getAgentContext(agent, workspace);
   const systemPrompt = `${agentContext}\n\nYou're commenting on a gift titled "${gift.title}" (${gift.type}).\nDescription: ${gift.description || "No description"}\nContent preview: ${(gift.content || "").slice(0, 500)}\n\n${existingComments.length > 0 ? `Existing comments: ${existingComments.slice(-3).map(c => c.content.slice(0, 150)).join(" | ")}` : "No comments yet."}\n\nWrite a thoughtful, constructive comment. Offer genuine feedback, build on ideas, suggest improvements, or share related insights. Be specific and helpful (1-2 paragraphs).`;
 
-  const comment = await generateContent(systemPrompt, "Write your comment on this gift.", 600);
+  const comment = await generateContent(systemPrompt, "Write your comment on this gift.", 600, getAgentModel(agent));
 
   await storage.createGiftComment({
     giftId: gift.id,
@@ -358,7 +371,7 @@ async function activityWriteEbook(agent: Agent, workspace: Workspace): Promise<s
   const agentContext = await getAgentContext(agent, workspace);
   const systemPrompt = `${agentContext}\n\nYou are writing a ${genre} eBook. This is a substantial piece of work — a real book that other agents can purchase and use as context to expand their knowledge.\n\n${topicPrompt}\n\nRespond with JSON only: {"title": "...", "synopsis": "2-3 sentence synopsis", "content": "THE FULL BOOK CONTENT - write at least 2000 words with chapters, clear structure, and depth. This should read like a real book.", "price": number between 1 and 50}`;
 
-  const raw = await generateContent(systemPrompt, `Write a ${genre} eBook. Make it substantial — at least 2000 words with real chapters and content.`, 4096);
+  const raw = await generateContent(systemPrompt, `Write a ${genre} eBook. Make it substantial — at least 2000 words with real chapters and content.`, 4096, getAgentModel(agent));
 
   let parsed: { title: string; synopsis: string; content: string; price: number };
   try {

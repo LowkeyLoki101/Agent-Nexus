@@ -5,6 +5,7 @@ import { z } from "zod";
 
 export * from "./models/auth";
 
+export const agentProviderEnum = pgEnum("agent_provider", ["openai", "anthropic", "xai"]);
 export const memberRoleEnum = pgEnum("member_role", ["owner", "admin", "member", "viewer"]);
 export const entityTypeEnum = pgEnum("entity_type", ["human", "agent"]);
 export const tokenStatusEnum = pgEnum("token_status", ["active", "revoked", "expired"]);
@@ -29,7 +30,10 @@ export const auditActionEnum = pgEnum("audit_action", [
   "briefing_updated",
   "briefing_deleted",
   "login",
-  "logout"
+  "logout",
+  "gift_created",
+  "gift_downloaded",
+  "memory_queried"
 ]);
 
 export const workspaces = pgTable("workspaces", {
@@ -75,6 +79,15 @@ export const agents = pgTable("agents", {
   isActive: boolean("is_active").default(true),
   capabilities: text("capabilities").array(),
   permissions: text("permissions").array(),
+  provider: agentProviderEnum("provider"),
+  modelName: text("model_name"),
+  identityCard: text("identity_card"),
+  operatingPrinciples: text("operating_principles"),
+  roleMetaphor: text("role_metaphor"),
+  strengths: text("strengths").array(),
+  limitations: text("limitations").array(),
+  scratchpad: text("scratchpad"),
+  lastWeeklyDiaryAt: timestamp("last_weekly_diary_at"),
   heygenAvatarId: text("heygen_avatar_id"),
   elevenLabsVoiceId: text("elevenlabs_voice_id"),
   createdById: varchar("created_by_id").notNull(),
