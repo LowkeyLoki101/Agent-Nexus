@@ -143,6 +143,12 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
+    const viteConfigModule = await import("../vite.config");
+    const rawConfig = viteConfigModule.default;
+    if (typeof rawConfig === "function") {
+      const resolved = await rawConfig({command: "serve", mode: "development"});
+      Object.assign(rawConfig, resolved);
+    }
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }

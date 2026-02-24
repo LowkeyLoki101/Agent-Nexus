@@ -326,7 +326,7 @@ function EmergentInterviewsPanel({ agentStatuses }: { agentStatuses: AgentInterv
   );
 }
 
-function RecentExcerptsPanel({ interviews }: { interviews: NewsroomInterview[] }) {
+function RecentExcerptsPanel({ interviews, onSelectInterview }: { interviews: NewsroomInterview[]; onSelectInterview: (i: NewsroomInterview) => void }) {
   const completed = interviews.filter(i => i.status === "complete" && i.excerpt);
 
   return (
@@ -336,18 +336,60 @@ function RecentExcerptsPanel({ interviews }: { interviews: NewsroomInterview[] }
       </CardHeader>
       <CardContent className="space-y-3">
         {completed.slice(0, 5).map((interview) => (
-          <div key={interview.id} className="space-y-1" data-testid={`excerpt-${interview.id}`}>
+          <div
+            key={interview.id}
+            className="space-y-1 rounded-lg p-2 -mx-2 cursor-pointer hover:bg-muted/40 transition-colors"
+            onClick={() => onSelectInterview(interview)}
+            data-testid={`excerpt-${interview.id}`}
+          >
             <div className="flex items-center gap-2">
               <Badge className={`text-[10px] text-white ${getAgentColor(interview.agentName)}`}>
                 {interview.agentName.toUpperCase()}
               </Badge>
               <span className="text-xs text-muted-foreground">{timeAgo(interview.createdAt)}</span>
+              <Mic className="h-3 w-3 text-muted-foreground/40 ml-auto" />
             </div>
             <p className="text-xs text-muted-foreground/80 italic line-clamp-2">"{interview.excerpt}"</p>
           </div>
         ))}
         {completed.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-2">No excerpts yet</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentInterviewsPanel({ interviews, onSelectInterview }: { interviews: NewsroomInterview[]; onSelectInterview: (i: NewsroomInterview) => void }) {
+  const allInterviews = interviews.filter(i => i.status === "complete" || i.status === "failed");
+
+  return (
+    <Card data-testid="panel-recent-interviews">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider">Interview Archive</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {allInterviews.slice(0, 10).map((interview) => (
+          <div
+            key={interview.id}
+            className="flex items-center justify-between rounded-lg p-2 -mx-2 cursor-pointer hover:bg-muted/40 transition-colors"
+            onClick={() => onSelectInterview(interview)}
+            data-testid={`interview-archive-${interview.id}`}
+          >
+            <div className="flex items-center gap-2">
+              <Mic className="h-3.5 w-3.5 text-primary/60" />
+              <Badge className={`text-[10px] text-white ${getAgentColor(interview.agentName)}`}>
+                {interview.agentName.toUpperCase()}
+              </Badge>
+              {interview.status === "failed" && (
+                <Badge variant="outline" className="text-[10px] text-red-400 border-red-400/30">FAILED</Badge>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground">{timeAgo(interview.createdAt)}</span>
+          </div>
+        ))}
+        {allInterviews.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-2">No interviews yet</p>
         )}
       </CardContent>
     </Card>
@@ -504,7 +546,8 @@ export default function Briefings() {
         <div className="space-y-6">
           <AutonomyPanel settings={settings} />
           <EmergentInterviewsPanel agentStatuses={agentStatuses || []} />
-          <RecentExcerptsPanel interviews={interviews || []} />
+          <RecentExcerptsPanel interviews={interviews || []} onSelectInterview={setSelectedInterview} />
+          <RecentInterviewsPanel interviews={interviews || []} onSelectInterview={setSelectedInterview} />
         </div>
       </div>
 
