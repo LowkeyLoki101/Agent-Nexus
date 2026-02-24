@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
+import {
   Search,
   FileText,
   Filter,
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { AuditLog } from "@shared/schema";
 
 const ACTION_COLORS: Record<string, string> = {
@@ -58,6 +58,20 @@ export default function AuditLogs() {
 
   const uniqueActions = [...new Set(logs?.map((l) => l.action) || [])];
 
+  const handleExport = useCallback(async () => {
+    const response = await fetch("/api/audit-logs/export", { credentials: "include" });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -69,7 +83,7 @@ export default function AuditLogs() {
             Comprehensive activity history across all workspaces
           </p>
         </div>
-        <Button variant="outline" className="gap-2" data-testid="button-export-logs">
+        <Button variant="outline" className="gap-2" data-testid="button-export-logs" onClick={handleExport}>
           <Download className="h-4 w-4" />
           Export
         </Button>

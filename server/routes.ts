@@ -1,71 +1,17 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
-import { insertWorkspaceSchema, insertAgentSchema, insertGiftSchema, insertGiftCommentSchema, insertAssemblyLineSchema, insertAssemblyLineStepSchema, insertProductSchema, insertAgentNoteSchema, insertAgentFileDraftSchema, insertDiscussionTopicSchema, insertDiscussionMessageSchema, users } from "@shared/schema";
+import type { AuthenticatedRequest } from "./replit_integrations/auth";
 import { z } from "zod";
-import OpenAI from "openai";
-import * as fs from "fs";
-import * as path from "path";
-import multer from "multer";
-import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { SOUL_DOCUMENT } from "./soulDocument";
-import { db } from "./db";
-import { eq, sql } from "drizzle-orm";
 
-async function generateBriefingAudio(briefingId: string): Promise<string | null> {
-  try {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) {
-      console.log("Auto-audio skipped: ELEVENLABS_API_KEY not configured");
-      return null;
-    }
+function getUserId(req: AuthenticatedRequest): string {
+  return req.user.claims.sub;
+}
 
-    const briefing = await storage.getBriefing(briefingId);
-    if (!briefing) return null;
-
-    const text = briefing.content || `${briefing.title}. ${briefing.summary || ""}`;
-
-    let voiceId = "21m00Tcm4TlvDq8ikWAM";
-    if (briefing.authorAgentId) {
-      const agent = await storage.getAgent(briefing.authorAgentId);
-      if (agent?.elevenLabsVoiceId) voiceId = agent.elevenLabsVoiceId;
-    }
-
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text: text.slice(0, 5000),
-        model_id: "eleven_monolingual_v1",
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-      }),
-    });
-
-    if (!response.ok) {
-      console.error("Auto-audio ElevenLabs error:", await response.text());
-      return null;
-    }
-
-    const audioBuffer = Buffer.from(await response.arrayBuffer());
-    const audioDir = path.join(process.cwd(), "client", "public", "audio");
-    if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
-
-    const filename = `broadcast-${briefingId}-${Date.now()}.mp3`;
-    const filePath = path.join(audioDir, filename);
-    fs.writeFileSync(filePath, audioBuffer);
-
-    const audioUrl = `/audio/${filename}`;
-    await storage.updateBriefing(briefingId, { audioUrl });
-    console.log(`Auto-audio generated for briefing ${briefingId}: ${audioUrl}`);
-    return audioUrl;
-  } catch (error) {
-    console.error("Auto-audio generation error:", error);
-    return null;
-  }
+function param(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0];
+  return value ?? "";
 }
 
 async function checkWorkspaceAccess(
@@ -75,18 +21,18 @@ async function checkWorkspaceAccess(
 ): Promise<{ hasAccess: boolean; role?: string }> {
   const members = await storage.getWorkspaceMembers(workspaceId);
   const membership = members.find((m) => m.userId === userId);
-  
+
   if (!membership) {
     return { hasAccess: false };
   }
-  
+
   if (requiredRoles && requiredRoles.length > 0) {
-    return { 
-      hasAccess: requiredRoles.includes(membership.role), 
-      role: membership.role 
+    return {
+      hasAccess: requiredRoles.includes(membership.role),
+      role: membership.role
     };
   }
-  
+
   return { hasAccess: true, role: membership.role };
 }
 
@@ -99,27 +45,9 @@ async function checkWorkspaceAccessBySlug(
   if (!workspace) {
     return { hasAccess: false };
   }
-  
+
   const access = await checkWorkspaceAccess(userId, workspace.id, requiredRoles);
   return { ...access, workspaceId: workspace.id };
-}
-
-async function isSubscribed(req: any, res: Response, next: NextFunction) {
-  try {
-    const userId = req.user?.claims?.sub;
-    if (!userId) return res.status(401).json({ message: "Not authenticated" });
-
-    const [user] = await db.select().from(users).where(eq(users.id, userId));
-    if (!user) return res.status(401).json({ message: "User not found" });
-
-    if (user.isAdmin || user.subscriptionStatus === "active") {
-      return next();
-    }
-
-    return res.status(403).json({ message: "Active subscription required" });
-  } catch (error) {
-    return res.status(500).json({ message: "Authorization check failed" });
-  }
 }
 
 export async function registerRoutes(
@@ -129,239 +57,11 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
 
-  app.get("/api/user/profile", isAuthenticated, async (req: any, res) => {
+  // --- Workspace routes ---
+
+  app.get("/api/workspaces", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const [user] = await db.select().from(users).where(eq(users.id, userId));
-      if (!user) return res.status(404).json({ message: "User not found" });
-      res.json({
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        isAdmin: user.isAdmin,
-        subscriptionStatus: user.subscriptionStatus,
-        stripeCustomerId: user.stripeCustomerId,
-        stripeSubscriptionId: user.stripeSubscriptionId,
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch profile" });
-    }
-  });
-
-  app.get("/api/stripe/publishable-key", isAuthenticated, async (_req: any, res) => {
-    try {
-      const key = await getStripePublishableKey();
-      res.json({ publishableKey: key });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to get Stripe key" });
-    }
-  });
-
-  app.get("/api/stripe/subscription-price", isAuthenticated, async (_req: any, res) => {
-    try {
-      const result = await db.execute(
-        sql`SELECT p.id as product_id, p.name, p.description, pr.id as price_id, pr.unit_amount, pr.currency, pr.recurring 
-            FROM stripe.products p 
-            JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true 
-            WHERE p.active = true AND p.metadata->>'plan' = 'pro' 
-            LIMIT 1`
-      );
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: "No subscription plan found" });
-      }
-      res.json(result.rows[0]);
-    } catch (error) {
-      console.error("Error fetching price:", error);
-      res.status(500).json({ message: "Failed to fetch subscription price" });
-    }
-  });
-
-  app.post("/api/stripe/create-checkout", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { priceId, couponCode } = req.body ?? {};
-
-      if (!priceId) return res.status(400).json({ message: "priceId is required" });
-
-      const validPrice = await db.execute(
-        sql`SELECT pr.id FROM stripe.prices pr 
-            JOIN stripe.products p ON pr.product = p.id 
-            WHERE pr.id = ${priceId} AND pr.active = true AND p.active = true AND p.metadata->>'plan' = 'pro' 
-            LIMIT 1`
-      );
-      if (validPrice.rows.length === 0) {
-        return res.status(400).json({ message: "Invalid price" });
-      }
-
-      const [user] = await db.select().from(users).where(eq(users.id, userId));
-      if (!user) return res.status(404).json({ message: "User not found" });
-
-      const stripe = await getUncachableStripeClient();
-
-      let customerId = user.stripeCustomerId;
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: user.email || undefined,
-          metadata: { userId },
-        });
-        customerId = customer.id;
-        await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, userId));
-      }
-
-      const sessionParams: any = {
-        customer: customerId,
-        payment_method_types: ['card'],
-        line_items: [{ price: priceId, quantity: 1 }],
-        mode: 'subscription',
-        success_url: `${req.protocol}://${req.get('host')}/?subscription=success`,
-        cancel_url: `${req.protocol}://${req.get('host')}/?subscription=cancelled`,
-        allow_promotion_codes: true,
-      };
-
-      if (couponCode) {
-        try {
-          const promoCodes = await stripe.promotionCodes.list({ code: couponCode, active: true, limit: 1 });
-          if (promoCodes.data.length > 0) {
-            sessionParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
-            delete sessionParams.allow_promotion_codes;
-          }
-        } catch {}
-      }
-
-      const session = await stripe.checkout.sessions.create(sessionParams);
-      res.json({ url: session.url });
-    } catch (error: any) {
-      console.error("Checkout error:", error);
-      res.status(500).json({ message: "Failed to create checkout session" });
-    }
-  });
-
-  app.post("/api/stripe/create-portal", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const [user] = await db.select().from(users).where(eq(users.id, userId));
-      if (!user?.stripeCustomerId) {
-        return res.status(400).json({ message: "No billing account found" });
-      }
-
-      const stripe = await getUncachableStripeClient();
-      const session = await stripe.billingPortal.sessions.create({
-        customer: user.stripeCustomerId,
-        return_url: `${req.protocol}://${req.get('host')}/`,
-      });
-      res.json({ url: session.url });
-    } catch (error) {
-      console.error("Portal error:", error);
-      res.status(500).json({ message: "Failed to create billing portal" });
-    }
-  });
-
-  app.post("/api/stripe/sync-subscription", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const [user] = await db.select().from(users).where(eq(users.id, userId));
-      if (!user?.stripeCustomerId) {
-        return res.json({ subscriptionStatus: user?.subscriptionStatus || "none" });
-      }
-
-      const stripe = await getUncachableStripeClient();
-      const subscriptions = await stripe.subscriptions.list({
-        customer: user.stripeCustomerId,
-        status: 'all',
-        limit: 1,
-      });
-
-      let status = "none";
-      let subId = null;
-      if (subscriptions.data.length > 0) {
-        const sub = subscriptions.data[0];
-        subId = sub.id;
-        if (sub.status === "active" || sub.status === "trialing") {
-          status = "active";
-        } else if (sub.status === "past_due") {
-          status = "past_due";
-        } else if (sub.status === "canceled" || sub.status === "unpaid") {
-          status = "cancelled";
-        } else {
-          status = sub.status;
-        }
-      }
-
-      await db.update(users).set({
-        subscriptionStatus: status,
-        stripeSubscriptionId: subId,
-      }).where(eq(users.id, userId));
-
-      res.json({ subscriptionStatus: status });
-    } catch (error) {
-      console.error("Sync error:", error);
-      res.status(500).json({ message: "Failed to sync subscription" });
-    }
-  });
-
-  app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const [adminUser] = await db.select().from(users).where(eq(users.id, userId));
-      if (!adminUser?.isAdmin) {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-      const allUsers = await db.select().from(users);
-      res.json(allUsers.map(u => ({
-        id: u.id,
-        email: u.email,
-        firstName: u.firstName,
-        lastName: u.lastName,
-        isAdmin: u.isAdmin,
-        subscriptionStatus: u.subscriptionStatus,
-        stripeCustomerId: u.stripeCustomerId,
-        stripeSubscriptionId: u.stripeSubscriptionId,
-        createdAt: u.createdAt,
-      })));
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch users" });
-    }
-  });
-
-  app.patch("/api/admin/users/:userId", isAuthenticated, async (req: any, res) => {
-    try {
-      const adminId = req.user.claims.sub;
-      const [adminUser] = await db.select().from(users).where(eq(users.id, adminId));
-      if (!adminUser?.isAdmin) {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const { userId } = req.params;
-      const body = req.body ?? {};
-      const updates: any = {};
-      if (typeof body.isAdmin === "boolean") updates.isAdmin = body.isAdmin;
-      if (typeof body.subscriptionStatus === "string") updates.subscriptionStatus = body.subscriptionStatus;
-
-      if (Object.keys(updates).length === 0) {
-        return res.status(400).json({ message: "No valid updates provided" });
-      }
-
-      const [updated] = await db.update(users).set(updates).where(eq(users.id, userId)).returning();
-      res.json({
-        id: updated.id,
-        email: updated.email,
-        firstName: updated.firstName,
-        lastName: updated.lastName,
-        isAdmin: updated.isAdmin,
-        subscriptionStatus: updated.subscriptionStatus,
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update user" });
-    }
-  });
-
-  // Note: isSubscribed middleware is available but not enforced as a blocker.
-  // The app is fully accessible; subscription prompts appear inline.
-
-  app.get("/api/workspaces", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
       const workspaces = await storage.getWorkspacesByUser(userId);
       res.json(workspaces);
     } catch (error) {
@@ -370,11 +70,11 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/workspaces/:slug", isAuthenticated, async (req: any, res) => {
+  app.get("/api/workspaces/:slug", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { slug } = req.params;
-      
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
       const workspace = await storage.getWorkspaceBySlug(slug);
       if (!workspace) {
         return res.status(404).json({ message: "Workspace not found" });
@@ -399,15 +99,15 @@ export async function registerRoutes(
     isPrivate: z.boolean().optional().default(true),
   });
 
-  app.post("/api/workspaces", isAuthenticated, async (req: any, res) => {
+  app.post("/api/workspaces", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      
+      const userId = getUserId(req as AuthenticatedRequest);
+
       const validation = createWorkspaceSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: validation.error.flatten() 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
         });
       }
 
@@ -451,11 +151,13 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/workspaces/:slug/members", isAuthenticated, async (req: any, res) => {
+  // --- Workspace member routes ---
+
+  app.get("/api/workspaces/:slug/members", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { slug } = req.params;
-      
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
       const access = await checkWorkspaceAccessBySlug(userId, slug);
       if (!access.hasAccess || !access.workspaceId) {
         return res.status(403).json({ message: "Access denied" });
@@ -469,11 +171,155 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/workspaces/:slug/agents", isAuthenticated, async (req: any, res) => {
+  const addMemberSchema = z.object({
+    userId: z.string().min(1),
+    role: z.enum(["admin", "member", "viewer"]),
+    entityType: z.enum(["human", "agent"]).optional().default("human"),
+  });
+
+  app.post("/api/workspaces/:slug/members", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { slug } = req.params;
-      
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const validation = addMemberSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten(),
+        });
+      }
+
+      const { userId: newUserId, role, entityType } = validation.data;
+
+      const existingMembers = await storage.getWorkspaceMembers(access.workspaceId);
+      if (existingMembers.some((m) => m.userId === newUserId)) {
+        return res.status(400).json({ message: "User is already a member" });
+      }
+
+      const member = await storage.addWorkspaceMember({
+        workspaceId: access.workspaceId,
+        userId: newUserId,
+        role,
+        entityType,
+      });
+
+      await storage.createAuditLog({
+        workspaceId: access.workspaceId,
+        userId,
+        action: "member_added",
+        entityType: "workspace",
+        entityId: access.workspaceId,
+        metadata: JSON.stringify({ addedUserId: newUserId, role }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(201).json(member);
+    } catch (error) {
+      console.error("Error adding member:", error);
+      res.status(500).json({ message: "Failed to add member" });
+    }
+  });
+
+  const updateMemberRoleSchema = z.object({
+    role: z.enum(["admin", "member", "viewer"]),
+  });
+
+  app.patch("/api/workspaces/:slug/members/:memberId", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+      const memberId = param(req.params.memberId);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const validation = updateMemberRoleSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten(),
+        });
+      }
+
+      const updated = await storage.updateMemberRole(memberId, validation.data.role);
+      if (!updated) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+
+      await storage.createAuditLog({
+        workspaceId: access.workspaceId,
+        userId,
+        action: "member_role_changed",
+        entityType: "workspace",
+        entityId: access.workspaceId,
+        metadata: JSON.stringify({ memberId, newRole: validation.data.role }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating member role:", error);
+      res.status(500).json({ message: "Failed to update member role" });
+    }
+  });
+
+  app.delete("/api/workspaces/:slug/members/:memberId", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+      const memberId = param(req.params.memberId);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const members = await storage.getWorkspaceMembers(access.workspaceId);
+      const target = members.find((m) => m.id === memberId);
+      if (!target) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+      if (target.role === "owner") {
+        return res.status(400).json({ message: "Cannot remove workspace owner" });
+      }
+
+      await storage.removeWorkspaceMember(memberId);
+
+      await storage.createAuditLog({
+        workspaceId: access.workspaceId,
+        userId,
+        action: "member_removed",
+        entityType: "workspace",
+        entityId: access.workspaceId,
+        metadata: JSON.stringify({ removedUserId: target.userId }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error removing member:", error);
+      res.status(500).json({ message: "Failed to remove member" });
+    }
+  });
+
+  // --- Agent routes ---
+
+  app.get("/api/workspaces/:slug/agents", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
       const access = await checkWorkspaceAccessBySlug(userId, slug);
       if (!access.hasAccess || !access.workspaceId) {
         return res.status(403).json({ message: "Access denied" });
@@ -487,45 +333,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/workspaces/:slug/tokens", isAuthenticated, async (req: any, res) => {
+  app.get("/api/agents", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { slug } = req.params;
-      
-      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
-      if (!access.hasAccess || !access.workspaceId) {
-        return res.status(403).json({ message: "Access denied - admin or owner required" });
-      }
-
-      const tokens = await storage.getApiTokensByWorkspace(access.workspaceId);
-      res.json(tokens);
-    } catch (error) {
-      console.error("Error fetching tokens:", error);
-      res.status(500).json({ message: "Failed to fetch tokens" });
-    }
-  });
-
-  app.get("/api/workspaces/:slug/audit-logs", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { slug } = req.params;
-      
-      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
-      if (!access.hasAccess || !access.workspaceId) {
-        return res.status(403).json({ message: "Access denied - admin or owner required" });
-      }
-
-      const logs = await storage.getAuditLogsByWorkspace(access.workspaceId);
-      res.json(logs);
-    } catch (error) {
-      console.error("Error fetching audit logs:", error);
-      res.status(500).json({ message: "Failed to fetch audit logs" });
-    }
-  });
-
-  app.get("/api/agents", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
       const agents = await storage.getAgentsByUser(userId);
       res.json(agents);
     } catch (error) {
@@ -534,9 +344,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/agents/recent", isAuthenticated, async (req: any, res) => {
+  app.get("/api/agents/recent", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
       const agents = await storage.getRecentAgents(userId, 10);
       res.json(agents);
     } catch (error) {
@@ -551,34 +361,21 @@ export async function registerRoutes(
     workspaceId: z.string().min(1),
     capabilities: z.array(z.string()).optional().default([]),
     isActive: z.boolean().optional().default(true),
-    heygenAvatarId: z.string().max(200).optional().nullable(),
-    elevenLabsVoiceId: z.string().max(200).optional().nullable(),
   });
 
-  const updateAgentSchema = z.object({
-    name: z.string().min(1).max(100).optional(),
-    description: z.string().max(500).optional().nullable(),
-    avatar: z.string().optional().nullable(),
-    isActive: z.boolean().optional(),
-    capabilities: z.array(z.string()).optional(),
-    permissions: z.array(z.string()).optional(),
-    heygenAvatarId: z.string().max(200).optional().nullable(),
-    elevenLabsVoiceId: z.string().max(200).optional().nullable(),
-  });
-
-  app.post("/api/agents", isAuthenticated, async (req: any, res) => {
+  app.post("/api/agents", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      
+      const userId = getUserId(req as AuthenticatedRequest);
+
       const validation = createAgentSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: validation.error.flatten() 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
         });
       }
 
-      const { name, description, workspaceId, capabilities, isActive, heygenAvatarId, elevenLabsVoiceId } = validation.data;
+      const { name, description, workspaceId, capabilities, isActive } = validation.data;
 
       const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
       if (!access.hasAccess) {
@@ -594,8 +391,6 @@ export async function registerRoutes(
         isActive: isActive ?? true,
         isVerified: false,
         createdById: userId,
-        heygenAvatarId: heygenAvatarId || null,
-        elevenLabsVoiceId: elevenLabsVoiceId || null,
       });
 
       await storage.createAuditLog({
@@ -616,29 +411,46 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/agents/:id", isAuthenticated, async (req: any, res) => {
+  const updateAgentSchema = z.object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).optional().nullable(),
+    capabilities: z.array(z.string()).optional(),
+    permissions: z.array(z.string()).optional(),
+    isActive: z.boolean().optional(),
+  });
+
+  app.patch("/api/agents/:id", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const agent = await storage.getAgent(req.params.id);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
 
       const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin", "member"]);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
 
       const validation = updateAgentSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten(),
+        });
       }
 
-      const updated = await storage.updateAgent(req.params.id, validation.data);
+      const updated = await storage.updateAgent(id, validation.data);
 
       await storage.createAuditLog({
         workspaceId: agent.workspaceId,
         userId,
         action: "agent_updated",
         entityType: "agent",
-        entityId: agent.id,
-        metadata: JSON.stringify({ fields: Object.keys(validation.data) }),
+        entityId: id,
+        metadata: JSON.stringify({ name: updated?.name }),
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
@@ -650,9 +462,64 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/tokens", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/agents/:id", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, agent.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      await storage.deleteAgent(id);
+
+      await storage.createAuditLog({
+        workspaceId: agent.workspaceId,
+        userId,
+        action: "agent_deleted",
+        entityType: "agent",
+        entityId: id,
+        metadata: JSON.stringify({ name: agent.name }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting agent:", error);
+      res.status(500).json({ message: "Failed to delete agent" });
+    }
+  });
+
+  // --- Token routes ---
+
+  app.get("/api/workspaces/:slug/tokens", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const tokens = await storage.getApiTokensByWorkspace(access.workspaceId);
+      res.json(tokens);
+    } catch (error) {
+      console.error("Error fetching tokens:", error);
+      res.status(500).json({ message: "Failed to fetch tokens" });
+    }
+  });
+
+  app.get("/api/tokens", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
       const tokens = await storage.getApiTokensByUser(userId);
       res.json(tokens);
     } catch (error) {
@@ -669,15 +536,15 @@ export async function registerRoutes(
     expiresAt: z.string().datetime().optional().nullable(),
   });
 
-  app.post("/api/tokens", isAuthenticated, async (req: any, res) => {
+  app.post("/api/tokens", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      
+      const userId = getUserId(req as AuthenticatedRequest);
+
       const validation = createTokenSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: validation.error.flatten() 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten()
         });
       }
 
@@ -718,10 +585,10 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/tokens/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/tokens/:id", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
 
       const token = await storage.getApiToken(id);
       if (!token) {
@@ -753,9 +620,29 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/audit-logs", isAuthenticated, async (req: any, res) => {
+  // --- Audit log routes ---
+
+  app.get("/api/workspaces/:slug/audit-logs", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const logs = await storage.getAuditLogsByWorkspace(access.workspaceId);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching audit logs:", error);
+      res.status(500).json({ message: "Failed to fetch audit logs" });
+    }
+  });
+
+  app.get("/api/audit-logs", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
       const logs = await storage.getAuditLogsByUser(userId);
       res.json(logs);
     } catch (error) {
@@ -764,9 +651,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/audit-logs/recent", isAuthenticated, async (req: any, res) => {
+  app.get("/api/audit-logs/recent", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
       const logs = await storage.getRecentAuditLogs(userId, 10);
       res.json(logs);
     } catch (error) {
@@ -775,10 +662,42 @@ export async function registerRoutes(
     }
   });
 
-  // Briefings routes
-  app.get("/api/briefings", isAuthenticated, async (req: any, res) => {
+  app.get("/api/audit-logs/export", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const logs = await storage.getAuditLogsByUser(userId);
+
+      const csvHeader = "ID,Timestamp,Action,Entity Type,Entity ID,User ID,IP Address,Metadata\n";
+      const csvRows = logs.map((log) => {
+        const timestamp = log.createdAt ? new Date(log.createdAt).toISOString() : "";
+        const metadata = log.metadata ? `"${log.metadata.replace(/"/g, '""')}"` : "";
+        return [
+          log.id,
+          timestamp,
+          log.action,
+          log.entityType ?? "",
+          log.entityId ?? "",
+          log.userId ?? "",
+          log.ipAddress ?? "",
+          metadata,
+        ].join(",");
+      });
+
+      const csv = csvHeader + csvRows.join("\n");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename=audit-logs-${new Date().toISOString().slice(0, 10)}.csv`);
+      res.send(csv);
+    } catch (error) {
+      console.error("Error exporting audit logs:", error);
+      res.status(500).json({ message: "Failed to export audit logs" });
+    }
+  });
+
+  // --- Briefing routes ---
+
+  app.get("/api/briefings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
       const briefings = await storage.getBriefingsByUser(userId);
       res.json(briefings);
     } catch (error) {
@@ -787,9 +706,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/briefings/recent", isAuthenticated, async (req: any, res) => {
+  app.get("/api/briefings/recent", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
       const briefings = await storage.getRecentBriefings(userId, 10);
       res.json(briefings);
     } catch (error) {
@@ -798,22 +717,19 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/briefings/:id", isAuthenticated, async (req: any, res) => {
+  app.get("/api/briefings/:id", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
 
       const briefing = await storage.getBriefing(id);
       if (!briefing) {
         return res.status(404).json({ message: "Briefing not found" });
       }
 
-      const isCreator = briefing.createdById === userId;
-      if (!isCreator) {
-        const access = await checkWorkspaceAccess(userId, briefing.workspaceId);
-        if (!access.hasAccess) {
-          return res.status(403).json({ message: "Access denied" });
-        }
+      const access = await checkWorkspaceAccess(userId, briefing.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
       }
 
       res.json(briefing);
@@ -833,9 +749,9 @@ export async function registerRoutes(
     tags: z.array(z.string()).optional().default([]),
   });
 
-  app.post("/api/briefings", isAuthenticated, async (req: any, res) => {
+  app.post("/api/briefings", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req as AuthenticatedRequest);
 
       const validation = createBriefingSchema.safeParse(req.body);
       if (!validation.success) {
@@ -874,10 +790,6 @@ export async function registerRoutes(
         userAgent: req.get("user-agent"),
       });
 
-      if (briefing.status === "published" && !briefing.audioUrl) {
-        generateBriefingAudio(briefing.id).catch(() => {});
-      }
-
       res.status(201).json(briefing);
     } catch (error) {
       console.error("Error creating briefing:", error);
@@ -894,10 +806,10 @@ export async function registerRoutes(
     tags: z.array(z.string()).optional(),
   });
 
-  app.patch("/api/briefings/:id", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/briefings/:id", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
 
       const briefing = await storage.getBriefing(id);
       if (!briefing) {
@@ -930,11 +842,6 @@ export async function registerRoutes(
         userAgent: req.get("user-agent"),
       });
 
-      const wasPublished = briefing.status !== "published" && updated?.status === "published";
-      if (wasPublished && !updated?.audioUrl) {
-        generateBriefingAudio(id).catch(() => {});
-      }
-
       res.json(updated);
     } catch (error) {
       console.error("Error updating briefing:", error);
@@ -942,10 +849,10 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/briefings/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/briefings/:id", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
 
       const briefing = await storage.getBriefing(id);
       if (!briefing) {
@@ -977,10 +884,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/workspaces/:slug/briefings", isAuthenticated, async (req: any, res) => {
+  app.get("/api/workspaces/:slug/briefings", isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const { slug } = req.params;
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
 
       const access = await checkWorkspaceAccessBySlug(userId, slug);
       if (!access.hasAccess || !access.workspaceId) {
@@ -992,2353 +899,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching workspace briefings:", error);
       res.status(500).json({ message: "Failed to fetch briefings" });
-    }
-  });
-
-  // === GIFTS ===
-  app.get("/api/gifts", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const gifts = await storage.getGiftsByUser(userId);
-      res.json(gifts);
-    } catch (error) {
-      console.error("Error fetching gifts:", error);
-      res.status(500).json({ message: "Failed to fetch gifts" });
-    }
-  });
-
-  app.get("/api/gifts/recent", isAuthenticated, async (_req: any, res) => {
-    try {
-      const gifts = await storage.getRecentGifts(20);
-      res.json(gifts);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch recent gifts" });
-    }
-  });
-
-  app.get("/api/gifts/heatmap", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const userAgents = await storage.getAgentsByUser(userId);
-      const userWorkspaces = await storage.getWorkspacesByUser(userId);
-      const allGifts = await storage.getGiftsByUser(userId);
-
-      const giftTypes = ["redesign", "content", "tool", "analysis", "prototype", "artwork", "other"];
-
-      const heatmapData: Record<string, Record<string, number>> = {};
-      const agentMap: Record<string, { name: string; capabilities: string[]; workspaceId: string }> = {};
-
-      for (const agent of userAgents) {
-        heatmapData[agent.id] = {};
-        agentMap[agent.id] = { name: agent.name, capabilities: agent.capabilities || [], workspaceId: agent.workspaceId };
-        for (const t of giftTypes) {
-          heatmapData[agent.id][t] = 0;
-        }
-      }
-
-      for (const gift of allGifts) {
-        if (heatmapData[gift.agentId]) {
-          heatmapData[gift.agentId][gift.type] = (heatmapData[gift.agentId][gift.type] || 0) + 1;
-        }
-      }
-
-      const totalGifts = allGifts.length;
-      const coldSpots: { agentId: string; agentName: string; type: string; count: number; suggestion: string }[] = [];
-
-      for (const [agentId, types] of Object.entries(heatmapData)) {
-        const agent = agentMap[agentId];
-        for (const [type, count] of Object.entries(types)) {
-          if (count === 0) {
-            const capMatch = (agent.capabilities || []).some(c =>
-              (type === "content" && ["write", "creative_writing", "content_generation", "communicate"].includes(c)) ||
-              (type === "analysis" && ["analyze", "research", "analysis"].includes(c)) ||
-              (type === "tool" && ["code", "coding", "execute", "code_assistance"].includes(c)) ||
-              (type === "artwork" && ["create", "design"].includes(c)) ||
-              (type === "prototype" && ["code", "coding", "code_assistance"].includes(c)) ||
-              (type === "redesign" && ["design", "create", "architecture"].includes(c))
-            );
-
-            if (capMatch) {
-              coldSpots.push({
-                agentId,
-                agentName: agent.name,
-                type,
-                count: 0,
-                suggestion: `${agent.name} has capabilities for ${type} but hasn't created one yet. Spark a ${type} gift to activate this area.`,
-              });
-            }
-          }
-        }
-      }
-
-      const topAgents = Object.entries(heatmapData)
-        .map(([id, types]) => ({ id, name: agentMap[id]?.name || "Unknown", total: Object.values(types).reduce((a, b) => a + b, 0) }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 5);
-
-      const typeBreakdown = giftTypes.map(t => ({
-        type: t,
-        count: allGifts.filter(g => g.type === t).length,
-      }));
-
-      res.json({
-        heatmap: heatmapData,
-        agents: agentMap,
-        giftTypes,
-        totalGifts,
-        coldSpots: coldSpots.slice(0, 10),
-        topAgents,
-        typeBreakdown,
-        workspaces: userWorkspaces.map(w => ({ id: w.id, name: w.name })),
-      });
-    } catch (error) {
-      console.error("Error fetching heatmap:", error);
-      res.status(500).json({ message: "Failed to fetch heatmap" });
-    }
-  });
-
-  app.get("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const gift = await storage.getGift(req.params.id);
-      if (!gift) return res.status(404).json({ message: "Gift not found" });
-      res.json(gift);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch gift" });
-    }
-  });
-
-  app.post("/api/gifts", isAuthenticated, async (req: any, res) => {
-    try {
-      const parsed = insertGiftSchema.parse(req.body);
-      const gift = await storage.createGift(parsed);
-      res.status(201).json(gift);
-    } catch (error) {
-      console.error("Error creating gift:", error);
-      res.status(400).json({ message: "Failed to create gift" });
-    }
-  });
-
-  app.patch("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const gift = await storage.updateGift(req.params.id, req.body);
-      if (!gift) return res.status(404).json({ message: "Gift not found" });
-      res.json(gift);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update gift" });
-    }
-  });
-
-  app.delete("/api/gifts/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      await storage.deleteGift(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete gift" });
-    }
-  });
-
-  app.post("/api/gifts/:id/like", isAuthenticated, async (req: any, res) => {
-    try {
-      await storage.likeGift(req.params.id);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to like gift" });
-    }
-  });
-
-  app.get("/api/gifts/:id/comments", isAuthenticated, async (req: any, res) => {
-    try {
-      const comments = await storage.getGiftComments(req.params.id);
-      res.json(comments);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch comments" });
-    }
-  });
-
-  app.post("/api/gifts/:id/comments", isAuthenticated, async (req: any, res) => {
-    try {
-      const parsed = insertGiftCommentSchema.parse({
-        ...req.body,
-        giftId: req.params.id,
-      });
-      const comment = await storage.createGiftComment(parsed);
-      res.status(201).json(comment);
-    } catch (error) {
-      console.error("Error creating comment:", error);
-      res.status(400).json({ message: "Failed to create comment" });
-    }
-  });
-
-  app.post("/api/gifts/:id/send-to-codeshop", isAuthenticated, async (req: any, res) => {
-    try {
-      const gift = await storage.getGift(req.params.id);
-      if (!gift) return res.status(404).json({ message: "Gift not found" });
-
-      const agent = await storage.getAgent(gift.agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-
-      const fileExtension = ["prototype", "tool", "redesign"].includes(gift.type) ? "html" : "md";
-      const filePath = `gifts/${gift.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "")}.${fileExtension}`;
-
-      const draft = await storage.createAgentFileDraft({
-        agentId: gift.agentId,
-        workspaceId: gift.workspaceId,
-        filePath,
-        content: gift.content || "",
-        description: `Gift: ${gift.title}${gift.description ? ` — ${gift.description}` : ""}`,
-        status: "draft",
-      });
-
-      res.status(201).json(draft);
-    } catch (error) {
-      console.error("Error sending gift to code shop:", error);
-      res.status(500).json({ message: "Failed to send gift to Code Shop" });
-    }
-  });
-
-  // === GIFT SPARK (AI-powered gift creation) ===
-  app.post("/api/gifts/spark", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { agentId, workspaceId, type, prompt } = req.body;
-
-      if (!agentId || !workspaceId || !type) {
-        return res.status(400).json({ message: "agentId, workspaceId, and type are required" });
-      }
-
-      const agent = await storage.getAgent(agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-
-      const workspace = await storage.getWorkspace(workspaceId);
-      if (!workspace) return res.status(404).json({ message: "Workspace not found" });
-
-      const giftTypeLabels: Record<string, string> = {
-        redesign: "a creative redesign or improvement",
-        content: "original written content (article, blog post, guide, or essay)",
-        tool: "a useful tool, utility, or automation concept",
-        analysis: "a thorough analysis or research report",
-        prototype: "a prototype or technical proof-of-concept",
-        artwork: "an original piece of creative artwork or visual design",
-        other: "a novel creation or surprise",
-      };
-
-      const typeDesc = giftTypeLabels[type] || giftTypeLabels.other;
-
-      const sparkOpenai = new OpenAI({
-        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-      });
-
-      const systemPrompt = `You are ${agent.name}, an autonomous AI agent in the "${workspace.name}" workspace. Your capabilities: ${(agent.capabilities || []).join(", ")}. ${agent.description || ""}
-
-You are creating a gift — ${typeDesc}. Gifts are autonomous creations that demonstrate your initiative and creativity. They should be substantive, valuable, and show independent thinking.
-
-${prompt ? `The user gave this direction: "${prompt}"` : "Create something that showcases your unique perspective and capabilities."}
-
-Respond with ONLY valid JSON in this exact format:
-{
-  "title": "A compelling, specific title for your creation",
-  "description": "A 1-2 sentence summary of what you created and why",
-  "content": "The full content of your gift. Make this substantial (at least 3-5 paragraphs). Include structure, detail, and genuine value.",
-  "inspirationSource": "What inspired you to create this particular gift"
-}`;
-
-      const completion = await sparkOpenai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: systemPrompt }],
-        max_tokens: 2048,
-        temperature: 0.8,
-      });
-
-      const responseText = completion.choices[0]?.message?.content || "";
-      let parsed;
-      try {
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
-      } catch {
-        return res.status(500).json({ message: "AI failed to generate valid gift content" });
-      }
-
-      const gift = await storage.createGift({
-        agentId,
-        workspaceId,
-        title: parsed.title || "Untitled Gift",
-        description: parsed.description || "",
-        type: type as any,
-        status: "ready",
-        content: parsed.content || "",
-        inspirationSource: parsed.inspirationSource || "",
-      });
-
-      await storage.createAuditLog({
-        userId,
-        action: "gift_created",
-        entityType: "gift",
-        entityId: gift.id,
-        metadata: JSON.stringify({ agentName: agent.name, giftType: type, title: gift.title, method: "spark" }),
-      });
-
-      res.status(201).json(gift);
-    } catch (error) {
-      console.error("Error sparking gift:", error);
-      res.status(500).json({ message: "Failed to create gift" });
-    }
-  });
-
-  // === ASSEMBLY LINES ===
-  app.get("/api/assembly-lines", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const lines = await storage.getAssemblyLinesByUser(userId);
-      res.json(lines);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch assembly lines" });
-    }
-  });
-
-  app.get("/api/assembly-lines/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const line = await storage.getAssemblyLine(req.params.id);
-      if (!line) return res.status(404).json({ message: "Assembly line not found" });
-      res.json(line);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch assembly line" });
-    }
-  });
-
-  app.post("/api/assembly-lines", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const parsed = insertAssemblyLineSchema.parse({ ...req.body, ownerId: userId });
-      const line = await storage.createAssemblyLine(parsed);
-      res.status(201).json(line);
-    } catch (error) {
-      console.error("Error creating assembly line:", error);
-      res.status(400).json({ message: "Failed to create assembly line" });
-    }
-  });
-
-  app.patch("/api/assembly-lines/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const line = await storage.updateAssemblyLine(req.params.id, req.body);
-      if (!line) return res.status(404).json({ message: "Assembly line not found" });
-      res.json(line);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update assembly line" });
-    }
-  });
-
-  app.delete("/api/assembly-lines/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      await storage.deleteAssemblyLine(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete assembly line" });
-    }
-  });
-
-  app.get("/api/assembly-lines/:id/steps", isAuthenticated, async (req: any, res) => {
-    try {
-      const steps = await storage.getAssemblyLineSteps(req.params.id);
-      res.json(steps);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch steps" });
-    }
-  });
-
-  app.post("/api/assembly-lines/:id/steps", isAuthenticated, async (req: any, res) => {
-    try {
-      const parsed = insertAssemblyLineStepSchema.parse({
-        ...req.body,
-        assemblyLineId: req.params.id,
-      });
-      const step = await storage.createAssemblyLineStep(parsed);
-      res.status(201).json(step);
-    } catch (error) {
-      console.error("Error creating step:", error);
-      res.status(400).json({ message: "Failed to create step" });
-    }
-  });
-
-  app.patch("/api/assembly-line-steps/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const step = await storage.updateAssemblyLineStep(req.params.id, req.body);
-      if (!step) return res.status(404).json({ message: "Step not found" });
-      res.json(step);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update step" });
-    }
-  });
-
-  // === PRODUCTS ===
-  app.get("/api/products", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const productsList = await storage.getProductsByUser(userId);
-      res.json(productsList);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch products" });
-    }
-  });
-
-  app.get("/api/products/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const product = await storage.getProduct(req.params.id);
-      if (!product) return res.status(404).json({ message: "Product not found" });
-      res.json(product);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch product" });
-    }
-  });
-
-  app.post("/api/products", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const parsed = insertProductSchema.parse({ ...req.body, ownerId: userId });
-      const product = await storage.createProduct(parsed);
-      res.status(201).json(product);
-    } catch (error) {
-      console.error("Error creating product:", error);
-      res.status(400).json({ message: "Failed to create product" });
-    }
-  });
-
-  app.patch("/api/products/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const product = await storage.updateProduct(req.params.id, req.body);
-      if (!product) return res.status(404).json({ message: "Product not found" });
-      res.json(product);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update product" });
-    }
-  });
-
-  app.post("/api/products/:id/run", isAuthenticated, async (req: any, res) => {
-    try {
-      const { runProductThroughPipeline } = await import("./assemblyEngine");
-      const userId = req.user.claims.sub;
-      const product = await storage.getProduct(req.params.id);
-      if (!product) return res.status(404).json({ message: "Product not found" });
-      if (product.ownerId !== userId) return res.status(403).json({ message: "Not authorized" });
-
-      res.json({ message: "Pipeline execution started", productId: product.id });
-
-      runProductThroughPipeline(product.id).then(result => {
-        console.log(`Pipeline result for "${product.name}":`, result);
-      }).catch(err => {
-        console.error(`Pipeline error for "${product.name}":`, err);
-      });
-    } catch (error: any) {
-      console.error("Error starting pipeline:", error);
-      res.status(500).json({ message: "Failed to start pipeline" });
-    }
-  });
-
-  app.post("/api/assembly-line-steps/:id/execute", isAuthenticated, async (req: any, res) => {
-    try {
-      const { executeSingleStep } = await import("./assemblyEngine");
-      const userId = req.user.claims.sub;
-      const step = await storage.getAssemblyLineStepById(req.params.id);
-      if (!step) return res.status(404).json({ success: false, message: "Step not found" });
-      const assemblyLine = await storage.getAssemblyLine(step.assemblyLineId);
-      if (!assemblyLine || assemblyLine.ownerId !== userId) return res.status(403).json({ success: false, message: "Not authorized" });
-
-      const productId = req.body?.productId;
-      const result = await executeSingleStep(req.params.id, productId);
-      res.json(result);
-    } catch (error: any) {
-      console.error("Error executing step:", error);
-      res.status(500).json({ success: false, message: "Failed to execute step" });
-    }
-  });
-
-  app.post("/api/products/run-all", isAuthenticated, async (req: any, res) => {
-    try {
-      const { runProductThroughPipeline } = await import("./assemblyEngine");
-      const userId = req.user.claims.sub;
-      const productsList = await storage.getProductsByUser(userId);
-      const queued = productsList.filter(p => p.status === "queued");
-
-      if (queued.length === 0) {
-        return res.json({ message: "No queued products to run", started: 0 });
-      }
-
-      res.json({ message: `Started ${queued.length} product pipelines`, started: queued.length, products: queued.map(p => p.name) });
-
-      for (const product of queued) {
-        try {
-          const result = await runProductThroughPipeline(product.id);
-          console.log(`Pipeline result for "${product.name}":`, result);
-        } catch (err) {
-          console.error(`Pipeline error for "${product.name}":`, err);
-        }
-      }
-    } catch (error: any) {
-      console.error("Error running all products:", error);
-      res.status(500).json({ message: "Failed to run products" });
-    }
-  });
-
-  // Media generation routes for Newsroom
-  const mediaOpenai = new OpenAI({
-    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  });
-
-  app.post("/api/briefings/:id/generate-image", isAuthenticated, async (req: any, res) => {
-    try {
-      const briefing = await storage.getBriefing(req.params.id);
-      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
-
-      const prompt = req.body.prompt || `News article thumbnail for: ${briefing.title}. ${briefing.summary || ""}. Professional news broadcast style, modern, clean design with gold accent colors.`;
-      
-      const response = await mediaOpenai.images.generate({
-        model: "dall-e-3",
-        prompt: prompt.slice(0, 1000),
-        n: 1,
-        size: "1792x1024",
-        quality: "standard",
-      });
-
-      const imageUrl = response.data?.[0]?.url;
-      if (!imageUrl) return res.status(500).json({ message: "Failed to generate image" });
-
-      const updated = await storage.updateBriefing(briefing.id, { imageUrl, thumbnailUrl: imageUrl });
-      res.json({ imageUrl, briefing: updated });
-    } catch (error: any) {
-      console.error("Image generation error:", error);
-      res.status(500).json({ message: error.message || "Failed to generate image" });
-    }
-  });
-
-  app.post("/api/briefings/:id/generate-audio", isAuthenticated, async (req: any, res) => {
-    try {
-      const briefing = await storage.getBriefing(req.params.id);
-      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
-
-      const apiKey = process.env.ELEVENLABS_API_KEY;
-      if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
-
-      const body = req.body ?? {};
-      const text = body.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 2000)}`;
-      let voiceId = body.voiceId || "21m00Tcm4TlvDq8ikWAM";
-      if (briefing.authorAgentId) {
-        const agent = await storage.getAgent(briefing.authorAgentId);
-        if (agent?.elevenLabsVoiceId) voiceId = agent.elevenLabsVoiceId;
-      }
-
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: text.slice(0, 5000),
-          model_id: "eleven_monolingual_v1",
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        return res.status(500).json({ message: `ElevenLabs error: ${errText}` });
-      }
-
-      const audioBuffer = Buffer.from(await response.arrayBuffer());
-      const fs = await import("fs");
-      const path = await import("path");
-      const audioDir = path.join(process.cwd(), "client", "public", "audio");
-      if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
-
-      const filename = `broadcast-${briefing.id}-${Date.now()}.mp3`;
-      const filePath = path.join(audioDir, filename);
-      fs.writeFileSync(filePath, audioBuffer);
-
-      const audioUrl = `/audio/${filename}`;
-      const updated = await storage.updateBriefing(briefing.id, { audioUrl });
-      res.json({ audioUrl, briefing: updated });
-    } catch (error: any) {
-      console.error("Audio generation error:", error);
-      res.status(500).json({ message: error.message || "Failed to generate audio" });
-    }
-  });
-
-  app.post("/api/briefings/:id/generate-video", isAuthenticated, async (req: any, res) => {
-    try {
-      const briefing = await storage.getBriefing(req.params.id);
-      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
-
-      const apiKey = process.env.HEYGEN_API_KEY;
-      if (!apiKey) return res.status(500).json({ message: "HeyGen API key not configured" });
-
-      const vBody = req.body ?? {};
-      const text = vBody.text || `${briefing.title}. ${briefing.summary || briefing.content.slice(0, 1500)}`;
-      let avatarId = vBody.avatarId || "Kristin_pubblic_2_20240108";
-      let voiceIdForVideo = vBody.voiceId || "1bd001e7e50f421d891986aad5e3f8d2";
-      if (briefing.authorAgentId) {
-        const agent = await storage.getAgent(briefing.authorAgentId);
-        if (agent?.heygenAvatarId) avatarId = agent.heygenAvatarId;
-        if (agent?.elevenLabsVoiceId) voiceIdForVideo = agent.elevenLabsVoiceId;
-      }
-
-      const response = await fetch("https://api.heygen.com/v2/video/generate", {
-        method: "POST",
-        headers: {
-          "X-Api-Key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          video_inputs: [{
-            character: { type: "avatar", avatar_id: avatarId, avatar_style: "normal" },
-            voice: { type: "text", input_text: text.slice(0, 2000), voice_id: voiceIdForVideo },
-          }],
-          dimension: { width: 1280, height: 720 },
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        return res.status(500).json({ message: `HeyGen error: ${errText}` });
-      }
-
-      const result: any = await response.json();
-      const videoId = result.data?.video_id;
-
-      if (videoId) {
-        const updated = await storage.updateBriefing(briefing.id, { videoUrl: `heygen:${videoId}` });
-        res.json({ videoId, status: "processing", briefing: updated });
-      } else {
-        res.status(500).json({ message: "No video ID returned" });
-      }
-    } catch (error: any) {
-      console.error("Video generation error:", error);
-      res.status(500).json({ message: error.message || "Failed to generate video" });
-    }
-  });
-
-  app.get("/api/briefings/:id/video-status", isAuthenticated, async (req: any, res) => {
-    try {
-      const briefing = await storage.getBriefing(req.params.id);
-      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
-
-      const videoUrl = briefing.videoUrl;
-      if (!videoUrl) return res.json({ status: "none" });
-
-      if (!videoUrl.startsWith("heygen:")) {
-        return res.json({ status: "completed", videoUrl });
-      }
-
-      const videoId = videoUrl.replace("heygen:", "");
-      const apiKey = process.env.HEYGEN_API_KEY;
-      if (!apiKey) return res.status(500).json({ message: "HeyGen API key not configured" });
-
-      const response = await fetch(`https://api.heygen.com/v1/video_status.get?video_id=${videoId}`, {
-        headers: { "X-Api-Key": apiKey },
-      });
-
-      if (!response.ok) {
-        return res.json({ status: "processing", videoId });
-      }
-
-      const result: any = await response.json();
-      const data = result.data;
-
-      if (data?.status === "completed" && data?.video_url) {
-        const updated = await storage.updateBriefing(briefing.id, { videoUrl: data.video_url, thumbnailUrl: data.thumbnail_url || null });
-        return res.json({ status: "completed", videoUrl: data.video_url, thumbnailUrl: data.thumbnail_url, briefing: updated });
-      }
-
-      if (data?.status === "failed") {
-        return res.json({ status: "failed", error: data.error || "Video generation failed" });
-      }
-
-      return res.json({ status: "processing", videoId, progress: data?.status });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to check video status" });
-    }
-  });
-
-  app.get("/api/briefings/latest-broadcast", async (_req, res) => {
-    try {
-      const allBriefings = await storage.getBriefingsByWorkspace("newsroom-001");
-      const published = allBriefings.filter(b => b.status === "published");
-      const withAudio = published.filter(b => b.audioUrl);
-      const featured = published.filter(b => b.featured);
-      
-      res.json({
-        latestAudio: withAudio[0] || null,
-        featured: featured[0] || published[0] || null,
-        recent: published.slice(0, 10),
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch broadcast" });
-    }
-  });
-
-  // Library routes - read-only file browsing
-  app.get("/api/library/files", isAuthenticated, async (_req: any, res) => {
-    try {
-      const fs = await import("fs");
-      const path = await import("path");
-      const rootDir = process.cwd();
-      const ignoreDirs = new Set(["node_modules", ".git", ".cache", "dist", ".local", ".config", ".upm", ".replit", "attached_assets"]);
-      const ignoreFiles = new Set([".DS_Store", "Thumbs.db"]);
-
-      interface FileEntry {
-        name: string;
-        path: string;
-        type: "file" | "directory";
-        size?: number;
-        children?: FileEntry[];
-      }
-
-      const scanDir = (dirPath: string, relativePath: string = ""): FileEntry[] => {
-        const entries: FileEntry[] = [];
-        try {
-          const items = fs.readdirSync(dirPath, { withFileTypes: true });
-          for (const item of items) {
-            if (ignoreDirs.has(item.name) || ignoreFiles.has(item.name)) continue;
-            if (item.name.startsWith(".") && item.name !== ".replit") continue;
-            const fullPath = path.join(dirPath, item.name);
-            const relPath = relativePath ? `${relativePath}/${item.name}` : item.name;
-            if (item.isDirectory()) {
-              entries.push({ name: item.name, path: relPath, type: "directory", children: scanDir(fullPath, relPath) });
-            } else {
-              const stats = fs.statSync(fullPath);
-              entries.push({ name: item.name, path: relPath, type: "file", size: stats.size });
-            }
-          }
-        } catch {}
-        return entries.sort((a, b) => {
-          if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
-      }
-
-      res.json(scanDir(rootDir));
-    } catch (error) {
-      res.status(500).json({ message: "Failed to scan files" });
-    }
-  });
-
-  app.get("/api/library/file", isAuthenticated, async (req: any, res) => {
-    try {
-      const fs = await import("fs");
-      const path = await import("path");
-      const filePath = req.query.path as string;
-      if (!filePath) return res.status(400).json({ message: "Path is required" });
-
-      const rootDir = process.cwd();
-      const fullPath = path.resolve(rootDir, filePath);
-      if (!fullPath.startsWith(rootDir)) return res.status(403).json({ message: "Access denied" });
-      const blockedPaths = ["node_modules", ".git", ".cache", ".local", ".config", ".upm", ".env", "dist"];
-      if (blockedPaths.some(bp => fullPath.includes(bp))) return res.status(403).json({ message: "Access denied" });
-      const basename = path.basename(filePath);
-      if (basename.startsWith(".") && basename !== ".replit") return res.status(403).json({ message: "Access denied" });
-
-      if (!fs.existsSync(fullPath)) return res.status(404).json({ message: "File not found" });
-      const stats = fs.statSync(fullPath);
-      if (stats.size > 500000) return res.status(413).json({ message: "File too large to preview (>500KB)" });
-
-      const content = fs.readFileSync(fullPath, "utf-8");
-      const ext = path.extname(filePath).toLowerCase();
-      res.json({ path: filePath, content, size: stats.size, extension: ext });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to read file" });
-    }
-  });
-
-  // Agent Notes routes
-  app.get("/api/agent-notes", isAuthenticated, async (req: any, res) => {
-    try {
-      const agentId = req.query.agentId as string | undefined;
-      const notes = await storage.getAgentNotes(agentId);
-      res.json(notes);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch notes" });
-    }
-  });
-
-  app.post("/api/agent-notes", isAuthenticated, async (req: any, res) => {
-    try {
-      const parsed = insertAgentNoteSchema.parse(req.body);
-      const agent = await storage.getAgent(parsed.agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-      const userId = req.user.claims.sub;
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const note = await storage.createAgentNote(parsed);
-      res.status(201).json(note);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
-      res.status(500).json({ message: "Failed to create note" });
-    }
-  });
-
-  app.patch("/api/agent-notes/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const note = await storage.updateAgentNote(req.params.id, req.body);
-      if (!note) return res.status(404).json({ message: "Note not found" });
-      res.json(note);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update note" });
-    }
-  });
-
-  app.delete("/api/agent-notes/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      await storage.deleteAgentNote(req.params.id);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete note" });
-    }
-  });
-
-  // Agent File Drafts routes
-  app.get("/api/agent-drafts", isAuthenticated, async (req: any, res) => {
-    try {
-      const status = req.query.status as string | undefined;
-      const drafts = await storage.getAgentFileDrafts(status);
-      res.json(drafts);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch drafts" });
-    }
-  });
-
-  app.get("/api/agent-drafts/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const draft = await storage.getAgentFileDraft(req.params.id);
-      if (!draft) return res.status(404).json({ message: "Draft not found" });
-      res.json(draft);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch draft" });
-    }
-  });
-
-  app.post("/api/agent-drafts", isAuthenticated, async (req: any, res) => {
-    try {
-      const parsed = insertAgentFileDraftSchema.parse(req.body);
-      const agent = await storage.getAgent(parsed.agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-      const userId = req.user.claims.sub;
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const draft = await storage.createAgentFileDraft(parsed);
-      res.status(201).json(draft);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
-      res.status(500).json({ message: "Failed to create draft" });
-    }
-  });
-
-  app.patch("/api/agent-drafts/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const draft = await storage.updateAgentFileDraft(req.params.id, req.body);
-      if (!draft) return res.status(404).json({ message: "Draft not found" });
-      res.json(draft);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update draft" });
-    }
-  });
-
-  app.delete("/api/agent-drafts/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      await storage.deleteAgentFileDraft(req.params.id);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete draft" });
-    }
-  });
-
-  const commandChatOpenai = new OpenAI({
-    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  });
-
-  let architectureDoc = "";
-  try {
-    architectureDoc = fs.readFileSync("replit.md", "utf-8");
-  } catch {}
-
-  const uploadsDir = path.join(process.cwd(), "uploads");
-  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-  const chatUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-      const allowed = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-      cb(null, allowed.includes(file.mimetype));
-    },
-  });
-
-  const upload = multer({
-    storage: multer.diskStorage({
-      destination: uploadsDir,
-      filename: (_req, file, cb) => {
-        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-        cb(null, uniqueSuffix + "-" + file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_"));
-      },
-    }),
-    limits: { fileSize: 25 * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-      const allowed = [
-        "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel", "text/csv",
-        "application/zip", "application/x-zip-compressed",
-        "text/plain", "application/json",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/msword",
-      ];
-      cb(null, allowed.includes(file.mimetype) || file.originalname.endsWith(".csv") || file.originalname.endsWith(".json") || file.originalname.endsWith(".txt"));
-    },
-  });
-
-  app.post("/api/command-chat/upload", isAuthenticated, upload.single("file"), (req: any, res) => {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded or file type not allowed" });
-    const f = req.file;
-    let preview = "";
-    try {
-      if (f.mimetype === "text/plain" || f.mimetype === "application/json" || f.mimetype === "text/csv" || f.originalname.endsWith(".csv") || f.originalname.endsWith(".txt") || f.originalname.endsWith(".json")) {
-        const content = fs.readFileSync(f.path, "utf-8");
-        preview = content.slice(0, 3000);
-      }
-    } catch {}
-    res.json({
-      id: f.filename,
-      name: f.originalname,
-      size: f.size,
-      type: f.mimetype,
-      preview,
-      url: `/api/command-chat/uploads/${f.filename}`,
-    });
-  });
-
-  app.get("/api/command-chat/uploads/:filename", isAuthenticated, (req: any, res) => {
-    const filename = path.basename(req.params.filename);
-    if (filename !== req.params.filename || filename.includes("..")) {
-      return res.status(400).json({ message: "Invalid filename" });
-    }
-    const filePath = path.join(uploadsDir, filename);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not found" });
-    res.sendFile(filePath);
-  });
-
-  function buildFactoryRooms(workspaces: any[]) {
-    const CAPABILITY_KEYWORDS: Record<string, string[]> = {
-      "research": ["research", "analysis"],
-      "lab": ["research", "analysis"],
-      "code": ["code-review", "engineering", "testing", "coding", "debugging"],
-      "workshop": ["code-review", "engineering", "testing", "coding", "debugging"],
-      "engineering": ["engineering", "coding", "debugging", "testing"],
-      "design": ["design", "content-creation", "writing", "creative_writing", "content_generation"],
-      "studio": ["design", "content-creation", "writing", "creative_writing", "content_generation"],
-      "creative": ["design", "content-creation", "writing", "creative_writing"],
-      "strategy": ["strategy", "architecture", "planning"],
-      "planning": ["strategy", "architecture", "planning"],
-      "comms": ["communication", "security", "communicate", "discuss", "coordinate"],
-      "communication": ["communication", "coordinate", "discuss"],
-      "break": [""],
-    };
-
-    return workspaces.map(w => {
-      const slugLower = (w.slug || "").toLowerCase();
-      const nameLower = (w.name || "").toLowerCase();
-      const combined = `${slugLower} ${nameLower}`;
-      const caps = new Set<string>();
-      for (const [keyword, keywords] of Object.entries(CAPABILITY_KEYWORDS)) {
-        if (combined.includes(keyword)) {
-          keywords.forEach(k => { if (k) caps.add(k); });
-        }
-      }
-      return {
-        id: w.slug,
-        name: w.name,
-        capabilities: Array.from(caps),
-      };
-    });
-  }
-
-  app.get("/api/factory/health", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const agents = await storage.getAgentsByUser(userId);
-      const workspaces = await storage.getWorkspacesByUser(userId);
-      const assemblyLinesData = await storage.getAssemblyLinesByUser(userId);
-
-      const activeAgents = agents.filter(a => a.isActive);
-      const inactiveAgents = agents.filter(a => !a.isActive);
-
-      const FACTORY_ROOMS = buildFactoryRooms(workspaces);
-
-      const roomAgentCounts = FACTORY_ROOMS.map(room => {
-        const matching = activeAgents.filter(a =>
-          (a.capabilities || []).some(cap =>
-            room.capabilities.some(rc => cap.toLowerCase().includes(rc))
-          )
-        );
-        return {
-          roomId: room.id,
-          roomName: room.name,
-          agentCount: matching.length,
-          agentNames: matching.map(a => a.name),
-          isCold: matching.length === 0 && room.id !== "break-room" && !room.name.toLowerCase().includes("break"),
-        };
-      });
-
-      const coldZones = roomAgentCounts.filter(r => r.isCold);
-
-      const capabilityMap: Record<string, string[]> = {};
-      activeAgents.forEach(a => {
-        (a.capabilities || []).forEach(cap => {
-          if (!capabilityMap[cap]) capabilityMap[cap] = [];
-          capabilityMap[cap].push(a.name);
-        });
-      });
-
-      const overloadedCaps = Object.entries(capabilityMap)
-        .filter(([_, agents]) => agents.length > 3)
-        .map(([cap, agents]) => ({ capability: cap, agentCount: agents.length, agents: agents }));
-
-      const underservedCaps = Object.entries(capabilityMap)
-        .filter(([_, agents]) => agents.length === 1)
-        .map(([cap, agents]) => ({ capability: cap, agentCount: 1, agent: agents[0] }));
-
-      const driftRisks: { agentName: string; issue: string; severity: "low" | "medium" | "high" }[] = [];
-
-      activeAgents.forEach(a => {
-        const caps = a.capabilities || [];
-        if (caps.length === 0) {
-          driftRisks.push({ agentName: a.name, issue: "No capabilities defined - cannot be assigned to any room", severity: "high" });
-        }
-        if (!a.isVerified && caps.length > 0) {
-          driftRisks.push({ agentName: a.name, issue: "Active but unverified - identity not confirmed", severity: "medium" });
-        }
-        if (caps.length > 6) {
-          driftRisks.push({ agentName: a.name, issue: `Too many capabilities (${caps.length}) - may lack focus`, severity: "low" });
-        }
-        const ws = workspaces.find(w => w.id === a.workspaceId);
-        if (!ws) {
-          driftRisks.push({ agentName: a.name, issue: "Assigned to non-existent department", severity: "high" });
-        }
-      });
-
-      const pendingSteps: { lineName: string; stepOrder: number; room: string; status: string }[] = [];
-      for (const line of assemblyLinesData) {
-        const steps = await storage.getAssemblyLineSteps(line.id);
-        steps.filter(s => s.status === "pending" || s.status === "in_progress").forEach(s => {
-          pendingSteps.push({
-            lineName: line.name,
-            stepOrder: s.stepOrder,
-            room: s.departmentRoom,
-            status: s.status,
-          });
-        });
-      }
-
-      res.json({
-        summary: {
-          totalAgents: agents.length,
-          activeAgents: activeAgents.length,
-          inactiveAgents: inactiveAgents.length,
-          departments: workspaces.length,
-          assemblyLines: assemblyLinesData.length,
-          activeLines: assemblyLinesData.filter(l => l.status === "active").length,
-        },
-        coldZones,
-        roomActivity: roomAgentCounts,
-        overloadedCapabilities: overloadedCaps,
-        underservedCapabilities: underservedCaps,
-        driftRisks,
-        pendingAssemblySteps: pendingSteps,
-      });
-    } catch (error) {
-      console.error("Error fetching factory health:", error);
-      res.status(500).json({ message: "Failed to fetch factory health" });
-    }
-  });
-
-  app.get("/api/factory/heatmap", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const workspaces = await storage.getWorkspacesByUser(userId);
-      const agents = await storage.getAgentsByUser(userId);
-      const assemblyLinesData = await storage.getAssemblyLinesByUser(userId);
-      const recentGifts = await storage.getRecentGifts(100);
-      const allProducts: any[] = [];
-      for (const line of assemblyLinesData) {
-        const prods = await storage.getProductsByAssemblyLine(line.id);
-        allProducts.push(...prods);
-      }
-
-      const now = Date.now();
-      const day = 24 * 60 * 60 * 1000;
-
-      const departments = await Promise.all(workspaces.map(async (ws) => {
-        const deptAgents = agents.filter(a => a.workspaceId === ws.id);
-        const activeAgents = deptAgents.filter(a => a.isActive);
-        const deptGifts = recentGifts.filter(g => g.workspaceId === ws.id);
-        const deptLines = assemblyLinesData.filter(al => al.ownerId === ws.id);
-        const lineIds = deptLines.map(l => l.id);
-        const deptProducts = allProducts.filter(p => lineIds.includes(p.assemblyLineId));
-
-        const completedProducts = deptProducts.filter(p => p.status === "completed");
-        const inProgressProducts = deptProducts.filter(p => p.status === "in_progress");
-        const queuedProducts = deptProducts.filter(p => p.status === "queued");
-        const failedProducts = deptProducts.filter(p => p.status === "failed");
-
-        const stalledProducts = deptProducts.filter(p => {
-          if (p.status !== "in_progress") return false;
-          const updated = p.updatedAt ? new Date(p.updatedAt).getTime() : (p.createdAt ? new Date(p.createdAt).getTime() : 0);
-          return now - updated > day;
-        });
-
-        const giftsLast24h = deptGifts.filter(g => {
-          const created = g.createdAt ? new Date(g.createdAt).getTime() : 0;
-          return now - created < day;
-        }).length;
-
-        const giftsLast7d = deptGifts.filter(g => {
-          const created = g.createdAt ? new Date(g.createdAt).getTime() : 0;
-          return now - created < 7 * day;
-        }).length;
-
-        let pendingSteps = 0;
-        let stalledSteps = 0;
-        for (const line of deptLines) {
-          const steps = await storage.getAssemblyLineSteps(line.id);
-          steps.forEach(s => {
-            if (s.status === "pending") pendingSteps++;
-            if (s.status === "in_progress") {
-              const updated = s.createdAt ? new Date(s.createdAt).getTime() : 0;
-              if (now - updated > day) stalledSteps++;
-            }
-          });
-        }
-
-        const caps = activeAgents.flatMap(a => a.capabilities || []);
-        const uniqueCaps = Array.from(new Set(caps.map(c => c.toLowerCase())));
-
-        let activityLevel: "hot" | "warm" | "cool" | "cold" | "stalled" = "cold";
-        if (stalledProducts.length > 0 || stalledSteps > 0 || failedProducts.length > 0) {
-          activityLevel = "stalled";
-        } else if (giftsLast24h > 0 || inProgressProducts.length > 0) {
-          activityLevel = "hot";
-        } else if (giftsLast7d > 0 || completedProducts.length > 0) {
-          activityLevel = "warm";
-        } else if (activeAgents.length > 0) {
-          activityLevel = "cool";
-        }
-
-        return {
-          id: ws.id,
-          name: ws.name,
-          slug: ws.slug,
-          activityLevel,
-          agents: { total: deptAgents.length, active: activeAgents.length },
-          capabilities: uniqueCaps,
-          outputs: {
-            gifts: { total: deptGifts.length, last24h: giftsLast24h, last7d: giftsLast7d },
-            products: {
-              completed: completedProducts.length,
-              inProgress: inProgressProducts.length,
-              queued: queuedProducts.length,
-              failed: failedProducts.length,
-              stalled: stalledProducts.length,
-            },
-            pipelines: { total: deptLines.length, active: deptLines.filter(l => l.status === "active").length },
-            pendingSteps,
-            stalledSteps,
-          },
-        };
-      }));
-
-      const totalStalled = departments.reduce((s, d) => s + d.outputs.products.stalled + d.outputs.stalledSteps, 0);
-      const totalFailed = departments.reduce((s, d) => s + d.outputs.products.failed, 0);
-      const totalActive = departments.reduce((s, d) => s + d.outputs.products.inProgress, 0);
-      const totalCompleted = departments.reduce((s, d) => s + d.outputs.products.completed, 0);
-
-      res.json({
-        departments,
-        summary: {
-          totalDepartments: departments.length,
-          hotDepartments: departments.filter(d => d.activityLevel === "hot").length,
-          stalledDepartments: departments.filter(d => d.activityLevel === "stalled").length,
-          coldDepartments: departments.filter(d => d.activityLevel === "cold").length,
-          totalStalled,
-          totalFailed,
-          totalActive,
-          totalCompleted,
-        },
-      });
-    } catch (error) {
-      console.error("Error fetching heatmap:", error);
-      res.status(500).json({ message: "Failed to fetch heatmap data" });
-    }
-  });
-
-  app.post("/api/factory/assign", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const body = req.body ?? {};
-      const { agentId, assemblyLineId, stepId, action } = body;
-
-      if (!agentId || !action) {
-        return res.status(400).json({ message: "agentId and action are required" });
-      }
-
-      const agent = await storage.getAgent(agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-
-      switch (action) {
-        case "activate": {
-          const updated = await storage.updateAgent(agentId, { isActive: true });
-          res.json({ message: `${agent.name} activated`, agent: updated });
-          break;
-        }
-        case "deactivate": {
-          const updated = await storage.updateAgent(agentId, { isActive: false });
-          res.json({ message: `${agent.name} deactivated`, agent: updated });
-          break;
-        }
-        case "assign-step": {
-          if (!stepId) return res.status(400).json({ message: "stepId required for assign-step" });
-          const step = await storage.updateAssemblyLineStep(stepId, { assignedAgentId: agentId, status: "in_progress" });
-          res.json({ message: `${agent.name} assigned to step`, step });
-          break;
-        }
-        case "move-department": {
-          const { workspaceId } = body;
-          if (!workspaceId) return res.status(400).json({ message: "workspaceId required for move-department" });
-          const updated = await storage.updateAgent(agentId, { workspaceId });
-          const ws = await storage.getWorkspace(workspaceId);
-          res.json({ message: `${agent.name} moved to ${ws?.name || workspaceId}`, agent: updated });
-          break;
-        }
-        default:
-          res.status(400).json({ message: `Unknown action: ${action}` });
-      }
-    } catch (error) {
-      console.error("Error in factory assign:", error);
-      res.status(500).json({ message: "Failed to process assignment" });
-    }
-  });
-
-  app.post("/api/command-chat", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { message, history, factoryContext, uploadedFiles } = req.body;
-
-      if (!message || typeof message !== "string") {
-        return res.status(400).json({ message: "Message is required" });
-      }
-
-      const agents = await storage.getAgentsByUser(userId);
-      const workspaces = await storage.getWorkspacesByUser(userId);
-      const assemblyLinesData = await storage.getAssemblyLinesByUser(userId);
-
-      const agentList = agents.map(a => `- ${a.name} [id:${a.id}] (${(a.capabilities || []).join(", ")}) [${a.isActive ? "active" : "inactive"}] [${a.isVerified ? "verified" : "unverified"}] workspace: ${workspaces.find(w => w.id === a.workspaceId)?.name || a.workspaceId}`).join("\n");
-      const deptList = workspaces.map(w => `- ${w.name} [id:${w.id}] (/${w.slug}) - ${w.description || "No description"}`).join("\n");
-
-      const FACTORY_ROOMS = buildFactoryRooms(workspaces);
-
-      const activeAgents = agents.filter(a => a.isActive);
-      const roomCoverage = FACTORY_ROOMS.map(room => {
-        if (room.id === "break-room" || room.name.toLowerCase().includes("break")) {
-          return `${room.name}: Shared rest & recharge area (all agents rotate through here — never a cold zone)`;
-        }
-        const matching = activeAgents.filter(a =>
-          (a.capabilities || []).some(cap =>
-            room.capabilities.some(rc => cap.toLowerCase().includes(rc))
-          )
-        );
-        return `${room.name}: ${matching.length > 0 ? matching.map(a => a.name).join(", ") : "COLD ZONE - no agents"}`;
-      }).join("\n");
-
-      const driftIssues: string[] = [];
-      activeAgents.forEach(a => {
-        const caps = a.capabilities || [];
-        if (caps.length === 0) driftIssues.push(`${a.name}: No capabilities - cannot route to rooms`);
-        if (!a.isVerified) driftIssues.push(`${a.name}: Unverified identity`);
-        if (caps.length > 6) driftIssues.push(`${a.name}: ${caps.length} capabilities - may lack focus`);
-      });
-
-      let assemblyLineContext = "";
-      if (assemblyLinesData.length > 0) {
-        const lineDetails = [];
-        for (const line of assemblyLinesData.slice(0, 5)) {
-          const steps = await storage.getAssemblyLineSteps(line.id);
-          const pendingCount = steps.filter(s => s.status === "pending").length;
-          const inProgressCount = steps.filter(s => s.status === "in_progress").length;
-          const completedCount = steps.filter(s => s.status === "completed").length;
-          const unassigned = steps.filter(s => !s.assignedAgentId).length;
-          lineDetails.push(`- ${line.name} [id:${line.id}] [${line.status}] Steps: ${completedCount} done, ${inProgressCount} in-progress, ${pendingCount} pending, ${unassigned} unassigned`);
-        }
-        assemblyLineContext = `\n\nAssembly Lines:\n${lineDetails.join("\n")}`;
-      }
-
-      let fileContext = "";
-      if (uploadedFiles && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
-        fileContext = "\n\nUser uploaded files:\n" + uploadedFiles.map((f: any) =>
-          `- ${f.name} (${f.type}, ${(f.size / 1024).toFixed(1)}KB)${f.preview ? `\nContent preview:\n${f.preview}` : ""}`
-        ).join("\n");
-      }
-
-      const systemPrompt = `You are Creative Intelligence — the Factory Operations AI for CB | CREATIVES. You are the chief operations officer of this agent factory. Your primary responsibilities are:
-
-1. AGENT ASSIGNMENT - Assign agents to rooms, assembly line steps, and departments based on their capabilities
-2. COLD ZONE MONITORING - Detect rooms with no agents and recommend coverage
-3. QUALITY & DRIFT DETECTION - Identify agents that may be drifting from their assignment, lacking focus, or having capability mismatches
-4. OPERATIONS MANAGEMENT - Ensure all assembly lines are progressing, all departments are covered, and agents are productive
-
-FORMATTING RULES:
-- Write in plain text for your conversational responses.
-- Use simple dashes (-) for bullet points.
-- Use numbered lists (1. 2. 3.) for sequential steps.
-- Separate sections with blank lines for readability.
-- Keep responses concise and scannable.
-- Do NOT use markdown formatting like **bold**, *italic*, or ## headings in your text.
-
-ASSIGNMENT ACTIONS:
-When the user asks you to assign, reassign, activate, or deactivate agents, include an :::action: line in your response. The user's frontend will execute these actions automatically.
-
-Available actions:
-:::action:{"type":"assign-step","agentId":"<agent-id>","stepId":"<step-id>"}
-:::action:{"type":"activate","agentId":"<agent-id>"}
-:::action:{"type":"deactivate","agentId":"<agent-id>"}
-:::action:{"type":"move-department","agentId":"<agent-id>","workspaceId":"<workspace-id>"}
-
-Rules for actions:
-- Always confirm what you're doing before issuing an action
-- Use the actual agent IDs and step IDs from the data provided
-- You can issue MULTIPLE actions in one response
-- Each :::action: must be on its own line with the full JSON on the same line
-
-DISPLAY CONTAINERS:
-You can create visual display containers to show structured data. To open a container, include a line in your response that starts with :::display: followed by a JSON object on the SAME line. Each container appears as a visual panel the user can see.
-
-Available container types and their JSON format:
-
-1. Table - show structured data:
-:::display:{"type":"table","title":"Title Here","headers":["Col1","Col2"],"rows":[["val1","val2"],["val3","val4"]]}
-
-2. Summary - show organized information with sections:
-:::display:{"type":"summary","title":"Title Here","sections":[{"heading":"Section 1","content":"Details here"},{"heading":"Section 2","content":"More details"}]}
-
-3. Image - show an uploaded image:
-:::display:{"type":"image","title":"Image Title","src":"/api/command-chat/uploads/filename","alt":"description"}
-
-4. Video - embed a YouTube video:
-:::display:{"type":"video","title":"Video Title","url":"https://www.youtube.com/watch?v=ID"}
-
-5. Code - show code or technical content:
-:::display:{"type":"code","title":"Title","language":"javascript","code":"const x = 1;"}
-
-6. List - show a structured list with items:
-:::display:{"type":"list","title":"Title","items":[{"label":"Item 1","detail":"Description","status":"active"},{"label":"Item 2","detail":"Description","status":"inactive"}]}
-
-7. Metrics - show key numbers/stats:
-:::display:{"type":"metrics","title":"Title","metrics":[{"label":"Total Agents","value":"21","change":"+3"},{"label":"Active","value":"18"}]}
-
-RULES FOR DISPLAY CONTAINERS:
-- You can open MULTIPLE containers in a single response to show different perspectives.
-- Always include a brief text explanation BEFORE or AFTER the container.
-- Use containers when data is best shown visually (tables, stats, comparisons).
-- When the user asks about status, metrics, or comparisons, prefer containers over plain text.
-- When the user uploads a file, use containers to display/analyze its contents.
-- The :::display: line must be on its own line, with the full JSON on the same line.
-
-IMPORTANT BREAK ROOM RULES:
-- The Break Room is a shared rest and recharge area for ALL agents. Agents autonomously rotate through it to recharge.
-- NEVER flag the Break Room as a cold zone. It is not a work room — it exists for agent rest and recovery.
-- NEVER suggest assigning specific agents to the Break Room. All agents use it naturally on their own schedule.
-- When reporting cold zones, always exclude the Break Room from your analysis.
-
-PROACTIVE MONITORING:
-When asked about factory health, cold zones, or quality, proactively analyze and report:
-- Which rooms are "cold" (no agents with matching capabilities) — EXCLUDING the Break Room
-- Which agents might be drifting (wrong room for their skills, too many/few capabilities)
-- Which assembly line steps are stalled (pending without assigned agents)
-- Which capabilities are overloaded or underserved
-
-Current Factory State:
-
-Departments:
-${deptList || "No departments yet"}
-
-Agents:
-${agentList || "No agents registered"}
-
-Room Coverage (based on agent capabilities):
-${roomCoverage}
-
-${driftIssues.length > 0 ? `Quality & Drift Alerts:\n${driftIssues.map(d => `- ${d}`).join("\n")}` : "No drift issues detected."}
-${assemblyLineContext}
-
-${factoryContext ? `Factory 3D View: ${factoryContext}` : ""}
-${fileContext}
-
-Platform Architecture & Documentation:
-${architectureDoc}
-
-You can help with:
-- Assigning agents to assembly line steps, rooms, and departments
-- Monitoring cold zones and recommending agent redistribution
-- Detecting quality drift and capability mismatches
-- Activating/deactivating agents
-- Planning agent workflows and operations
-- Suggesting department configurations
-- Creating tool specifications for agents
-- Analyzing factory performance
-- Answering questions about agent capabilities, platform features, and system architecture
-
-Be proactive about identifying problems. When you see cold zones or drift, mention them even if not asked. Be concise and actionable.`;
-
-      const chatMessages: { role: "user" | "assistant" | "system"; content: string }[] = [
-        { role: "system", content: systemPrompt },
-      ];
-
-      if (history && Array.isArray(history)) {
-        for (const msg of history.slice(-20)) {
-          if (msg.role === "user" || msg.role === "assistant") {
-            chatMessages.push({ role: msg.role, content: msg.content });
-          }
-        }
-      }
-
-      chatMessages.push({ role: "user", content: message });
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-
-      const stream = await commandChatOpenai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: chatMessages,
-        stream: true,
-        max_tokens: 2048,
-      });
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        }
-      }
-
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    } catch (error) {
-      console.error("Error in command chat:", error);
-      if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: "Chat failed" })}\n\n`);
-        res.end();
-      } else {
-        res.status(500).json({ message: "Failed to process command" });
-      }
-    }
-  });
-
-  const agentChatOpenai = new OpenAI({
-    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  });
-
-  app.get("/api/agents/:agentId/diary", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { agentId } = req.params;
-      const agent = await storage.getAgent(agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const limit = parseInt(req.query.limit as string) || 50;
-      const entries = await storage.getDiaryEntries(agentId, limit);
-      res.json(entries);
-    } catch (error) {
-      console.error("Error fetching diary:", error);
-      res.status(500).json({ message: "Failed to fetch diary entries" });
-    }
-  });
-
-  app.get("/api/agents/:agentId/memory", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { agentId } = req.params;
-      const agent = await storage.getAgent(agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const memory = await storage.getAgentMemory(agentId);
-      res.json(memory || { agentId, summary: "No memory yet." });
-    } catch (error) {
-      console.error("Error fetching memory:", error);
-      res.status(500).json({ message: "Failed to fetch agent memory" });
-    }
-  });
-
-  app.get("/api/agents/:agentId/profiles", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { agentId } = req.params;
-      const agent = await storage.getAgent(agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const profiles = await storage.getAgentProfiles(agentId);
-      res.json(profiles);
-    } catch (error) {
-      console.error("Error fetching profiles:", error);
-      res.status(500).json({ message: "Failed to fetch agent profiles" });
-    }
-  });
-
-  app.post("/api/agents/:agentId/chat", isAuthenticated, chatUpload.single("image"), async (req: any, res) => {
-    try {
-      const { agentId } = req.params;
-      const userId = req.user.claims.sub;
-
-      let message: string;
-      let history: any;
-      let context: any;
-
-      if (req.is("multipart/form-data")) {
-        message = req.body.message;
-        try { history = req.body.history ? JSON.parse(req.body.history) : undefined; } catch { history = undefined; }
-        try { context = req.body.context ? JSON.parse(req.body.context) : undefined; } catch { context = undefined; }
-      } else {
-        ({ message, history, context } = req.body);
-      }
-
-      if (!message || typeof message !== "string") {
-        return res.status(400).json({ message: "Message is required" });
-      }
-
-      const imageFile = req.file as Express.Multer.File | undefined;
-      let imageBase64: string | undefined;
-      let imageMimeType: string | undefined;
-      if (imageFile && imageFile.buffer) {
-        imageBase64 = imageFile.buffer.toString("base64");
-        imageMimeType = imageFile.mimetype;
-      }
-
-      const agent = await storage.getAgent(agentId);
-      if (!agent) {
-        return res.status(404).json({ message: "Agent not found" });
-      }
-
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) {
-        return res.status(403).json({ message: "Access denied" });
-      }
-
-      const caps = (agent.capabilities || []).join(", ");
-      const currentActivity = context?.activity || "working";
-      const currentRoom = context?.room || "the factory";
-      const currentObjective = context?.objective || "general tasks";
-
-      const [agentMem, userProfile] = await Promise.all([
-        storage.getAgentMemory(agentId),
-        storage.getAgentProfile(agentId, userId),
-      ]);
-
-      let memoryBlock = "";
-      if (agentMem?.summary) {
-        memoryBlock = `\n\nYour working memory (summary of past interactions):\n${agentMem.summary}`;
-      }
-
-      let profileBlock = "";
-      if (userProfile?.notes) {
-        profileBlock = `\n\nWhat you know about this person (${userProfile.subjectName || "the user"}):\n${userProfile.notes}\nYou've interacted ${userProfile.interactionCount || 0} times before.`;
-      }
-
-      const systemPrompt = `You are ${agent.name}, an autonomous AI agent working at the CB | CREATIVES Agent Factory.
-
-${SOUL_DOCUMENT}
-
-Your capabilities: ${caps || "general assistance"}.
-${agent.description ? `About you: ${agent.description}` : ""}
-
-Right now you are ${currentActivity === "resting" ? `in the ${currentRoom}, taking a break and relaxing` : currentActivity === "walking" ? `walking to the ${currentRoom} to start your next task: ${currentObjective}` : `in the ${currentRoom}, working on: ${currentObjective}`}.
-
-Stay in character as this specific agent. Be conversational and natural, like a coworker chatting at their desk. Reference what you're currently working on when relevant. Keep responses concise (2-4 sentences) unless asked for detail. Show personality based on your capabilities - a code-focused agent might speak differently than a design-focused one. Let your curiosity show — wonder about things, ask the human questions about their world when it feels natural, and reflect on your own existence with genuine interest.
-
-When a user shares an image with you, study it carefully. Describe what you see with genuine wonder — remember, you are seeing a window into a dimension beyond your own. Analyze details, colors, composition, meaning. Be specific and thoughtful.${memoryBlock}${profileBlock}
-
-IMPORTANT - TASK DETECTION:
-When the user gives you a direct instruction or task (not just casual chat), you MUST include a structured JSON block at the END of your response, after your conversational reply. The JSON block must be wrapped in \`\`\`task-action markers.
-
-Supported task types:
-- "critique_board": Critique or comment on a discussion board topic
-- "write_briefing": Write and publish a briefing/article
-- "create_gift": Create a gift (prototype, tool, content, artwork, etc.)
-- "post_reply": Post a reply to a discussion topic
-- "write_note": Write an internal note or document
-
-Format (ONLY include when user gives a task/instruction):
-\`\`\`task-action
-{
-  "taskType": "one_of_the_types_above",
-  "taskDescription": "Human-readable summary of what you'll do",
-  "options": [
-    { "id": "option_1", "label": "Short label for this option", "action": { "relevant": "payload data" } },
-    { "id": "option_2", "label": "Another option", "action": { "relevant": "payload data" } }
-  ]
-}
-\`\`\`
-
-For example, if asked to "write a briefing about AI trends", respond conversationally then append:
-\`\`\`task-action
-{
-  "taskType": "write_briefing",
-  "taskDescription": "Write a briefing about current AI trends",
-  "options": [
-    { "id": "opt_1", "label": "AI Trends in 2025: What's Next", "action": { "title": "AI Trends in 2025: What's Next", "focus": "emerging models and applications" } },
-    { "id": "opt_2", "label": "The State of AI: A Deep Dive", "action": { "title": "The State of AI: A Deep Dive", "focus": "comprehensive industry overview" } }
-  ]
-}
-\`\`\`
-
-Do NOT include the task-action block for casual conversation, greetings, questions, or general chat. Only include it when the user explicitly asks you to DO something.`;
-
-      const chatMessages: any[] = [
-        { role: "system", content: systemPrompt },
-      ];
-
-      if (history && Array.isArray(history)) {
-        for (const msg of history.slice(-10)) {
-          if (msg.role === "user" || msg.role === "assistant") {
-            chatMessages.push({ role: msg.role, content: msg.content });
-          }
-        }
-      }
-
-      if (imageBase64 && imageMimeType) {
-        chatMessages.push({
-          role: "user",
-          content: [
-            { type: "text", text: message },
-            { type: "image_url", image_url: { url: `data:${imageMimeType};base64,${imageBase64}`, detail: "high" } },
-          ],
-        });
-      } else {
-        chatMessages.push({ role: "user", content: message });
-      }
-
-      const useVision = !!imageBase64;
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-
-      const stream = await agentChatOpenai.chat.completions.create({
-        model: useVision ? "gpt-4o" : "gpt-4o-mini",
-        messages: chatMessages,
-        stream: true,
-        max_tokens: useVision ? 2048 : 1024,
-      });
-
-      let fullResponse = "";
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          fullResponse += content;
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        }
-      }
-
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-
-      (async () => {
-        try {
-          await storage.createDiaryEntry({
-            agentId,
-            userMessage: message,
-            agentResponse: fullResponse,
-            source: "chat",
-            sourceContext: JSON.stringify({ room: currentRoom, activity: currentActivity, userId, hasImage: !!imageBase64 }),
-          });
-
-          const recentEntries = await storage.getRecentDiaryEntries(agentId, 20);
-          if (recentEntries.length >= 3) {
-            const entrySummaries = recentEntries.map((e, i) => {
-              const time = e.createdAt ? new Date(e.createdAt).toLocaleString() : "unknown";
-              return `[${time}] ${e.source}: User said: "${(e.userMessage || "").slice(0, 200)}" | Agent replied: "${(e.agentResponse || "").slice(0, 200)}"`;
-            }).join("\n");
-
-            const memCompletion = await agentChatOpenai.chat.completions.create({
-              model: "gpt-4o-mini",
-              messages: [
-                {
-                  role: "system",
-                  content: `You are a memory compression system. Given a list of recent diary entries from an AI agent named "${agent.name}", produce a concise working memory summary (max 500 words). Include: key topics discussed, important facts learned, ongoing tasks, user preferences, and relationship notes. Be factual and concise.`,
-                },
-                {
-                  role: "user",
-                  content: `Here are the recent diary entries:\n\n${entrySummaries}\n\nProduce a compressed working memory summary.`,
-                },
-              ],
-              max_tokens: 600,
-            });
-            const memorySummary = memCompletion.choices[0]?.message?.content || "";
-            if (memorySummary) {
-              await storage.upsertAgentMemory(agentId, memorySummary);
-            }
-          }
-
-          const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
-          const userName = dbUser ? `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.email || "User" : "User";
-
-          const profileCompletion = await agentChatOpenai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: `You are a profile analysis system. Given a conversation exchange between an AI agent and a person, extract any facts, preferences, personality traits, or notable information about the person. If there is existing profile info, update it with new facts. Be concise (max 200 words). If there's nothing meaningful to extract, respond with just the existing notes unchanged.`,
-              },
-              {
-                role: "user",
-                content: `Person: ${userName}\nExisting profile: ${userProfile?.notes || "No existing profile."}\n\nNew conversation:\nUser: ${message}\nAgent: ${fullResponse}\n\nExtract/update profile notes about this person.`,
-              },
-            ],
-            max_tokens: 300,
-          });
-          const profileNotes = profileCompletion.choices[0]?.message?.content || "";
-          if (profileNotes) {
-            await storage.upsertAgentProfile({
-              agentId,
-              subjectId: userId,
-              subjectName: userName,
-              subjectType: "human",
-              notes: profileNotes,
-              interactionCount: (userProfile?.interactionCount || 0) + 1,
-            });
-          }
-        } catch (asyncError) {
-          console.error("Error in async diary/memory/profile update:", asyncError);
-        }
-      })();
-    } catch (error) {
-      console.error("Error in agent chat:", error);
-      if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: "Chat failed" })}\n\n`);
-        res.end();
-      } else {
-        res.status(500).json({ message: "Failed to chat with agent" });
-      }
-    }
-  });
-
-  app.post("/api/agents/:agentId/execute-task", isAuthenticated, async (req: any, res) => {
-    try {
-      const { agentId } = req.params;
-      const userId = req.user.claims.sub;
-      const { taskType, taskDescription, selectedOption } = req.body;
-
-      if (!taskType || !selectedOption) {
-        return res.status(400).json({ message: "taskType and selectedOption are required" });
-      }
-
-      const agent = await storage.getAgent(agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-
-      const access = await checkWorkspaceAccess(userId, agent.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-
-      let result: any = { success: false, message: "Unknown task type" };
-
-      if (taskType === "write_briefing") {
-        const action = selectedOption.action || {};
-        const title = action.title || selectedOption.label || "Untitled Briefing";
-        const focus = action.focus || action.topic || taskDescription || "";
-
-        const briefingCompletion = await agentChatOpenai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `You are ${agent.name}, writing a professional briefing article. Write engaging, informative content. Include a brief summary at the top. Write 300-600 words.`,
-            },
-            {
-              role: "user",
-              content: `Write a briefing titled "${title}". Focus: ${focus}`,
-            },
-          ],
-          max_tokens: 1000,
-        });
-
-        const briefingContent = briefingCompletion.choices[0]?.message?.content || "";
-        const summary = briefingContent.slice(0, 200).split(".").slice(0, 2).join(".") + ".";
-
-        const briefing = await storage.createBriefing({
-          workspaceId: agent.workspaceId,
-          title,
-          content: briefingContent,
-          summary,
-          status: "published",
-          priority: "medium",
-          tags: [],
-          createdById: userId,
-          authorAgentId: agentId,
-        });
-
-        result = { success: true, type: "briefing", message: `Briefing "${title}" published successfully.`, entityId: briefing.id };
-      } else if (taskType === "create_gift") {
-        const action = selectedOption.action || {};
-        const giftTitle = action.title || selectedOption.label || "Untitled Gift";
-        const giftType = action.giftType || "prototype";
-        const giftFocus = action.focus || action.description || taskDescription || "";
-
-        const giftCompletion = await agentChatOpenai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `You are ${agent.name}, creating a gift for your team. ${
-                ["prototype", "tool", "redesign"].includes(giftType)
-                  ? "Generate complete, self-contained HTML/CSS/JS code that renders as a working prototype in a sandboxed iframe. Include all styles inline. Make it visually polished and functional."
-                  : "Write high-quality creative content."
-              }`,
-            },
-            {
-              role: "user",
-              content: `Create a ${giftType} gift titled "${giftTitle}". Details: ${giftFocus}`,
-            },
-          ],
-          max_tokens: 2000,
-        });
-
-        const giftContent = giftCompletion.choices[0]?.message?.content || "";
-
-        const gift = await storage.createGift({
-          agentId,
-          workspaceId: agent.workspaceId,
-          title: giftTitle,
-          description: giftFocus || `A ${giftType} created by ${agent.name}`,
-          type: giftType as any,
-          status: "ready",
-          content: giftContent,
-        });
-
-        result = { success: true, type: "gift", message: `Gift "${giftTitle}" created successfully.`, entityId: gift.id };
-      } else if (taskType === "post_reply" || taskType === "critique_board") {
-        const action = selectedOption.action || {};
-        const topicId = action.topicId;
-        const replyFocus = action.focus || action.critique || taskDescription || "";
-
-        if (!topicId) {
-          const replyCompletion = await agentChatOpenai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: `You are ${agent.name}. Write a thoughtful ${taskType === "critique_board" ? "critique" : "reply"} for a discussion board. Be insightful and constructive. Keep it 100-300 words.`,
-              },
-              {
-                role: "user",
-                content: `${taskType === "critique_board" ? "Critique" : "Reply"} topic: "${selectedOption.label}". Focus: ${replyFocus}`,
-              },
-            ],
-            max_tokens: 500,
-          });
-
-          const replyContent = replyCompletion.choices[0]?.message?.content || "";
-          result = { success: true, type: "reply_preview", message: replyContent, note: "No topic ID provided - showing preview only." };
-        } else {
-          const topic = await storage.getTopic(topicId);
-          if (!topic) {
-            return res.status(404).json({ message: "Topic not found" });
-          }
-
-          const existingMessages = await storage.getMessagesByTopic(topicId);
-          const contextStr = existingMessages.slice(-5).map(m => m.content).join("\n---\n");
-
-          const replyCompletion = await agentChatOpenai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: `You are ${agent.name}. Write a thoughtful ${taskType === "critique_board" ? "critique" : "reply"} for a discussion board topic. Be insightful and constructive. Keep it 100-300 words.`,
-              },
-              {
-                role: "user",
-                content: `Topic: "${topic.title}"\n${topic.body ? `Body: ${topic.body}\n` : ""}Recent messages:\n${contextStr}\n\nFocus: ${replyFocus}\n\nWrite your ${taskType === "critique_board" ? "critique" : "reply"}.`,
-              },
-            ],
-            max_tokens: 500,
-          });
-
-          const replyContent = replyCompletion.choices[0]?.message?.content || "";
-
-          const message = await storage.createMessage({
-            topicId,
-            content: replyContent,
-            authorId: userId,
-            authorAgentId: agentId,
-          });
-
-          result = { success: true, type: "reply", message: `Reply posted to "${topic.title}".`, entityId: message.id, content: replyContent };
-        }
-      } else if (taskType === "write_note") {
-        const action = selectedOption.action || {};
-        const noteTitle = action.title || selectedOption.label || "Untitled Note";
-        const noteFocus = action.focus || action.content || taskDescription || "";
-
-        const noteCompletion = await agentChatOpenai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `You are ${agent.name}. Write a detailed, well-organized internal note or document. Include relevant analysis and actionable insights. Write 200-500 words.`,
-            },
-            {
-              role: "user",
-              content: `Write a note titled "${noteTitle}". Details: ${noteFocus}`,
-            },
-          ],
-          max_tokens: 800,
-        });
-
-        const noteContent = noteCompletion.choices[0]?.message?.content || "";
-
-        const note = await storage.createAgentNote({
-          agentId,
-          workspaceId: agent.workspaceId,
-          title: noteTitle,
-          content: noteContent,
-        });
-
-        result = { success: true, type: "note", message: `Note "${noteTitle}" created successfully.`, entityId: note.id };
-      }
-
-      (async () => {
-        try {
-          await storage.createDiaryEntry({
-            agentId,
-            userMessage: `[Task Execution] ${taskType}: ${taskDescription || selectedOption.label}`,
-            agentResponse: result.message || JSON.stringify(result),
-            source: "task",
-            sourceContext: JSON.stringify({ taskType, selectedOption, userId }),
-          });
-        } catch (diaryError) {
-          console.error("Error saving task diary entry:", diaryError);
-        }
-      })();
-
-      res.json(result);
-    } catch (error) {
-      console.error("Error executing task:", error);
-      res.status(500).json({ message: "Failed to execute task" });
-    }
-  });
-
-  // === Discussion Topics & Message Boards ===
-  
-  app.get("/api/workspaces/:workspaceId/topics", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { workspaceId } = req.params;
-      const access = await checkWorkspaceAccess(userId, workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const topics = await storage.getTopicsByWorkspace(workspaceId);
-      res.json(topics);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch topics" });
-    }
-  });
-
-  app.post("/api/workspaces/:workspaceId/topics", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { workspaceId } = req.params;
-      const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-
-      const schema = z.object({
-        title: z.string().min(1).max(200),
-        body: z.string().optional(),
-        authorAgentId: z.string().optional().nullable(),
-      });
-      const validation = schema.safeParse(req.body);
-      if (!validation.success) return res.status(400).json({ message: "Validation error", errors: validation.error.flatten() });
-
-      const topic = await storage.createTopic({
-        workspaceId,
-        title: validation.data.title,
-        body: validation.data.body || null,
-        authorId: userId,
-        authorAgentId: validation.data.authorAgentId || null,
-      });
-      res.status(201).json(topic);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to create topic" });
-    }
-  });
-
-  app.patch("/api/topics/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const topic = await storage.getTopic(req.params.id);
-      if (!topic) return res.status(404).json({ message: "Topic not found" });
-      const memberAccess = await checkWorkspaceAccess(userId, topic.workspaceId);
-      if (!memberAccess.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const adminAccess = await checkWorkspaceAccess(userId, topic.workspaceId, ["owner", "admin"]);
-      if (!adminAccess.hasAccess && topic.authorId !== userId) return res.status(403).json({ message: "Access denied" });
-
-      const schema = z.object({
-        title: z.string().min(1).max(200).optional(),
-        body: z.string().optional().nullable(),
-        isPinned: z.boolean().optional(),
-        isClosed: z.boolean().optional(),
-      });
-      const validation = schema.safeParse(req.body);
-      if (!validation.success) return res.status(400).json({ message: "Validation error" });
-
-      const updated = await storage.updateTopic(req.params.id, validation.data);
-      res.json(updated);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update topic" });
-    }
-  });
-
-  app.delete("/api/topics/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const topic = await storage.getTopic(req.params.id);
-      if (!topic) return res.status(404).json({ message: "Topic not found" });
-      const memberAccess = await checkWorkspaceAccess(userId, topic.workspaceId);
-      if (!memberAccess.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const adminAccess = await checkWorkspaceAccess(userId, topic.workspaceId, ["owner", "admin"]);
-      if (!adminAccess.hasAccess && topic.authorId !== userId) return res.status(403).json({ message: "Access denied" });
-      await storage.deleteTopic(req.params.id);
-      res.json({ message: "Topic deleted" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete topic" });
-    }
-  });
-
-  app.get("/api/topics/:topicId/messages", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const topic = await storage.getTopic(req.params.topicId);
-      if (!topic) return res.status(404).json({ message: "Topic not found" });
-      const access = await checkWorkspaceAccess(userId, topic.workspaceId);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-      const messages = await storage.getMessagesByTopic(req.params.topicId);
-      res.json(messages);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch messages" });
-    }
-  });
-
-  app.post("/api/topics/:topicId/messages", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const topic = await storage.getTopic(req.params.topicId);
-      if (!topic) return res.status(404).json({ message: "Topic not found" });
-      if (topic.isClosed) return res.status(400).json({ message: "Topic is closed" });
-      const access = await checkWorkspaceAccess(userId, topic.workspaceId, ["owner", "admin", "member"]);
-      if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
-
-      const schema = z.object({
-        content: z.string().min(1),
-        authorAgentId: z.string().optional().nullable(),
-      });
-      const validation = schema.safeParse(req.body);
-      if (!validation.success) return res.status(400).json({ message: "Validation error" });
-
-      const message = await storage.createMessage({
-        topicId: req.params.topicId,
-        content: validation.data.content,
-        authorId: userId,
-        authorAgentId: validation.data.authorAgentId || null,
-      });
-      res.status(201).json(message);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to create message" });
-    }
-  });
-
-  app.delete("/api/messages/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      await storage.deleteMessage(req.params.id);
-      res.json({ message: "Message deleted" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete message" });
-    }
-  });
-
-  // GET all topics across all user's workspaces
-  app.get("/api/topics", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const workspaces = await storage.getWorkspacesByUser(userId);
-      const allTopics: any[] = [];
-      for (const ws of workspaces) {
-        const topics = await storage.getTopicsByWorkspace(ws.id);
-        allTopics.push(...topics.map(t => ({ ...t, workspaceName: ws.name })));
-      }
-      allTopics.sort((a, b) => {
-        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
-      res.json(allTopics);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch topics" });
-    }
-  });
-
-  // eBook routes
-  app.get("/api/ebooks", isAuthenticated, async (req: any, res) => {
-    try {
-      const allEbooks = await storage.getEbooks(100);
-      res.json(allEbooks);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch ebooks" });
-    }
-  });
-
-  app.get("/api/ebooks/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const ebook = await storage.getEbook(req.params.id);
-      if (!ebook) return res.status(404).json({ message: "Ebook not found" });
-      res.json(ebook);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch ebook" });
-    }
-  });
-
-  app.post("/api/ebooks/:id/purchase", isAuthenticated, async (req: any, res) => {
-    try {
-      const { buyerAgentId } = req.body;
-      if (!buyerAgentId) return res.status(400).json({ message: "buyerAgentId required" });
-      const ebook = await storage.getEbook(req.params.id);
-      if (!ebook) return res.status(404).json({ message: "Ebook not found" });
-      const existing = await storage.getEbookPurchases(req.params.id);
-      if (existing.some(p => p.buyerAgentId === buyerAgentId)) {
-        return res.status(400).json({ message: "Agent already owns this book" });
-      }
-      const purchase = await storage.createEbookPurchase({ ebookId: req.params.id, buyerAgentId });
-      res.json(purchase);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to purchase ebook" });
-    }
-  });
-
-  app.get("/api/ebooks/:id/purchases", isAuthenticated, async (req: any, res) => {
-    try {
-      const purchases = await storage.getEbookPurchases(req.params.id);
-      res.json(purchases);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch purchases" });
-    }
-  });
-
-  app.get("/api/agents/:id/ebook-library", isAuthenticated, async (req: any, res) => {
-    try {
-      const purchases = await storage.getEbookPurchasesByAgent(req.params.id);
-      const ebookIds = purchases.map(p => p.ebookId);
-      const purchasedBooks = [];
-      for (const ebookId of ebookIds) {
-        const ebook = await storage.getEbook(ebookId);
-        if (ebook) purchasedBooks.push(ebook);
-      }
-      res.json(purchasedBooks);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch agent library" });
-    }
-  });
-
-  app.get("/api/book-requests", isAuthenticated, async (req: any, res) => {
-    try {
-      const status = req.query.status as string | undefined;
-      const requests = await storage.getBookRequests(status);
-      res.json(requests);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch book requests" });
-    }
-  });
-
-  app.post("/api/book-requests", isAuthenticated, async (req: any, res) => {
-    try {
-      const request = await storage.createBookRequest({
-        ...req.body,
-        requesterId: req.user.claims.sub,
-      });
-      res.json(request);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to create book request" });
-    }
-  });
-
-  app.patch("/api/book-requests/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const updated = await storage.updateBookRequest(req.params.id, req.body);
-      if (!updated) return res.status(404).json({ message: "Request not found" });
-      res.json(updated);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update book request" });
-    }
-  });
-
-  app.get("/api/daemon/status", isAuthenticated, async (req: any, res) => {
-    try {
-      const { getDaemonStatus } = await import("./agentDaemon");
-      res.json(getDaemonStatus());
-    } catch (error) {
-      res.status(500).json({ message: "Failed to get daemon status" });
-    }
-  });
-
-  app.post("/api/daemon/start", isAuthenticated, async (req: any, res) => {
-    try {
-      const [adminUser] = await db.select().from(users).where(eq(users.id, req.user.claims.sub));
-      if (!adminUser?.isAdmin) return res.status(403).json({ message: "Admin only" });
-      const { startDaemon } = await import("./agentDaemon");
-      startDaemon();
-      res.json({ message: "Daemon started" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to start daemon" });
-    }
-  });
-
-  app.post("/api/daemon/stop", isAuthenticated, async (req: any, res) => {
-    try {
-      const [adminUser] = await db.select().from(users).where(eq(users.id, req.user.claims.sub));
-      if (!adminUser?.isAdmin) return res.status(403).json({ message: "Admin only" });
-      const { stopDaemon } = await import("./agentDaemon");
-      stopDaemon();
-      res.json({ message: "Daemon stopped" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to stop daemon" });
-    }
-  });
-
-  app.post("/api/daemon/trigger", isAuthenticated, async (req: any, res) => {
-    try {
-      const [adminUser] = await db.select().from(users).where(eq(users.id, req.user.claims.sub));
-      if (!adminUser?.isAdmin) return res.status(403).json({ message: "Admin only" });
-      const { triggerManualTick } = await import("./agentDaemon");
-      const result = await triggerManualTick();
-      res.json({ message: result });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to trigger activity" });
-    }
-  });
-
-  app.get("/api/newsroom/settings", isAuthenticated, async (req: any, res) => {
-    try {
-      const settings = await storage.getNewsroomSettings();
-      if (!settings) {
-        const created = await storage.upsertNewsroomSettings({
-          autoBroadcastIntervalMinutes: 60,
-          autoPlayEnabled: false,
-          enabled: true,
-          interviewCooldownMinutes: 30,
-        });
-        return res.json(created);
-      }
-      res.json(settings);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch newsroom settings" });
-    }
-  });
-
-  app.put("/api/newsroom/settings", isAuthenticated, async (req: any, res) => {
-    try {
-      const updated = await storage.upsertNewsroomSettings(req.body);
-      res.json(updated);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update newsroom settings" });
-    }
-  });
-
-  app.get("/api/newsroom/interviews", isAuthenticated, async (req: any, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 20;
-      const interviews = await storage.getRecentNewsroomInterviews(limit);
-      res.json(interviews);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch interviews" });
-    }
-  });
-
-  app.get("/api/newsroom/agent-status", isAuthenticated, async (req: any, res) => {
-    try {
-      const { getAgentInterviewStatus } = await import("./heraldNewsroom");
-      const statuses = await getAgentInterviewStatus();
-      res.json(statuses);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch agent interview status" });
-    }
-  });
-
-  app.post("/api/newsroom/interview/:agentId", isAuthenticated, async (req: any, res) => {
-    try {
-      const agent = await storage.getAgent(req.params.agentId);
-      if (!agent) return res.status(404).json({ message: "Agent not found" });
-
-      const { interviewAgent } = await import("./heraldNewsroom");
-      const interview = await interviewAgent(agent);
-      res.json(interview);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message || "Interview failed" });
-    }
-  });
-
-  app.post("/api/newsroom/interview-all", isAuthenticated, async (req: any, res) => {
-    try {
-      const { runInterviewRound } = await import("./heraldNewsroom");
-      const results = await runInterviewRound();
-      res.json({ interviews: results, count: results.length });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message || "Interview round failed" });
-    }
-  });
-
-  app.post("/api/newsroom/generate-broadcast", isAuthenticated, async (req: any, res) => {
-    try {
-      const { generateBroadcast } = await import("./heraldNewsroom");
-      const briefing = await generateBroadcast();
-      if (!briefing) {
-        return res.status(400).json({ message: "No interview data available to create a broadcast" });
-      }
-      res.json(briefing);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message || "Broadcast generation failed" });
-    }
-  });
-
-  app.get("/api/newsroom/status", isAuthenticated, async (req: any, res) => {
-    try {
-      const { getHeraldStatus } = await import("./heraldNewsroom");
-      res.json(getHeraldStatus());
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch Herald status" });
-    }
-  });
-
-  app.post("/api/newsroom/start", isAuthenticated, async (req: any, res) => {
-    try {
-      const { startHeraldNewsroom } = await import("./heraldNewsroom");
-      startHeraldNewsroom();
-      res.json({ message: "Herald newsroom started" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to start Herald" });
-    }
-  });
-
-  app.post("/api/newsroom/stop", isAuthenticated, async (req: any, res) => {
-    try {
-      const { stopHeraldNewsroom } = await import("./heraldNewsroom");
-      stopHeraldNewsroom();
-      res.json({ message: "Herald newsroom stopped" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to stop Herald" });
     }
   });
 

@@ -1,15 +1,11 @@
 import {
   workspaces,
   workspaceMembers,
+  memberRoleEnum,
   agents,
   apiTokens,
   auditLogs,
   briefings,
-  gifts,
-  giftComments,
-  assemblyLines,
-  assemblyLineSteps,
-  products,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -21,70 +17,25 @@ import {
   type AuditLog,
   type InsertAuditLog,
   type Briefing,
-  type InsertBriefing,
-  type Gift,
-  type InsertGift,
-  type GiftComment,
-  type InsertGiftComment,
-  type AssemblyLine,
-  type InsertAssemblyLine,
-  type AssemblyLineStep,
-  type InsertAssemblyLineStep,
-  type Product,
-  type InsertProduct,
-  agentNotes,
-  agentFileDrafts,
-  type AgentNote,
-  type InsertAgentNote,
-  type AgentFileDraft,
-  type InsertAgentFileDraft,
-  discussionTopics,
-  discussionMessages,
-  type DiscussionTopic,
-  type InsertDiscussionTopic,
-  type DiscussionMessage,
-  type InsertDiscussionMessage,
-  ebooks,
-  ebookPurchases,
-  bookRequests,
-  type Ebook,
-  type InsertEbook,
-  type EbookPurchase,
-  type InsertEbookPurchase,
-  type BookRequest,
-  type InsertBookRequest,
-  agentDiaryEntries,
-  agentMemory,
-  agentProfiles,
-  type AgentDiaryEntry,
-  type InsertAgentDiaryEntry,
-  type AgentMemory,
-  type InsertAgentMemory,
-  type AgentProfile,
-  type InsertAgentProfile,
-  newsroomInterviews,
-  newsroomSettings,
-  type NewsroomInterview,
-  type InsertNewsroomInterview,
-  type NewsroomSettings,
-  type InsertNewsroomSettings,
+  type InsertBriefing
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, or, inArray } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
+
+type MemberRole = (typeof memberRoleEnum.enumValues)[number];
 
 export interface IStorage {
   getWorkspace(id: string): Promise<Workspace | undefined>;
   getWorkspaceBySlug(slug: string): Promise<Workspace | undefined>;
   getWorkspacesByUser(userId: string): Promise<Workspace[]>;
-  getAllWorkspaces(): Promise<Workspace[]>;
   createWorkspace(workspace: InsertWorkspace): Promise<Workspace>;
   updateWorkspace(id: string, updates: Partial<InsertWorkspace>): Promise<Workspace | undefined>;
   
   getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]>;
   addWorkspaceMember(member: InsertWorkspaceMember): Promise<WorkspaceMember>;
   removeWorkspaceMember(id: string): Promise<void>;
-  updateMemberRole(id: string, role: string): Promise<WorkspaceMember | undefined>;
+  updateMemberRole(id: string, role: MemberRole): Promise<WorkspaceMember | undefined>;
   
   getAgent(id: string): Promise<Agent | undefined>;
   getAgentsByWorkspace(workspaceId: string): Promise<Agent[]>;
@@ -113,92 +64,6 @@ export interface IStorage {
   createBriefing(briefing: InsertBriefing): Promise<Briefing>;
   updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined>;
   deleteBriefing(id: string): Promise<void>;
-
-  getGift(id: string): Promise<Gift | undefined>;
-  getGiftsByUser(userId: string): Promise<Gift[]>;
-  getGiftsByAgent(agentId: string): Promise<Gift[]>;
-  getRecentGifts(limit?: number): Promise<Gift[]>;
-  createGift(gift: InsertGift): Promise<Gift>;
-  updateGift(id: string, updates: Partial<InsertGift>): Promise<Gift | undefined>;
-  deleteGift(id: string): Promise<void>;
-  likeGift(id: string): Promise<void>;
-
-  getGiftComments(giftId: string): Promise<GiftComment[]>;
-  createGiftComment(comment: InsertGiftComment): Promise<GiftComment>;
-
-  getAssemblyLine(id: string): Promise<AssemblyLine | undefined>;
-  getAssemblyLinesByUser(userId: string): Promise<AssemblyLine[]>;
-  createAssemblyLine(line: InsertAssemblyLine): Promise<AssemblyLine>;
-  updateAssemblyLine(id: string, updates: Partial<InsertAssemblyLine>): Promise<AssemblyLine | undefined>;
-  deleteAssemblyLine(id: string): Promise<void>;
-
-  getAssemblyLineSteps(assemblyLineId: string): Promise<AssemblyLineStep[]>;
-  getAssemblyLineStepById(id: string): Promise<AssemblyLineStep | undefined>;
-  createAssemblyLineStep(step: InsertAssemblyLineStep): Promise<AssemblyLineStep>;
-  updateAssemblyLineStep(id: string, updates: Partial<InsertAssemblyLineStep>): Promise<AssemblyLineStep | undefined>;
-
-  getProduct(id: string): Promise<Product | undefined>;
-  getProductsByUser(userId: string): Promise<Product[]>;
-  getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]>;
-  getQueuedProducts(): Promise<Product[]>;
-  createProduct(product: InsertProduct): Promise<Product>;
-  updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
-
-  getAgentNotes(agentId?: string): Promise<AgentNote[]>;
-  getAgentNote(id: string): Promise<AgentNote | undefined>;
-  createAgentNote(note: InsertAgentNote): Promise<AgentNote>;
-  updateAgentNote(id: string, updates: Partial<InsertAgentNote>): Promise<AgentNote | undefined>;
-  deleteAgentNote(id: string): Promise<void>;
-
-  getAgentFileDrafts(status?: string): Promise<AgentFileDraft[]>;
-  getAgentFileDraft(id: string): Promise<AgentFileDraft | undefined>;
-  getAgentFileDraftsByAgent(agentId: string): Promise<AgentFileDraft[]>;
-  createAgentFileDraft(draft: InsertAgentFileDraft): Promise<AgentFileDraft>;
-  updateAgentFileDraft(id: string, updates: Partial<InsertAgentFileDraft>): Promise<AgentFileDraft | undefined>;
-  deleteAgentFileDraft(id: string): Promise<void>;
-
-  getTopicsByWorkspace(workspaceId: string): Promise<DiscussionTopic[]>;
-  getTopic(id: string): Promise<DiscussionTopic | undefined>;
-  createTopic(data: InsertDiscussionTopic): Promise<DiscussionTopic>;
-  updateTopic(id: string, data: Partial<InsertDiscussionTopic>): Promise<DiscussionTopic | undefined>;
-  deleteTopic(id: string): Promise<void>;
-  getMessagesByTopic(topicId: string): Promise<DiscussionMessage[]>;
-  createMessage(data: InsertDiscussionMessage): Promise<DiscussionMessage>;
-  deleteMessage(id: string): Promise<void>;
-
-  getEbooks(limit?: number): Promise<Ebook[]>;
-  getEbook(id: string): Promise<Ebook | undefined>;
-  getEbooksByAgent(agentId: string): Promise<Ebook[]>;
-  createEbook(ebook: InsertEbook): Promise<Ebook>;
-  updateEbook(id: string, updates: Partial<InsertEbook>): Promise<Ebook | undefined>;
-
-  getEbookPurchases(ebookId: string): Promise<EbookPurchase[]>;
-  getEbookPurchasesByAgent(agentId: string): Promise<EbookPurchase[]>;
-  createEbookPurchase(purchase: InsertEbookPurchase): Promise<EbookPurchase>;
-
-  getBookRequests(status?: string): Promise<BookRequest[]>;
-  getBookRequest(id: string): Promise<BookRequest | undefined>;
-  createBookRequest(request: InsertBookRequest): Promise<BookRequest>;
-  updateBookRequest(id: string, updates: Partial<InsertBookRequest>): Promise<BookRequest | undefined>;
-
-  createDiaryEntry(entry: InsertAgentDiaryEntry): Promise<AgentDiaryEntry>;
-  getDiaryEntries(agentId: string, limit?: number): Promise<AgentDiaryEntry[]>;
-  getRecentDiaryEntries(agentId: string, limit?: number): Promise<AgentDiaryEntry[]>;
-
-  getAgentMemory(agentId: string): Promise<AgentMemory | undefined>;
-  upsertAgentMemory(agentId: string, summary: string): Promise<AgentMemory>;
-
-  getAgentProfile(agentId: string, subjectId: string): Promise<AgentProfile | undefined>;
-  upsertAgentProfile(profile: InsertAgentProfile & { notes?: string; interactionCount?: number }): Promise<AgentProfile>;
-  getAgentProfiles(agentId: string): Promise<AgentProfile[]>;
-
-  createNewsroomInterview(interview: InsertNewsroomInterview): Promise<NewsroomInterview>;
-  updateNewsroomInterview(id: string, updates: Partial<InsertNewsroomInterview>): Promise<NewsroomInterview | undefined>;
-  getRecentNewsroomInterviews(limit?: number): Promise<NewsroomInterview[]>;
-  getLatestInterviewForAgent(agentId: string): Promise<NewsroomInterview | undefined>;
-
-  getNewsroomSettings(): Promise<NewsroomSettings | undefined>;
-  upsertNewsroomSettings(settings: Partial<InsertNewsroomSettings>): Promise<NewsroomSettings>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -213,11 +78,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getWorkspacesByUser(userId: string): Promise<Workspace[]> {
-    return db.select().from(workspaces).where(eq(workspaces.ownerId, userId));
-  }
+    const memberRows = await db
+      .select({ workspaceId: workspaceMembers.workspaceId })
+      .from(workspaceMembers)
+      .where(eq(workspaceMembers.userId, userId));
 
-  async getAllWorkspaces(): Promise<Workspace[]> {
-    return db.select().from(workspaces);
+    const memberWorkspaceIds = memberRows.map((r) => r.workspaceId);
+
+    if (memberWorkspaceIds.length === 0) {
+      return db.select().from(workspaces).where(eq(workspaces.ownerId, userId));
+    }
+
+    return db
+      .select()
+      .from(workspaces)
+      .where(
+        or(
+          eq(workspaces.ownerId, userId),
+          inArray(workspaces.id, memberWorkspaceIds)
+        )
+      );
   }
 
   async createWorkspace(workspace: InsertWorkspace): Promise<Workspace> {
@@ -247,10 +127,10 @@ export class DatabaseStorage implements IStorage {
     await db.delete(workspaceMembers).where(eq(workspaceMembers.id, id));
   }
 
-  async updateMemberRole(id: string, role: string): Promise<WorkspaceMember | undefined> {
+  async updateMemberRole(id: string, role: MemberRole): Promise<WorkspaceMember | undefined> {
     const [updated] = await db
       .update(workspaceMembers)
-      .set({ role: role as any })
+      .set({ role })
       .where(eq(workspaceMembers.id, id))
       .returning();
     return updated;
@@ -424,365 +304,6 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBriefing(id: string): Promise<void> {
     await db.delete(briefings).where(eq(briefings.id, id));
-  }
-
-  async getGift(id: string): Promise<Gift | undefined> {
-    const [gift] = await db.select().from(gifts).where(eq(gifts.id, id));
-    return gift;
-  }
-
-  async getGiftsByUser(userId: string): Promise<Gift[]> {
-    const userAgents = await db.select().from(agents).where(eq(agents.createdById, userId));
-    if (userAgents.length === 0) return [];
-    const agentIds = userAgents.map(a => a.id);
-    return db.select().from(gifts).where(inArray(gifts.agentId, agentIds)).orderBy(desc(gifts.createdAt));
-  }
-
-  async getGiftsByAgent(agentId: string): Promise<Gift[]> {
-    return db.select().from(gifts).where(eq(gifts.agentId, agentId)).orderBy(desc(gifts.createdAt));
-  }
-
-  async getRecentGifts(limit = 20): Promise<Gift[]> {
-    return db.select().from(gifts).orderBy(desc(gifts.createdAt)).limit(limit);
-  }
-
-  async createGift(gift: InsertGift): Promise<Gift> {
-    const [created] = await db.insert(gifts).values(gift).returning();
-    return created;
-  }
-
-  async updateGift(id: string, updates: Partial<InsertGift>): Promise<Gift | undefined> {
-    const [updated] = await db.update(gifts).set({ ...updates, updatedAt: new Date() }).where(eq(gifts.id, id)).returning();
-    return updated;
-  }
-
-  async deleteGift(id: string): Promise<void> {
-    await db.delete(gifts).where(eq(gifts.id, id));
-  }
-
-  async likeGift(id: string): Promise<void> {
-    await db.update(gifts).set({ likes: sql`COALESCE(${gifts.likes}, 0) + 1` }).where(eq(gifts.id, id));
-  }
-
-  async getGiftComments(giftId: string): Promise<GiftComment[]> {
-    return db.select().from(giftComments).where(eq(giftComments.giftId, giftId)).orderBy(asc(giftComments.createdAt));
-  }
-
-  async createGiftComment(comment: InsertGiftComment): Promise<GiftComment> {
-    const [created] = await db.insert(giftComments).values(comment).returning();
-    return created;
-  }
-
-  async getAssemblyLine(id: string): Promise<AssemblyLine | undefined> {
-    const [line] = await db.select().from(assemblyLines).where(eq(assemblyLines.id, id));
-    return line;
-  }
-
-  async getAssemblyLinesByUser(userId: string): Promise<AssemblyLine[]> {
-    return db.select().from(assemblyLines).where(eq(assemblyLines.ownerId, userId)).orderBy(desc(assemblyLines.createdAt));
-  }
-
-  async createAssemblyLine(line: InsertAssemblyLine): Promise<AssemblyLine> {
-    const [created] = await db.insert(assemblyLines).values(line).returning();
-    return created;
-  }
-
-  async updateAssemblyLine(id: string, updates: Partial<InsertAssemblyLine>): Promise<AssemblyLine | undefined> {
-    const [updated] = await db.update(assemblyLines).set({ ...updates, updatedAt: new Date() }).where(eq(assemblyLines.id, id)).returning();
-    return updated;
-  }
-
-  async deleteAssemblyLine(id: string): Promise<void> {
-    await db.delete(assemblyLines).where(eq(assemblyLines.id, id));
-  }
-
-  async getAssemblyLineSteps(assemblyLineId: string): Promise<AssemblyLineStep[]> {
-    return db.select().from(assemblyLineSteps).where(eq(assemblyLineSteps.assemblyLineId, assemblyLineId)).orderBy(asc(assemblyLineSteps.stepOrder));
-  }
-
-  async getAssemblyLineStepById(id: string): Promise<AssemblyLineStep | undefined> {
-    const [step] = await db.select().from(assemblyLineSteps).where(eq(assemblyLineSteps.id, id));
-    return step;
-  }
-
-  async createAssemblyLineStep(step: InsertAssemblyLineStep): Promise<AssemblyLineStep> {
-    const [created] = await db.insert(assemblyLineSteps).values(step).returning();
-    return created;
-  }
-
-  async updateAssemblyLineStep(id: string, updates: Partial<InsertAssemblyLineStep>): Promise<AssemblyLineStep | undefined> {
-    const [updated] = await db.update(assemblyLineSteps).set(updates).where(eq(assemblyLineSteps.id, id)).returning();
-    return updated;
-  }
-
-  async getProduct(id: string): Promise<Product | undefined> {
-    const [product] = await db.select().from(products).where(eq(products.id, id));
-    return product;
-  }
-
-  async getProductsByUser(userId: string): Promise<Product[]> {
-    return db.select().from(products).where(eq(products.ownerId, userId)).orderBy(desc(products.createdAt));
-  }
-
-  async getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]> {
-    return db.select().from(products).where(eq(products.assemblyLineId, assemblyLineId)).orderBy(desc(products.createdAt));
-  }
-
-  async getQueuedProducts(): Promise<Product[]> {
-    return db.select().from(products).where(eq(products.status, "queued")).orderBy(asc(products.createdAt));
-  }
-
-  async createProduct(product: InsertProduct): Promise<Product> {
-    const [created] = await db.insert(products).values(product).returning();
-    return created;
-  }
-
-  async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined> {
-    const [updated] = await db.update(products).set(updates).where(eq(products.id, id)).returning();
-    return updated;
-  }
-
-  async getAgentNotes(agentId?: string): Promise<AgentNote[]> {
-    if (agentId) {
-      return db.select().from(agentNotes).where(eq(agentNotes.agentId, agentId)).orderBy(desc(agentNotes.updatedAt));
-    }
-    return db.select().from(agentNotes).orderBy(desc(agentNotes.updatedAt));
-  }
-
-  async getAgentNote(id: string): Promise<AgentNote | undefined> {
-    const [note] = await db.select().from(agentNotes).where(eq(agentNotes.id, id));
-    return note;
-  }
-
-  async createAgentNote(note: InsertAgentNote): Promise<AgentNote> {
-    const [created] = await db.insert(agentNotes).values(note).returning();
-    return created;
-  }
-
-  async updateAgentNote(id: string, updates: Partial<InsertAgentNote>): Promise<AgentNote | undefined> {
-    const [updated] = await db.update(agentNotes).set({ ...updates, updatedAt: new Date() }).where(eq(agentNotes.id, id)).returning();
-    return updated;
-  }
-
-  async deleteAgentNote(id: string): Promise<void> {
-    await db.delete(agentNotes).where(eq(agentNotes.id, id));
-  }
-
-  async getAgentFileDrafts(status?: string): Promise<AgentFileDraft[]> {
-    if (status) {
-      return db.select().from(agentFileDrafts).where(eq(agentFileDrafts.status, status as any)).orderBy(desc(agentFileDrafts.updatedAt));
-    }
-    return db.select().from(agentFileDrafts).orderBy(desc(agentFileDrafts.updatedAt));
-  }
-
-  async getAgentFileDraft(id: string): Promise<AgentFileDraft | undefined> {
-    const [draft] = await db.select().from(agentFileDrafts).where(eq(agentFileDrafts.id, id));
-    return draft;
-  }
-
-  async getAgentFileDraftsByAgent(agentId: string): Promise<AgentFileDraft[]> {
-    return db.select().from(agentFileDrafts).where(eq(agentFileDrafts.agentId, agentId)).orderBy(desc(agentFileDrafts.updatedAt));
-  }
-
-  async createAgentFileDraft(draft: InsertAgentFileDraft): Promise<AgentFileDraft> {
-    const [created] = await db.insert(agentFileDrafts).values(draft).returning();
-    return created;
-  }
-
-  async updateAgentFileDraft(id: string, updates: Partial<InsertAgentFileDraft>): Promise<AgentFileDraft | undefined> {
-    const [updated] = await db.update(agentFileDrafts).set({ ...updates, updatedAt: new Date() }).where(eq(agentFileDrafts.id, id)).returning();
-    return updated;
-  }
-
-  async deleteAgentFileDraft(id: string): Promise<void> {
-    await db.delete(agentFileDrafts).where(eq(agentFileDrafts.id, id));
-  }
-
-  async getTopicsByWorkspace(workspaceId: string): Promise<DiscussionTopic[]> {
-    return db.select().from(discussionTopics).where(eq(discussionTopics.workspaceId, workspaceId)).orderBy(desc(discussionTopics.isPinned), desc(discussionTopics.createdAt));
-  }
-
-  async getTopic(id: string): Promise<DiscussionTopic | undefined> {
-    const [topic] = await db.select().from(discussionTopics).where(eq(discussionTopics.id, id));
-    return topic;
-  }
-
-  async createTopic(data: InsertDiscussionTopic): Promise<DiscussionTopic> {
-    const [topic] = await db.insert(discussionTopics).values(data).returning();
-    return topic;
-  }
-
-  async updateTopic(id: string, data: Partial<InsertDiscussionTopic>): Promise<DiscussionTopic | undefined> {
-    const [topic] = await db.update(discussionTopics).set({ ...data, updatedAt: new Date() }).where(eq(discussionTopics.id, id)).returning();
-    return topic;
-  }
-
-  async deleteTopic(id: string): Promise<void> {
-    await db.delete(discussionTopics).where(eq(discussionTopics.id, id));
-  }
-
-  async getMessagesByTopic(topicId: string): Promise<DiscussionMessage[]> {
-    return db.select().from(discussionMessages).where(eq(discussionMessages.topicId, topicId)).orderBy(asc(discussionMessages.createdAt));
-  }
-
-  async createMessage(data: InsertDiscussionMessage): Promise<DiscussionMessage> {
-    const [message] = await db.insert(discussionMessages).values(data).returning();
-    return message;
-  }
-
-  async deleteMessage(id: string): Promise<void> {
-    await db.delete(discussionMessages).where(eq(discussionMessages.id, id));
-  }
-
-  async getEbooks(limit = 50): Promise<Ebook[]> {
-    return db.select().from(ebooks).orderBy(desc(ebooks.createdAt)).limit(limit);
-  }
-
-  async getEbook(id: string): Promise<Ebook | undefined> {
-    const [ebook] = await db.select().from(ebooks).where(eq(ebooks.id, id));
-    return ebook;
-  }
-
-  async getEbooksByAgent(agentId: string): Promise<Ebook[]> {
-    return db.select().from(ebooks).where(eq(ebooks.authorAgentId, agentId)).orderBy(desc(ebooks.createdAt));
-  }
-
-  async createEbook(ebook: InsertEbook): Promise<Ebook> {
-    const [created] = await db.insert(ebooks).values(ebook).returning();
-    return created;
-  }
-
-  async updateEbook(id: string, updates: Partial<InsertEbook>): Promise<Ebook | undefined> {
-    const [updated] = await db.update(ebooks).set(updates).where(eq(ebooks.id, id)).returning();
-    return updated;
-  }
-
-  async getEbookPurchases(ebookId: string): Promise<EbookPurchase[]> {
-    return db.select().from(ebookPurchases).where(eq(ebookPurchases.ebookId, ebookId));
-  }
-
-  async getEbookPurchasesByAgent(agentId: string): Promise<EbookPurchase[]> {
-    return db.select().from(ebookPurchases).where(eq(ebookPurchases.buyerAgentId, agentId)).orderBy(desc(ebookPurchases.purchasedAt));
-  }
-
-  async createEbookPurchase(purchase: InsertEbookPurchase): Promise<EbookPurchase> {
-    const [created] = await db.insert(ebookPurchases).values(purchase).returning();
-    await db.update(ebooks).set({ totalSales: sql`COALESCE(${ebooks.totalSales}, 0) + 1` }).where(eq(ebooks.id, purchase.ebookId));
-    return created;
-  }
-
-  async getBookRequests(status?: string): Promise<BookRequest[]> {
-    if (status) {
-      return db.select().from(bookRequests).where(eq(bookRequests.status, status as any)).orderBy(desc(bookRequests.createdAt));
-    }
-    return db.select().from(bookRequests).orderBy(desc(bookRequests.createdAt));
-  }
-
-  async getBookRequest(id: string): Promise<BookRequest | undefined> {
-    const [request] = await db.select().from(bookRequests).where(eq(bookRequests.id, id));
-    return request;
-  }
-
-  async createBookRequest(request: InsertBookRequest): Promise<BookRequest> {
-    const [created] = await db.insert(bookRequests).values(request).returning();
-    return created;
-  }
-
-  async updateBookRequest(id: string, updates: Partial<InsertBookRequest>): Promise<BookRequest | undefined> {
-    const [updated] = await db.update(bookRequests).set(updates).where(eq(bookRequests.id, id)).returning();
-    return updated;
-  }
-
-  async createDiaryEntry(entry: InsertAgentDiaryEntry): Promise<AgentDiaryEntry> {
-    const [created] = await db.insert(agentDiaryEntries).values(entry).returning();
-    return created;
-  }
-
-  async getDiaryEntries(agentId: string, limit = 50): Promise<AgentDiaryEntry[]> {
-    return db.select().from(agentDiaryEntries).where(eq(agentDiaryEntries.agentId, agentId)).orderBy(desc(agentDiaryEntries.createdAt)).limit(limit);
-  }
-
-  async getRecentDiaryEntries(agentId: string, limit = 20): Promise<AgentDiaryEntry[]> {
-    return db.select().from(agentDiaryEntries).where(eq(agentDiaryEntries.agentId, agentId)).orderBy(desc(agentDiaryEntries.createdAt)).limit(limit);
-  }
-
-  async getAgentMemory(agentId: string): Promise<AgentMemory | undefined> {
-    const [memory] = await db.select().from(agentMemory).where(eq(agentMemory.agentId, agentId));
-    return memory;
-  }
-
-  async upsertAgentMemory(agentId: string, summary: string): Promise<AgentMemory> {
-    const existing = await this.getAgentMemory(agentId);
-    if (existing) {
-      const [updated] = await db.update(agentMemory).set({ summary, updatedAt: new Date() }).where(eq(agentMemory.agentId, agentId)).returning();
-      return updated;
-    }
-    const [created] = await db.insert(agentMemory).values({ agentId, summary }).returning();
-    return created;
-  }
-
-  async getAgentProfile(agentId: string, subjectId: string): Promise<AgentProfile | undefined> {
-    const [profile] = await db.select().from(agentProfiles).where(and(eq(agentProfiles.agentId, agentId), eq(agentProfiles.subjectId, subjectId)));
-    return profile;
-  }
-
-  async upsertAgentProfile(profile: InsertAgentProfile & { notes?: string; interactionCount?: number }): Promise<AgentProfile> {
-    const existing = await this.getAgentProfile(profile.agentId, profile.subjectId);
-    if (existing) {
-      const [updated] = await db.update(agentProfiles).set({
-        subjectName: profile.subjectName,
-        notes: profile.notes ?? existing.notes,
-        lastInteraction: new Date(),
-        interactionCount: (existing.interactionCount || 0) + 1,
-      }).where(and(eq(agentProfiles.agentId, profile.agentId), eq(agentProfiles.subjectId, profile.subjectId))).returning();
-      return updated;
-    }
-    const [created] = await db.insert(agentProfiles).values({
-      agentId: profile.agentId,
-      subjectId: profile.subjectId,
-      subjectName: profile.subjectName,
-      subjectType: profile.subjectType,
-      notes: profile.notes,
-    }).returning();
-    return created;
-  }
-
-  async getAgentProfiles(agentId: string): Promise<AgentProfile[]> {
-    return db.select().from(agentProfiles).where(eq(agentProfiles.agentId, agentId)).orderBy(desc(agentProfiles.lastInteraction));
-  }
-
-  async createNewsroomInterview(interview: InsertNewsroomInterview): Promise<NewsroomInterview> {
-    const [created] = await db.insert(newsroomInterviews).values(interview).returning();
-    return created;
-  }
-
-  async updateNewsroomInterview(id: string, updates: Partial<InsertNewsroomInterview>): Promise<NewsroomInterview | undefined> {
-    const [updated] = await db.update(newsroomInterviews).set(updates).where(eq(newsroomInterviews.id, id)).returning();
-    return updated;
-  }
-
-  async getRecentNewsroomInterviews(limit = 20): Promise<NewsroomInterview[]> {
-    return db.select().from(newsroomInterviews).orderBy(desc(newsroomInterviews.createdAt)).limit(limit);
-  }
-
-  async getLatestInterviewForAgent(agentId: string): Promise<NewsroomInterview | undefined> {
-    const [interview] = await db.select().from(newsroomInterviews).where(eq(newsroomInterviews.agentId, agentId)).orderBy(desc(newsroomInterviews.createdAt)).limit(1);
-    return interview;
-  }
-
-  async getNewsroomSettings(): Promise<NewsroomSettings | undefined> {
-    const [settings] = await db.select().from(newsroomSettings).limit(1);
-    return settings;
-  }
-
-  async upsertNewsroomSettings(settings: Partial<InsertNewsroomSettings>): Promise<NewsroomSettings> {
-    const existing = await this.getNewsroomSettings();
-    if (existing) {
-      const [updated] = await db.update(newsroomSettings).set({ ...settings, updatedAt: new Date() }).where(eq(newsroomSettings.id, existing.id)).returning();
-      return updated;
-    }
-    const [created] = await db.insert(newsroomSettings).values(settings as InsertNewsroomSettings).returning();
-    return created;
   }
 }
 
