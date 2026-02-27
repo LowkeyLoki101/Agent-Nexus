@@ -6,6 +6,8 @@ import {
   apiTokens,
   auditLogs,
   briefings,
+  socialCredentials,
+  socialPosts,
   type Workspace,
   type InsertWorkspace,
   type WorkspaceMember,
@@ -17,7 +19,11 @@ import {
   type AuditLog,
   type InsertAuditLog,
   type Briefing,
-  type InsertBriefing
+  type InsertBriefing,
+  type SocialCredential,
+  type InsertSocialCredential,
+  type SocialPost,
+  type InsertSocialPost
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, or, inArray } from "drizzle-orm";
@@ -64,6 +70,22 @@ export interface IStorage {
   createBriefing(briefing: InsertBriefing): Promise<Briefing>;
   updateBriefing(id: string, updates: Partial<InsertBriefing>): Promise<Briefing | undefined>;
   deleteBriefing(id: string): Promise<void>;
+
+  // Social credentials
+  getSocialCredential(id: string): Promise<SocialCredential | undefined>;
+  getSocialCredentialsByWorkspace(workspaceId: string): Promise<SocialCredential[]>;
+  createSocialCredential(cred: InsertSocialCredential): Promise<SocialCredential>;
+  updateSocialCredential(id: string, updates: Partial<InsertSocialCredential>): Promise<SocialCredential | undefined>;
+  deleteSocialCredential(id: string): Promise<void>;
+
+  // Social posts
+  getSocialPost(id: string): Promise<SocialPost | undefined>;
+  getSocialPostsByWorkspace(workspaceId: string): Promise<SocialPost[]>;
+  getSocialPostsByUser(userId: string): Promise<SocialPost[]>;
+  getRecentSocialPosts(userId: string, limit?: number): Promise<SocialPost[]>;
+  createSocialPost(post: InsertSocialPost): Promise<SocialPost>;
+  updateSocialPost(id: string, updates: Partial<InsertSocialPost>): Promise<SocialPost | undefined>;
+  deleteSocialPost(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -304,6 +326,89 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBriefing(id: string): Promise<void> {
     await db.delete(briefings).where(eq(briefings.id, id));
+  }
+
+  // --- Social Credentials ---
+
+  async getSocialCredential(id: string): Promise<SocialCredential | undefined> {
+    const [cred] = await db.select().from(socialCredentials).where(eq(socialCredentials.id, id));
+    return cred;
+  }
+
+  async getSocialCredentialsByWorkspace(workspaceId: string): Promise<SocialCredential[]> {
+    return db
+      .select()
+      .from(socialCredentials)
+      .where(eq(socialCredentials.workspaceId, workspaceId))
+      .orderBy(desc(socialCredentials.createdAt));
+  }
+
+  async createSocialCredential(cred: InsertSocialCredential): Promise<SocialCredential> {
+    const [created] = await db.insert(socialCredentials).values(cred).returning();
+    return created;
+  }
+
+  async updateSocialCredential(id: string, updates: Partial<InsertSocialCredential>): Promise<SocialCredential | undefined> {
+    const [updated] = await db
+      .update(socialCredentials)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(socialCredentials.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSocialCredential(id: string): Promise<void> {
+    await db.delete(socialCredentials).where(eq(socialCredentials.id, id));
+  }
+
+  // --- Social Posts ---
+
+  async getSocialPost(id: string): Promise<SocialPost | undefined> {
+    const [post] = await db.select().from(socialPosts).where(eq(socialPosts.id, id));
+    return post;
+  }
+
+  async getSocialPostsByWorkspace(workspaceId: string): Promise<SocialPost[]> {
+    return db
+      .select()
+      .from(socialPosts)
+      .where(eq(socialPosts.workspaceId, workspaceId))
+      .orderBy(desc(socialPosts.createdAt));
+  }
+
+  async getSocialPostsByUser(userId: string): Promise<SocialPost[]> {
+    return db
+      .select()
+      .from(socialPosts)
+      .where(eq(socialPosts.createdById, userId))
+      .orderBy(desc(socialPosts.createdAt));
+  }
+
+  async getRecentSocialPosts(userId: string, limit = 10): Promise<SocialPost[]> {
+    return db
+      .select()
+      .from(socialPosts)
+      .where(eq(socialPosts.createdById, userId))
+      .orderBy(desc(socialPosts.createdAt))
+      .limit(limit);
+  }
+
+  async createSocialPost(post: InsertSocialPost): Promise<SocialPost> {
+    const [created] = await db.insert(socialPosts).values(post).returning();
+    return created;
+  }
+
+  async updateSocialPost(id: string, updates: Partial<InsertSocialPost>): Promise<SocialPost | undefined> {
+    const [updated] = await db
+      .update(socialPosts)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(socialPosts.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSocialPost(id: string): Promise<void> {
+    await db.delete(socialPosts).where(eq(socialPosts.id, id));
   }
 }
 

@@ -27,6 +27,7 @@ import {
   Key,
   FileText,
   ClipboardList,
+  Share2,
   Settings,
   LogOut,
   ChevronUp,
@@ -48,6 +49,11 @@ const mainNavItems = [
     title: "Briefings",
     url: "/briefings",
     icon: ClipboardList,
+  },
+  {
+    title: "Social Media",
+    url: "/social-posts",
+    icon: Share2,
   },
   {
     title: "Agents",

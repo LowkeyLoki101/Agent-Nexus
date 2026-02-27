@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import type { AuthenticatedRequest } from "./replit_integrations/auth";
 import { z } from "zod";
+import { publishToMultiplePlatforms } from "./social-service";
 
 function getUserId(req: AuthenticatedRequest): string {
   return req.user.claims.sub;
@@ -899,6 +900,425 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching workspace briefings:", error);
       res.status(500).json({ message: "Failed to fetch briefings" });
+    }
+  });
+
+  // --- Social Credential routes ---
+
+  app.get("/api/workspaces/:slug/social-credentials", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug, ["owner", "admin"]);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const creds = await storage.getSocialCredentialsByWorkspace(access.workspaceId);
+      // Redact credential values – only return metadata
+      const safeCredentials = creds.map((c) => ({
+        ...c,
+        credentials: "***",
+      }));
+      res.json(safeCredentials);
+    } catch (error) {
+      console.error("Error fetching social credentials:", error);
+      res.status(500).json({ message: "Failed to fetch social credentials" });
+    }
+  });
+
+  const createSocialCredentialSchema = z.object({
+    workspaceId: z.string().min(1),
+    platform: z.enum(["twitter", "facebook", "instagram", "linkedin"]),
+    label: z.string().min(1).max(100),
+    credentials: z.record(z.string(), z.string()), // key/value pairs
+  });
+
+  app.post("/api/social-credentials", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+
+      const validation = createSocialCredentialSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten(),
+        });
+      }
+
+      const { workspaceId, platform, label, credentials } = validation.data;
+
+      const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      const cred = await storage.createSocialCredential({
+        workspaceId,
+        platform,
+        label,
+        credentials: JSON.stringify(credentials),
+        isActive: true,
+        createdById: userId,
+      });
+
+      await storage.createAuditLog({
+        workspaceId,
+        userId,
+        action: "social_credential_added",
+        entityType: "social_credential",
+        entityId: cred.id,
+        metadata: JSON.stringify({ platform, label }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(201).json({ ...cred, credentials: "***" });
+    } catch (error) {
+      console.error("Error creating social credential:", error);
+      res.status(500).json({ message: "Failed to create social credential" });
+    }
+  });
+
+  app.delete("/api/social-credentials/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const cred = await storage.getSocialCredential(id);
+      if (!cred) {
+        return res.status(404).json({ message: "Credential not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, cred.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      await storage.deleteSocialCredential(id);
+
+      await storage.createAuditLog({
+        workspaceId: cred.workspaceId,
+        userId,
+        action: "social_credential_removed",
+        entityType: "social_credential",
+        entityId: id,
+        metadata: JSON.stringify({ platform: cred.platform, label: cred.label }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting social credential:", error);
+      res.status(500).json({ message: "Failed to delete social credential" });
+    }
+  });
+
+  // --- Social Post routes ---
+
+  app.get("/api/social-posts", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const posts = await storage.getSocialPostsByUser(userId);
+      res.json(posts);
+    } catch (error) {
+      console.error("Error fetching social posts:", error);
+      res.status(500).json({ message: "Failed to fetch social posts" });
+    }
+  });
+
+  app.get("/api/social-posts/recent", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const posts = await storage.getRecentSocialPosts(userId, 10);
+      res.json(posts);
+    } catch (error) {
+      console.error("Error fetching recent social posts:", error);
+      res.status(500).json({ message: "Failed to fetch recent social posts" });
+    }
+  });
+
+  app.get("/api/social-posts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const post = await storage.getSocialPost(id);
+      if (!post) {
+        return res.status(404).json({ message: "Social post not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, post.workspaceId);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      res.json(post);
+    } catch (error) {
+      console.error("Error fetching social post:", error);
+      res.status(500).json({ message: "Failed to fetch social post" });
+    }
+  });
+
+  app.get("/api/workspaces/:slug/social-posts", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const slug = param(req.params.slug);
+
+      const access = await checkWorkspaceAccessBySlug(userId, slug);
+      if (!access.hasAccess || !access.workspaceId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const posts = await storage.getSocialPostsByWorkspace(access.workspaceId);
+      res.json(posts);
+    } catch (error) {
+      console.error("Error fetching workspace social posts:", error);
+      res.status(500).json({ message: "Failed to fetch social posts" });
+    }
+  });
+
+  const createSocialPostSchema = z.object({
+    content: z.string().min(1).max(5000),
+    platforms: z.array(z.enum(["twitter", "facebook", "instagram", "linkedin"])).min(1),
+    workspaceId: z.string().min(1),
+    status: z.enum(["draft", "scheduled"]).optional().default("draft"),
+    scheduledAt: z.string().datetime().optional().nullable(),
+    agentId: z.string().optional().nullable(),
+  });
+
+  // Create a social post (draft or scheduled)
+  app.post("/api/social-posts", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+
+      const validation = createSocialPostSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten(),
+        });
+      }
+
+      const { content, platforms, workspaceId, status, scheduledAt, agentId } = validation.data;
+
+      const access = await checkWorkspaceAccess(userId, workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const post = await storage.createSocialPost({
+        content,
+        platforms,
+        workspaceId,
+        status: status ?? "draft",
+        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+        agentId: agentId || null,
+        createdById: userId,
+        publishedAt: null,
+        platformResults: null,
+      });
+
+      await storage.createAuditLog({
+        workspaceId,
+        userId,
+        agentId: agentId || undefined,
+        action: "social_post_created",
+        entityType: "social_post",
+        entityId: post.id,
+        metadata: JSON.stringify({ platforms, status: post.status }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(201).json(post);
+    } catch (error) {
+      console.error("Error creating social post:", error);
+      res.status(500).json({ message: "Failed to create social post" });
+    }
+  });
+
+  const updateSocialPostSchema = z.object({
+    content: z.string().min(1).max(5000).optional(),
+    platforms: z.array(z.enum(["twitter", "facebook", "instagram", "linkedin"])).min(1).optional(),
+    status: z.enum(["draft", "scheduled"]).optional(),
+    scheduledAt: z.string().datetime().optional().nullable(),
+  });
+
+  app.patch("/api/social-posts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const post = await storage.getSocialPost(id);
+      if (!post) {
+        return res.status(404).json({ message: "Social post not found" });
+      }
+
+      if (post.status === "published" || post.status === "publishing") {
+        return res.status(400).json({ message: "Cannot edit a published or publishing post" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, post.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const validation = updateSocialPostSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Validation error",
+          errors: validation.error.flatten(),
+        });
+      }
+
+      const updates: any = { ...validation.data };
+      if (updates.scheduledAt) {
+        updates.scheduledAt = new Date(updates.scheduledAt);
+      }
+
+      const updated = await storage.updateSocialPost(id, updates);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating social post:", error);
+      res.status(500).json({ message: "Failed to update social post" });
+    }
+  });
+
+  // Publish a social post now (fan-out to all selected platforms)
+  app.post("/api/social-posts/:id/publish", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const post = await storage.getSocialPost(id);
+      if (!post) {
+        return res.status(404).json({ message: "Social post not found" });
+      }
+
+      if (post.status === "published") {
+        return res.status(400).json({ message: "Post has already been published" });
+      }
+
+      if (post.status === "publishing") {
+        return res.status(400).json({ message: "Post is currently being published" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, post.workspaceId, ["owner", "admin", "member"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Mark as publishing
+      await storage.updateSocialPost(id, { status: "publishing" });
+
+      // Gather credentials for each target platform
+      const allCreds = await storage.getSocialCredentialsByWorkspace(post.workspaceId);
+      const credsByPlatform: Record<string, any> = {};
+
+      for (const platform of post.platforms) {
+        const cred = allCreds.find((c) => c.platform === platform && c.isActive);
+        if (cred) {
+          try {
+            credsByPlatform[platform] = JSON.parse(cred.credentials);
+          } catch {
+            credsByPlatform[platform] = null;
+          }
+        }
+      }
+
+      // Check we have at least one valid credential
+      const validPlatforms = Object.entries(credsByPlatform).filter(([, v]) => v !== null);
+      if (validPlatforms.length === 0) {
+        await storage.updateSocialPost(id, {
+          status: "failed",
+          platformResults: JSON.stringify({
+            error: "No active credentials found for any of the selected platforms",
+          }),
+        });
+        return res.status(400).json({
+          message: "No active social credentials found for the selected platforms. Add credentials in workspace settings.",
+        });
+      }
+
+      // Fan-out publish
+      const results = await publishToMultiplePlatforms(
+        post.content,
+        Object.fromEntries(validPlatforms)
+      );
+
+      // Add results for platforms without credentials
+      for (const platform of post.platforms) {
+        if (!results[platform]) {
+          results[platform] = {
+            success: false,
+            error: "No active credentials configured for this platform",
+          };
+        }
+      }
+
+      const anySuccess = Object.values(results).some((r) => r.success);
+      const finalStatus = anySuccess ? "published" : "failed";
+
+      const updated = await storage.updateSocialPost(id, {
+        status: finalStatus,
+        publishedAt: anySuccess ? new Date() : null,
+        platformResults: JSON.stringify(results),
+      });
+
+      await storage.createAuditLog({
+        workspaceId: post.workspaceId,
+        userId,
+        agentId: post.agentId || undefined,
+        action: "social_post_published",
+        entityType: "social_post",
+        entityId: id,
+        metadata: JSON.stringify({ platforms: post.platforms, results }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error publishing social post:", error);
+      res.status(500).json({ message: "Failed to publish social post" });
+    }
+  });
+
+  app.delete("/api/social-posts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const id = param(req.params.id);
+
+      const post = await storage.getSocialPost(id);
+      if (!post) {
+        return res.status(404).json({ message: "Social post not found" });
+      }
+
+      const access = await checkWorkspaceAccess(userId, post.workspaceId, ["owner", "admin"]);
+      if (!access.hasAccess) {
+        return res.status(403).json({ message: "Access denied - admin or owner required" });
+      }
+
+      await storage.deleteSocialPost(id);
+
+      await storage.createAuditLog({
+        workspaceId: post.workspaceId,
+        userId,
+        action: "social_post_deleted",
+        entityType: "social_post",
+        entityId: id,
+        metadata: JSON.stringify({ platforms: post.platforms }),
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting social post:", error);
+      res.status(500).json({ message: "Failed to delete social post" });
     }
   });
 

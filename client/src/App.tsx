@@ -20,6 +20,9 @@ import AgentNew from "@/pages/agent-new";
 import Briefings from "@/pages/briefings";
 import BriefingNew from "@/pages/briefing-new";
 import BriefingDetail from "@/pages/briefing-detail";
+import SocialPosts from "@/pages/social-posts";
+import SocialPostNew from "@/pages/social-post-new";
+import SocialPostDetail from "@/pages/social-post-detail";
 import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
 import NotFound from "@/pages/not-found";
@@ -62,6 +65,9 @@ function AuthenticatedRouter() {
         <Route path="/briefings" component={Briefings} />
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
+        <Route path="/social-posts" component={SocialPosts} />
+        <Route path="/social-posts/new" component={SocialPostNew} />
+        <Route path="/social-posts/:id" component={SocialPostDetail} />
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route component={NotFound} />

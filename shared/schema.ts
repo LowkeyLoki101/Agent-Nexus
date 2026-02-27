@@ -11,6 +11,9 @@ export const tokenStatusEnum = pgEnum("token_status", ["active", "revoked", "exp
 export const briefingStatusEnum = pgEnum("briefing_status", ["draft", "published", "archived"]);
 export const briefingPriorityEnum = pgEnum("briefing_priority", ["low", "medium", "high", "urgent"]);
 
+export const socialPlatformEnum = pgEnum("social_platform", ["twitter", "facebook", "instagram", "linkedin"]);
+export const socialPostStatusEnum = pgEnum("social_post_status", ["draft", "scheduled", "publishing", "published", "failed"]);
+
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
   "workspace_updated",
@@ -27,6 +30,11 @@ export const auditActionEnum = pgEnum("audit_action", [
   "briefing_created",
   "briefing_updated",
   "briefing_deleted",
+  "social_post_created",
+  "social_post_published",
+  "social_post_deleted",
+  "social_credential_added",
+  "social_credential_removed",
   "login",
   "logout"
 ]);
@@ -189,6 +197,65 @@ export const insertBriefingSchema = createInsertSchema(briefings).omit({
   updatedAt: true,
 });
 
+// --- Social Media tables ---
+
+export const socialCredentials = pgTable("social_credentials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  platform: socialPlatformEnum("platform").notNull(),
+  label: text("label").notNull(),
+  credentials: text("credentials").notNull(), // encrypted JSON blob
+  isActive: boolean("is_active").default(true),
+  createdById: varchar("created_by_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const socialCredentialRelations = relations(socialCredentials, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [socialCredentials.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const socialPosts = pgTable("social_posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  platforms: text("platforms").array().notNull(), // ["twitter", "facebook", ...]
+  status: socialPostStatusEnum("status").notNull().default("draft"),
+  scheduledAt: timestamp("scheduled_at"),
+  publishedAt: timestamp("published_at"),
+  platformResults: text("platform_results"), // JSON: { twitter: { success: true, postId: "..." }, ... }
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdById: varchar("created_by_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const socialPostRelations = relations(socialPosts, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [socialPosts.workspaceId],
+    references: [workspaces.id],
+  }),
+  agent: one(agents, {
+    fields: [socialPosts.agentId],
+    references: [agents.id],
+  }),
+}));
+
+export const insertSocialCredentialSchema = createInsertSchema(socialCredentials).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSocialPostSchema = createInsertSchema(socialPosts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type InsertWorkspace = z.infer<typeof insertWorkspaceSchema>;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
@@ -201,3 +268,7 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type Briefing = typeof briefings.$inferSelect;
 export type InsertBriefing = z.infer<typeof insertBriefingSchema>;
+export type SocialCredential = typeof socialCredentials.$inferSelect;
+export type InsertSocialCredential = z.infer<typeof insertSocialCredentialSchema>;
+export type SocialPost = typeof socialPosts.$inferSelect;
+export type InsertSocialPost = z.infer<typeof insertSocialPostSchema>;
