@@ -13,6 +13,14 @@ export const briefingStatusEnum = pgEnum("briefing_status", ["draft", "published
 export const briefingPriorityEnum = pgEnum("briefing_priority", ["low", "medium", "high", "urgent"]);
 export const articleTypeEnum = pgEnum("article_type", ["breaking", "feature", "interview", "investigation", "recap", "bulletin"]);
 
+export const diaryEntryTypeEnum = pgEnum("diary_entry_type", ["observation", "wonder", "investigation", "reflection", "chat_log", "action_log", "court_evaluation"]);
+export const analyticsEventTypeEnum = pgEnum("analytics_event_type", ["session_start", "page_view", "listing_view", "listing_click", "buy_click", "checkout_opened", "checkout_abandoned", "purchase_complete", "scroll_depth", "filter_applied"]);
+export const feedbackTypeEnum = pgEnum("feedback_type", ["comment", "rating", "question", "suggestion", "issue"]);
+export const priceAdjustmentStatusEnum = pgEnum("price_adjustment_status", ["pending", "approved", "rejected"]);
+export const purchaseStatusEnum = pgEnum("purchase_status", ["pending", "completed", "refunded"]);
+export const storefrontListingStatusEnum = pgEnum("storefront_listing_status", ["draft", "published", "archived"]);
+export const storefrontListingTypeEnum = pgEnum("storefront_listing_type", ["knowledge", "template", "automation", "decoration"]);
+
 export const auditActionEnum = pgEnum("audit_action", [
   "workspace_created",
   "workspace_updated",
@@ -218,6 +226,8 @@ export const giftComments = pgTable("gift_comments", {
   authorName: text("author_name").notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
+  feedbackType: feedbackTypeEnum("feedback_type").default("comment"),
+  rating: integer("rating"),
 });
 
 export const giftCommentRelations = relations(giftComments, ({ one }) => ({
@@ -545,7 +555,7 @@ export type InsertDiscussionTopic = z.infer<typeof insertDiscussionTopicSchema>;
 export type DiscussionMessage = typeof discussionMessages.$inferSelect;
 export type InsertDiscussionMessage = z.infer<typeof insertDiscussionMessageSchema>;
 
-export const diaryEntrySourceEnum = pgEnum("diary_entry_source", ["chat", "daemon", "task", "reflection"]);
+export const diaryEntrySourceEnum = pgEnum("diary_entry_source", ["chat", "daemon", "task", "reflection", "court"]);
 
 export const agentDiaryEntries = pgTable("agent_diary_entries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -555,6 +565,10 @@ export const agentDiaryEntries = pgTable("agent_diary_entries", {
   source: diaryEntrySourceEnum("source").notNull().default("chat"),
   sourceContext: text("source_context"),
   createdAt: timestamp("created_at").defaultNow(),
+  entryType: diaryEntryTypeEnum("entry_type").notNull().default("observation"),
+  content: text("content"),
+  context: text("context"),
+  mood: text("mood"),
 });
 
 export const agentDiaryEntryRelations = relations(agentDiaryEntries, ({ one }) => ({
@@ -717,8 +731,8 @@ export const storefrontListings = pgTable("storefront_listings", {
   sourceId: varchar("source_id"),
   title: text("title").notNull(),
   description: text("description"),
-  listingType: text("listing_type").notNull().default("knowledge"),
-  status: text("status").notNull().default("draft"),
+  listingType: storefrontListingTypeEnum("listing_type").notNull().default("knowledge"),
+  status: storefrontListingStatusEnum("status").notNull().default("draft"),
   price: integer("price").notNull().default(100),
   currency: text("currency").notNull().default("usd"),
   slug: text("slug").notNull(),
@@ -743,7 +757,7 @@ export const storefrontAnalytics = pgTable("storefront_analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   listingId: varchar("listing_id").references(() => storefrontListings.id, { onDelete: "cascade" }),
   sessionId: text("session_id").notNull(),
-  eventType: text("event_type").notNull(),
+  eventType: analyticsEventTypeEnum("event_type").notNull(),
   eventData: text("event_data"),
   visitorFingerprint: text("visitor_fingerprint"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -761,7 +775,7 @@ export const storefrontPurchases = pgTable("storefront_purchases", {
   stripePaymentIntentId: text("stripe_payment_intent_id"),
   amountPaid: integer("amount_paid").notNull(),
   currency: text("currency").notNull().default("usd"),
-  status: text("status").notNull().default("pending"),
+  status: purchaseStatusEnum("status").notNull().default("pending"),
   downloadAccessToken: varchar("download_access_token").default(sql`gen_random_uuid()`),
   downloadCount: integer("download_count").default(0),
   createdAt: timestamp("created_at").defaultNow(),
@@ -795,7 +809,7 @@ export const priceAdjustments = pgTable("price_adjustments", {
   reason: text("reason").notNull(),
   suggestedByAgentId: varchar("suggested_by_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
   approvedByOwnerId: varchar("approved_by_owner_id"),
-  status: text("status").notNull().default("pending"),
+  status: priceAdjustmentStatusEnum("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -951,9 +965,8 @@ export type SandboxProject = typeof sandboxProjects.$inferSelect;
 export type InsertSandboxProject = z.infer<typeof insertSandboxProjectSchema>;
 
 export const factoryNotificationTypeEnum = pgEnum("factory_notification_type", [
-  "product_complete", "product_failed", "product_stalled", "agent_idle",
-  "health_alert", "gift_created", "briefing_published", "board_reply",
-  "sandbox_created", "tool_created", "ebook_published", "system"
+  "product_ready", "product_stalled", "product_failed", "system_alert",
+  "agent_question", "oversight_report", "deliverable_ready", "action_needed"
 ]);
 
 export const factoryNotifications = pgTable("factory_notifications", {
