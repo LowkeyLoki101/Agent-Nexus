@@ -16,6 +16,14 @@ class AuthStorage implements IAuthStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
+    const existing = await this.getUser(userData.id!);
+    if (!existing) {
+      const allUsers = await db.select().from(users);
+      if (allUsers.length === 0) {
+        (userData as any).isAdmin = true;
+      }
+    }
+
     const [user] = await db
       .insert(users)
       .values(userData)

@@ -13,6 +13,9 @@ import {
   Trash2,
   Edit,
   AlertTriangle,
+  Volume2,
+  Loader2,
+  Headphones,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -56,6 +59,21 @@ export default function BriefingDetail() {
       return res.json();
     },
     enabled: !!briefingId,
+    refetchInterval: 5000,
+  });
+
+  const narrationMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/briefings/${briefingId}/narrate`);
+    },
+    onSuccess: () => {
+      toast({ title: "Generating audio", description: "ElevenLabs is creating the narration. This may take a moment." });
+      queryClient.invalidateQueries({ queryKey: ["/api/briefings", briefingId] });
+    },
+    onError: (error: any) => {
+      const msg = error?.message || "Could not generate audio.";
+      toast({ title: "Narration failed", description: msg, variant: "destructive" });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -171,6 +189,33 @@ export default function BriefingDetail() {
           </AlertDialog>
         </div>
       </div>
+
+      {briefing.audioUrl ? (
+        <Card className="border-amber-500/20 bg-amber-500/5">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <Headphones className="h-5 w-5 text-amber-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium mb-1">Listen to this briefing</p>
+                <audio controls src={briefing.audioUrl} className="w-full h-8" preload="metadata" data-testid="audio-player-briefing">
+                  Your browser does not support audio playback.
+                </audio>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Button
+          variant="outline"
+          className="gap-2 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
+          onClick={() => narrationMutation.mutate()}
+          disabled={narrationMutation.isPending}
+          data-testid="button-generate-briefing-narration"
+        >
+          {narrationMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
+          Generate Audio Narration
+        </Button>
+      )}
 
       {briefing.summary && (
         <Card>
