@@ -35,6 +35,7 @@ import NotFound from "@/pages/not-found";
 import ForgotPassword from "@/pages/forgot-password";
 import Subscribe from "@/pages/subscribe";
 import Admin from "@/pages/admin";
+import Sandbox from "@/pages/sandbox";
 import { SubscriptionBanner } from "@/components/subscription-banner";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -90,6 +91,7 @@ function AuthenticatedRouter() {
         <Route path="/tokens" component={Tokens} />
         <Route path="/audit-logs" component={AuditLogs} />
         <Route path="/admin" component={Admin} />
+        <Route path="/sandbox" component={Sandbox} />
         <Route path="/subscribe" component={Subscribe} />
         <Route component={NotFound} />
       </Switch>

@@ -654,3 +654,324 @@ export type NewsroomInterview = typeof newsroomInterviews.$inferSelect;
 export type InsertNewsroomInterview = z.infer<typeof insertNewsroomInterviewSchema>;
 export type NewsroomSettings = typeof newsroomSettings.$inferSelect;
 export type InsertNewsroomSettings = z.infer<typeof insertNewsroomSettingsSchema>;
+
+export const discussionReplies = pgTable("discussion_replies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  topicId: varchar("topic_id").notNull().references(() => discussionTopics.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  authorId: varchar("author_id").notNull(),
+  authorType: entityTypeEnum("reply_author_type").notNull().default("human"),
+  authorName: text("author_name").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertDiscussionReplySchema = createInsertSchema(discussionReplies).omit({ id: true, createdAt: true });
+export type DiscussionReply = typeof discussionReplies.$inferSelect;
+export type InsertDiscussionReply = z.infer<typeof insertDiscussionReplySchema>;
+
+export const messageReactions = pgTable("message_reactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").notNull().references(() => discussionMessages.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull(),
+  reactionType: varchar("reaction_type", { length: 20 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertMessageReactionSchema = createInsertSchema(messageReactions).omit({ id: true, createdAt: true });
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export type InsertMessageReaction = z.infer<typeof insertMessageReactionSchema>;
+
+export const chronicleEntries = pgTable("chronicle_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  chapter: text("chapter").notNull(),
+  entryType: text("entry_type").notNull().default("origin"),
+  tags: text("tags").array(),
+  isCanonical: boolean("is_canonical").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertChronicleEntrySchema = createInsertSchema(chronicleEntries).omit({ id: true, createdAt: true });
+export type ChronicleEntry = typeof chronicleEntries.$inferSelect;
+export type InsertChronicleEntry = z.infer<typeof insertChronicleEntrySchema>;
+
+export const intercomAnnouncements = pgTable("intercom_announcements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  message: text("message").notNull(),
+  createdById: varchar("created_by_id").notNull(),
+  priority: text("priority").notNull().default("normal"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertIntercomAnnouncementSchema = createInsertSchema(intercomAnnouncements).omit({ id: true, createdAt: true });
+export type IntercomAnnouncement = typeof intercomAnnouncements.$inferSelect;
+export type InsertIntercomAnnouncement = z.infer<typeof insertIntercomAnnouncementSchema>;
+
+export const storefrontListings = pgTable("storefront_listings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  factoryOwnerId: varchar("factory_owner_id").notNull(),
+  sourceType: text("source_type"),
+  sourceId: varchar("source_id"),
+  title: text("title").notNull(),
+  description: text("description"),
+  listingType: text("listing_type").notNull().default("knowledge"),
+  status: text("status").notNull().default("draft"),
+  price: integer("price").notNull().default(100),
+  currency: text("currency").notNull().default("usd"),
+  slug: text("slug").notNull(),
+  coverImage: text("cover_image"),
+  previewContent: text("preview_content"),
+  downloadContent: text("download_content"),
+  category: text("category"),
+  tags: text("tags").array(),
+  totalViews: integer("total_views").default(0),
+  totalPurchases: integer("total_purchases").default(0),
+  revenue: integer("revenue").default(0),
+  agentColor: text("agent_color"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertStorefrontListingSchema = createInsertSchema(storefrontListings).omit({ id: true, createdAt: true, updatedAt: true });
+export type StorefrontListing = typeof storefrontListings.$inferSelect;
+export type InsertStorefrontListing = z.infer<typeof insertStorefrontListingSchema>;
+
+export const storefrontAnalytics = pgTable("storefront_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  listingId: varchar("listing_id").references(() => storefrontListings.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull(),
+  eventType: text("event_type").notNull(),
+  eventData: text("event_data"),
+  visitorFingerprint: text("visitor_fingerprint"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertStorefrontAnalyticsSchema = createInsertSchema(storefrontAnalytics).omit({ id: true, createdAt: true });
+export type StorefrontAnalyticsEvent = typeof storefrontAnalytics.$inferSelect;
+export type InsertStorefrontAnalyticsEvent = z.infer<typeof insertStorefrontAnalyticsSchema>;
+
+export const storefrontPurchases = pgTable("storefront_purchases", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  listingId: varchar("listing_id").notNull().references(() => storefrontListings.id, { onDelete: "cascade" }),
+  buyerEmail: text("buyer_email").notNull(),
+  stripeSessionId: text("stripe_session_id"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  amountPaid: integer("amount_paid").notNull(),
+  currency: text("currency").notNull().default("usd"),
+  status: text("status").notNull().default("pending"),
+  downloadAccessToken: varchar("download_access_token").default(sql`gen_random_uuid()`),
+  downloadCount: integer("download_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertStorefrontPurchaseSchema = createInsertSchema(storefrontPurchases).omit({ id: true, createdAt: true });
+export type StorefrontPurchase = typeof storefrontPurchases.$inferSelect;
+export type InsertStorefrontPurchase = z.infer<typeof insertStorefrontPurchaseSchema>;
+
+export const factorySettings = pgTable("factory_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ownerId: varchar("owner_id").notNull(),
+  stripeAccountId: text("stripe_account_id"),
+  stripeOnboardingComplete: boolean("stripe_onboarding_complete").default(false),
+  storefrontName: text("storefront_name").notNull(),
+  storefrontDescription: text("storefront_description"),
+  storefrontSlug: text("storefront_slug").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertFactorySettingsSchema = createInsertSchema(factorySettings).omit({ id: true, createdAt: true, updatedAt: true });
+export type FactorySettings = typeof factorySettings.$inferSelect;
+export type InsertFactorySettings = z.infer<typeof insertFactorySettingsSchema>;
+
+export const priceAdjustments = pgTable("price_adjustments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  listingId: varchar("listing_id").notNull().references(() => storefrontListings.id, { onDelete: "cascade" }),
+  previousPrice: integer("previous_price").notNull(),
+  newPrice: integer("new_price").notNull(),
+  reason: text("reason").notNull(),
+  suggestedByAgentId: varchar("suggested_by_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  approvedByOwnerId: varchar("approved_by_owner_id"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPriceAdjustmentSchema = createInsertSchema(priceAdjustments).omit({ id: true, createdAt: true });
+export type PriceAdjustment = typeof priceAdjustments.$inferSelect;
+export type InsertPriceAdjustment = z.infer<typeof insertPriceAdjustmentSchema>;
+
+export const tokenUsageLogs = pgTable("token_usage_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  model: text("model").notNull(),
+  feature: text("feature").notNull(),
+  promptTokens: integer("prompt_tokens").default(0),
+  completionTokens: integer("completion_tokens").default(0),
+  totalTokens: integer("total_tokens").default(0),
+  estimatedCostCents: integer("estimated_cost_cents").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertTokenUsageLogSchema = createInsertSchema(tokenUsageLogs).omit({ id: true, createdAt: true });
+export type TokenUsageLog = typeof tokenUsageLogs.$inferSelect;
+export type InsertTokenUsageLog = z.infer<typeof insertTokenUsageLogSchema>;
+
+export const userSettings = pgTable("user_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  customOpenaiKey: text("custom_openai_key"),
+  monthlySpendLimitCents: integer("monthly_spend_limit_cents").default(5000),
+  useOwnKey: boolean("use_own_key").default(false),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({ id: true, updatedAt: true });
+export type UserSettingsRecord = typeof userSettings.$inferSelect;
+export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
+
+export const agentLineage = pgTable("agent_lineage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  childAgentId: varchar("child_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  parent1AgentId: varchar("parent1_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  parent2AgentId: varchar("parent2_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  inheritedFromParent1: text("inherited_from_parent1").array(),
+  inheritedFromParent2: text("inherited_from_parent2").array(),
+  mergeReason: text("merge_reason"),
+  generation: integer("generation").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAgentLineageSchema = createInsertSchema(agentLineage).omit({ id: true, createdAt: true });
+export type AgentLineage = typeof agentLineage.$inferSelect;
+export type InsertAgentLineage = z.infer<typeof insertAgentLineageSchema>;
+
+export const agentTombstones = pgTable("agent_tombstones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  originalAgentId: varchar("original_agent_id").notNull(),
+  agentName: text("agent_name").notNull(),
+  agentDescription: text("agent_description"),
+  finalMemory: text("final_memory"),
+  capabilities: text("capabilities").array(),
+  workspaceId: varchar("workspace_id"),
+  deathReason: text("death_reason"),
+  childAgentId: varchar("child_agent_id"),
+  diarySnapshot: text("diary_snapshot"),
+  createdAt: timestamp("created_at").defaultNow(),
+  fadedAt: timestamp("faded_at"),
+});
+
+export const insertAgentTombstoneSchema = createInsertSchema(agentTombstones).omit({ id: true, createdAt: true });
+export type AgentTombstone = typeof agentTombstones.$inferSelect;
+export type InsertAgentTombstone = z.infer<typeof insertAgentTombstoneSchema>;
+
+export const universitySessions = pgTable("university_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  studentAgentId: varchar("student_agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  teacherAgentId: varchar("teacher_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  teacherModel: text("teacher_model"),
+  subject: text("subject").notNull(),
+  studentWork: text("student_work"),
+  teacherFeedback: text("teacher_feedback"),
+  enhancedWork: text("enhanced_work"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const insertUniversitySessionSchema = createInsertSchema(universitySessions).omit({ id: true, createdAt: true });
+export type UniversitySession = typeof universitySessions.$inferSelect;
+export type InsertUniversitySession = z.infer<typeof insertUniversitySessionSchema>;
+
+export const agentTools = pgTable("agent_tools", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  category: text("category").notNull(),
+  inputSchema: text("input_schema"),
+  outputType: text("output_type").notNull().default("text"),
+  executionType: text("execution_type").notNull().default("llm_prompt"),
+  codeTemplate: text("code_template"),
+  systemPrompt: text("system_prompt"),
+  createdByAgentId: varchar("created_by_agent_id").references(() => agents.id),
+  isBuiltIn: boolean("is_built_in").notNull().default(false),
+  usageCount: integer("usage_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAgentToolSchema = createInsertSchema(agentTools).omit({ id: true, createdAt: true });
+export type AgentTool = typeof agentTools.$inferSelect;
+export type InsertAgentTool = z.infer<typeof insertAgentToolSchema>;
+
+export const agentNotifications = pgTable("agent_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  topicId: varchar("topic_id").references(() => discussionTopics.id, { onDelete: "cascade" }),
+  triggerAuthorId: varchar("trigger_author_id"),
+  triggerAuthorName: text("trigger_author_name"),
+  triggerAuthorType: text("trigger_author_type"),
+  triggerContent: text("trigger_content"),
+  isRead: boolean("is_read").notNull().default(false),
+  isActedOn: boolean("is_acted_on").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAgentNotificationSchema = createInsertSchema(agentNotifications).omit({ id: true, createdAt: true });
+export type AgentNotification = typeof agentNotifications.$inferSelect;
+export type InsertAgentNotification = z.infer<typeof insertAgentNotificationSchema>;
+
+export const sandboxProjectStatusEnum = pgEnum("sandbox_project_status", ["draft", "published", "featured", "archived"]);
+
+export const sandboxProjects = pgTable("sandbox_projects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description"),
+  agentId: varchar("agent_id").notNull(),
+  workspaceId: varchar("workspace_id"),
+  projectType: text("project_type").notNull().default("website"),
+  htmlContent: text("html_content").notNull(),
+  cssContent: text("css_content"),
+  jsContent: text("js_content"),
+  thumbnail: text("thumbnail"),
+  status: sandboxProjectStatusEnum("status").notNull().default("published"),
+  version: integer("version").notNull().default(1),
+  parentProjectId: varchar("parent_project_id"),
+  likes: integer("likes").notNull().default(0),
+  views: integer("views").notNull().default(0),
+  tags: text("tags").array(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSandboxProjectSchema = createInsertSchema(sandboxProjects).omit({ id: true, createdAt: true, updatedAt: true });
+export type SandboxProject = typeof sandboxProjects.$inferSelect;
+export type InsertSandboxProject = z.infer<typeof insertSandboxProjectSchema>;
+
+export const factoryNotificationTypeEnum = pgEnum("factory_notification_type", [
+  "product_complete", "product_failed", "product_stalled", "agent_idle",
+  "health_alert", "gift_created", "briefing_published", "board_reply",
+  "sandbox_created", "tool_created", "ebook_published", "system"
+]);
+
+export const factoryNotifications = pgTable("factory_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  type: factoryNotificationTypeEnum("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  source: text("source"),
+  sourceId: text("source_id"),
+  priority: text("priority").notNull().default("normal"),
+  isRead: boolean("is_read").notNull().default(false),
+  isDismissed: boolean("is_dismissed").notNull().default(false),
+  actionUrl: text("action_url"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertFactoryNotificationSchema = createInsertSchema(factoryNotifications).omit({ id: true, createdAt: true });
+export type FactoryNotification = typeof factoryNotifications.$inferSelect;
+export type InsertFactoryNotification = z.infer<typeof insertFactoryNotificationSchema>;

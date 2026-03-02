@@ -299,7 +299,6 @@ export interface IStorage {
   validateApiToken(plainToken: string): Promise<{ token: ApiToken; userId: string } | null>;
   getDiscussionTopicsByWorkspace(workspaceId: string, limit?: number): Promise<DiscussionTopic[]>;
   getDiscussionRepliesByTopic(topicId: string): Promise<DiscussionReply[]>;
-  getAllAgents(): Promise<Agent[]>;
   getGiftsByWorkspace(workspaceId: string): Promise<Gift[]>;
   getDiaryEntriesByAgent(agentId: string, limit?: number): Promise<DiaryEntry[]>;
 
@@ -1406,10 +1405,6 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(discussionReplies)
       .where(eq(discussionReplies.topicId, topicId))
       .orderBy(asc(discussionReplies.createdAt));
-  }
-
-  async getAllAgents(): Promise<Agent[]> {
-    return db.select().from(agents).orderBy(desc(agents.createdAt));
   }
 
   async getGiftsByWorkspace(workspaceId: string): Promise<Gift[]> {

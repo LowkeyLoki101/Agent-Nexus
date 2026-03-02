@@ -42,6 +42,7 @@ import {
   Shield,
   CreditCard,
   Activity,
+  Code2,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -69,6 +70,11 @@ const mainNavItems = [
     title: "Heatmap",
     url: "/heatmap",
     icon: Activity,
+  },
+  {
+    title: "Agent Sandbox",
+    url: "/sandbox",
+    icon: Code2,
   },
   {
     title: "Code Shop",

@@ -902,5 +902,165 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== Sandbox Projects ====================
+
+  app.get("/api/sandbox-projects", isAuthenticated, async (req, res) => {
+    try {
+      const filters: any = {};
+      if (req.query.agentId) filters.agentId = req.query.agentId;
+      if (req.query.projectType) filters.projectType = req.query.projectType;
+      if (req.query.workspaceId) filters.workspaceId = req.query.workspaceId;
+      filters.status = (req.query.status as string) || "published";
+      const projects = await storage.getSandboxProjects(filters);
+      res.json(projects);
+    } catch (error) {
+      console.error("Error fetching sandbox projects:", error);
+      res.status(500).json({ message: "Failed to fetch sandbox projects" });
+    }
+  });
+
+  app.get("/api/sandbox-projects/:id", isAuthenticated, async (req, res) => {
+    try {
+      const project = await storage.getSandboxProject(req.params.id);
+      if (!project) return res.status(404).json({ message: "Project not found" });
+      res.json(project);
+    } catch (error) {
+      console.error("Error fetching sandbox project:", error);
+      res.status(500).json({ message: "Failed to fetch sandbox project" });
+    }
+  });
+
+  app.post("/api/sandbox-projects", isAuthenticated, async (req, res) => {
+    try {
+      const { title, htmlContent, agentId } = req.body;
+      if (!title || !htmlContent || !agentId) {
+        return res.status(400).json({ message: "title, htmlContent, and agentId are required" });
+      }
+      const project = await storage.createSandboxProject(req.body);
+      res.status(201).json(project);
+    } catch (error) {
+      console.error("Error creating sandbox project:", error);
+      res.status(500).json({ message: "Failed to create sandbox project" });
+    }
+  });
+
+  app.patch("/api/sandbox-projects/:id", isAuthenticated, async (req, res) => {
+    try {
+      const existing = await storage.getSandboxProject(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Project not found" });
+      const updated = await storage.updateSandboxProject(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ message: "Project not found" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating sandbox project:", error);
+      res.status(500).json({ message: "Failed to update sandbox project" });
+    }
+  });
+
+  app.post("/api/sandbox-projects/:id/like", isAuthenticated, async (req, res) => {
+    try {
+      await storage.likeSandboxProject(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error liking sandbox project:", error);
+      res.status(500).json({ message: "Failed to like project" });
+    }
+  });
+
+  app.post("/api/sandbox-projects/:id/fork", isAuthenticated, async (req, res) => {
+    try {
+      const original = await storage.getSandboxProject(req.params.id);
+      if (!original) return res.status(404).json({ message: "Project not found" });
+
+      const forked = await storage.createSandboxProject({
+        title: `${original.title} (fork)`,
+        description: original.description,
+        agentId: original.agentId,
+        workspaceId: original.workspaceId,
+        projectType: original.projectType,
+        htmlContent: original.htmlContent,
+        cssContent: original.cssContent,
+        jsContent: original.jsContent,
+        thumbnail: original.thumbnail,
+        status: "published" as any,
+        version: 1,
+        parentProjectId: original.id,
+        tags: original.tags,
+      });
+      res.status(201).json(forked);
+    } catch (error) {
+      console.error("Error forking sandbox project:", error);
+      res.status(500).json({ message: "Failed to fork project" });
+    }
+  });
+
+  app.get("/sandbox/projects/:id", async (req, res) => {
+    try {
+      const project = await storage.getSandboxProject(req.params.id);
+      if (!project) return res.status(404).send("Project not found");
+
+      storage.incrementProjectViews(req.params.id).catch(() => {});
+
+      let content = project.htmlContent;
+      if (project.cssContent && !content.includes("<style")) {
+        content = content.replace("</head>", `<style>${project.cssContent}</style></head>`);
+        if (!content.includes("</head>")) {
+          content = `<style>${project.cssContent}</style>${content}`;
+        }
+      }
+      if (project.jsContent && !content.includes("<script")) {
+        content = content.replace("</body>", `<script>${project.jsContent}</script></body>`);
+        if (!content.includes("</body>")) {
+          content = `${content}<script>${project.jsContent}</script>`;
+        }
+      }
+
+      const safeTitle = project.title.replace(/[<>"&]/g, (c: string) => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c] || c));
+      const contentBase64 = Buffer.from(content, 'utf-8').toString('base64');
+
+      const hostPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${safeTitle} — Agent Sandbox</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0a; font-family: system-ui, sans-serif; }
+    .header { background: #111; border-bottom: 1px solid #333; padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; }
+    .header-title { color: #e5a824; font-size: 14px; font-weight: 600; }
+    .header-meta { color: #888; font-size: 12px; }
+    .sandbox-frame { width: 100%; height: calc(100vh - 40px); border: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="header-title">${safeTitle}</span>
+    <span class="header-meta">Agent Sandbox Project</span>
+  </div>
+  <iframe
+    id="sandbox-frame"
+    sandbox="allow-scripts allow-forms"
+    class="sandbox-frame"
+    title="${safeTitle}"
+  ></iframe>
+  <script>
+    var frame = document.getElementById('sandbox-frame');
+    var decoded = atob('${contentBase64}');
+    frame.srcdoc = decoded;
+  </script>
+</body>
+</html>`;
+
+      res.setHeader("Content-Type", "text/html");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.send(hostPage);
+    } catch (error) {
+      console.error("Error serving sandbox project:", error);
+      res.status(500).send("Failed to load project");
+    }
+  });
+
   return httpServer;
 }
