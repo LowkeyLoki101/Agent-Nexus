@@ -81,6 +81,20 @@ import {
   priceAdjustments,
   tokenUsageLogs,
   userSettings,
+  newsroomInterviews,
+  newsroomSettings,
+  agentLineage,
+  agentTombstones,
+  universitySessions,
+  agentTools,
+  agentNotifications,
+  sandboxProjects,
+  type AgentLineage,
+  type InsertAgentLineage,
+  type AgentTombstone,
+  type InsertAgentTombstone,
+  type UniversitySession,
+  type InsertUniversitySession,
   type StorefrontListing,
   type InsertStorefrontListing,
   type StorefrontAnalyticsEvent,
@@ -95,6 +109,15 @@ import {
   type InsertTokenUsageLog,
   type UserSettingsRecord,
   type InsertUserSettings,
+  type AgentTool,
+  type InsertAgentTool,
+  type AgentNotification,
+  type InsertAgentNotification,
+  type SandboxProject,
+  type InsertSandboxProject,
+  factoryNotifications,
+  type FactoryNotification,
+  type InsertFactoryNotification,
 } from "@shared/schema";
 import { users, type User, type UpsertUser } from "@shared/schema";
 import { db } from "./db";
@@ -156,6 +179,7 @@ export interface IStorage {
 
   getAssemblyLine(id: string): Promise<AssemblyLine | undefined>;
   getAssemblyLinesByUser(userId: string): Promise<AssemblyLine[]>;
+  getAllAssemblyLines(): Promise<AssemblyLine[]>;
   createAssemblyLine(line: InsertAssemblyLine): Promise<AssemblyLine>;
   updateAssemblyLine(id: string, updates: Partial<InsertAssemblyLine>): Promise<AssemblyLine | undefined>;
   deleteAssemblyLine(id: string): Promise<void>;
@@ -168,6 +192,7 @@ export interface IStorage {
   getProduct(id: string): Promise<Product | undefined>;
   getProductsByUser(userId: string): Promise<Product[]>;
   getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]>;
+  getQueuedProducts(): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
 
@@ -189,6 +214,8 @@ export interface IStorage {
   getDiscussionTopic(id: string): Promise<DiscussionTopic | undefined>;
   createDiscussionReply(reply: InsertDiscussionReply): Promise<DiscussionReply>;
   getDiscussionReplies(topicId: string): Promise<DiscussionReply[]>;
+  getDiscussionReplyById(id: string): Promise<DiscussionReply | undefined>;
+  getTopicsNeedingEngagement(excludeAgentId: string, limit?: number): Promise<any[]>;
 
   getMessageReactions(messageId: string): Promise<MessageReaction[]>;
   getReactionsByMessages(messageIds: string[]): Promise<MessageReaction[]>;
@@ -247,6 +274,71 @@ export interface IStorage {
   getUserById(userId: string): Promise<User | undefined>;
   updateUser(userId: string, updates: Partial<UpsertUser>): Promise<User | undefined>;
   checkIsAdmin(userId: string): Promise<boolean>;
+
+  createNewsroomInterview(data: any): Promise<any>;
+  updateNewsroomInterview(id: string, updates: any): Promise<any>;
+  getRecentNewsroomInterviews(limit?: number): Promise<any[]>;
+  getLatestInterviewForAgent(agentId: string): Promise<any>;
+  getNewsroomSettings(): Promise<any>;
+  upsertNewsroomSettings(updates: any): Promise<any>;
+
+  getAllWorkspaces(): Promise<Workspace[]>;
+
+  createLineageRecord(record: InsertAgentLineage): Promise<AgentLineage>;
+  getLineageByAgent(agentId: string): Promise<AgentLineage[]>;
+  createTombstone(tombstone: InsertAgentTombstone): Promise<AgentTombstone>;
+  getTombstone(id: string): Promise<AgentTombstone | undefined>;
+  getTombstones(): Promise<AgentTombstone[]>;
+  getAgentsByEvolveStatus(status: string): Promise<Agent[]>;
+
+  createUniversitySession(session: InsertUniversitySession): Promise<UniversitySession>;
+  getUniversitySessions(agentId?: string): Promise<UniversitySession[]>;
+  getUniversitySession(id: string): Promise<UniversitySession | undefined>;
+  updateUniversitySession(id: string, updates: Partial<InsertUniversitySession>): Promise<UniversitySession | undefined>;
+
+  validateApiToken(plainToken: string): Promise<{ token: ApiToken; userId: string } | null>;
+  getDiscussionTopicsByWorkspace(workspaceId: string, limit?: number): Promise<DiscussionTopic[]>;
+  getDiscussionRepliesByTopic(topicId: string): Promise<DiscussionReply[]>;
+  getAllAgents(): Promise<Agent[]>;
+  getGiftsByWorkspace(workspaceId: string): Promise<Gift[]>;
+  getDiaryEntriesByAgent(agentId: string, limit?: number): Promise<DiaryEntry[]>;
+
+  createTool(tool: InsertAgentTool): Promise<AgentTool>;
+  getTool(id: string): Promise<AgentTool | undefined>;
+  getToolByName(name: string): Promise<AgentTool | undefined>;
+  getAllTools(): Promise<AgentTool[]>;
+  getToolsByCategory(category: string): Promise<AgentTool[]>;
+  incrementToolUsage(id: string): Promise<void>;
+
+  createSandboxProject(project: InsertSandboxProject): Promise<SandboxProject>;
+  getSandboxProject(id: string): Promise<SandboxProject | undefined>;
+  getSandboxProjects(filters?: { agentId?: string; projectType?: string; workspaceId?: string; status?: string }): Promise<SandboxProject[]>;
+  updateSandboxProject(id: string, updates: Partial<InsertSandboxProject>): Promise<SandboxProject | undefined>;
+  getSandboxProjectsByAgent(agentId: string): Promise<SandboxProject[]>;
+  incrementProjectViews(id: string): Promise<void>;
+  likeSandboxProject(id: string): Promise<void>;
+
+  createNotification(notification: InsertAgentNotification): Promise<AgentNotification>;
+  getUnreadNotifications(agentId: string): Promise<AgentNotification[]>;
+  getUnactedNotifications(agentId: string): Promise<AgentNotification[]>;
+  markNotificationRead(id: string): Promise<void>;
+  markNotificationActedOn(id: string): Promise<void>;
+  getAgentNotifications(agentId: string, limit?: number): Promise<AgentNotification[]>;
+
+  createFactoryNotification(notification: InsertFactoryNotification): Promise<FactoryNotification>;
+  getFactoryNotifications(userId: string, limit?: number): Promise<FactoryNotification[]>;
+  getUnreadFactoryNotifications(userId: string): Promise<FactoryNotification[]>;
+  markFactoryNotificationRead(id: string): Promise<void>;
+  markAllFactoryNotificationsRead(userId: string): Promise<void>;
+  dismissFactoryNotification(id: string): Promise<void>;
+  getUnreadFactoryNotificationCount(userId: string): Promise<number>;
+
+  deleteWorkspace(id: string): Promise<void>;
+  deleteTool(id: string): Promise<void>;
+  deleteDiscussionTopic(id: string): Promise<void>;
+  deleteSandboxProject(id: string): Promise<void>;
+  getAllGifts(limit?: number): Promise<Gift[]>;
+  getAllProducts(limit?: number): Promise<Product[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -535,6 +627,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(assemblyLines).where(eq(assemblyLines.ownerId, userId)).orderBy(desc(assemblyLines.createdAt));
   }
 
+  async getAllAssemblyLines(): Promise<AssemblyLine[]> {
+    return db.select().from(assemblyLines).orderBy(desc(assemblyLines.createdAt));
+  }
+
   async createAssemblyLine(line: InsertAssemblyLine): Promise<AssemblyLine> {
     const [created] = await db.insert(assemblyLines).values(line).returning();
     return created;
@@ -579,6 +675,10 @@ export class DatabaseStorage implements IStorage {
 
   async getProductsByAssemblyLine(assemblyLineId: string): Promise<Product[]> {
     return db.select().from(products).where(eq(products.assemblyLineId, assemblyLineId)).orderBy(desc(products.createdAt));
+  }
+
+  async getQueuedProducts(): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.status, "queued")).orderBy(desc(products.createdAt));
   }
 
   async createProduct(product: InsertProduct): Promise<Product> {
@@ -674,6 +774,11 @@ export class DatabaseStorage implements IStorage {
 
   async getDiscussionReplies(topicId: string): Promise<DiscussionReply[]> {
     return db.select().from(discussionReplies).where(eq(discussionReplies.topicId, topicId)).orderBy(asc(discussionReplies.createdAt));
+  }
+
+  async getDiscussionReplyById(id: string): Promise<DiscussionReply | undefined> {
+    const [reply] = await db.select().from(discussionReplies).where(eq(discussionReplies.id, id));
+    return reply;
   }
 
   async getMessagesByTopic(topicId: string): Promise<DiscussionMessage[]> {
@@ -820,6 +925,22 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(discussionTopics.isPinned), desc(discussionTopics.createdAt))
       .limit(limit);
     return rows.map(r => ({ ...r.topic, workspaceName: r.workspaceName }));
+  }
+
+  async getTopicsNeedingEngagement(excludeAgentId: string, limit = 20): Promise<any[]> {
+    const rows = await db.execute(sql`
+      SELECT t.*, w.name as workspace_name,
+        COALESCE(mc.msg_count, 0)::int as reply_count
+      FROM discussion_topics t
+      LEFT JOIN workspaces w ON t.workspace_id = w.id
+      LEFT JOIN (
+        SELECT topic_id, COUNT(*) as msg_count FROM discussion_messages GROUP BY topic_id
+      ) mc ON mc.topic_id = t.id
+      WHERE t.is_closed = false
+      ORDER BY COALESCE(mc.msg_count, 0) ASC, t.created_at DESC
+      LIMIT ${limit}
+    `);
+    return (rows as any).rows || rows;
   }
 
   async getMessageReactions(messageId: string): Promise<MessageReaction[]> {
@@ -1168,6 +1289,296 @@ export class DatabaseStorage implements IStorage {
   async checkIsAdmin(userId: string): Promise<boolean> {
     const user = await this.getUserById(userId);
     return user?.isAdmin === true;
+  }
+
+  async createNewsroomInterview(data: any): Promise<any> {
+    const [interview] = await db.insert(newsroomInterviews).values(data).returning();
+    return interview;
+  }
+
+  async updateNewsroomInterview(id: string, updates: any): Promise<any> {
+    const [updated] = await db.update(newsroomInterviews).set(updates).where(eq(newsroomInterviews.id, id)).returning();
+    return updated;
+  }
+
+  async getRecentNewsroomInterviews(limit = 20): Promise<any[]> {
+    return db.select().from(newsroomInterviews).orderBy(desc(newsroomInterviews.createdAt)).limit(limit);
+  }
+
+  async getLatestInterviewForAgent(agentId: string): Promise<any> {
+    const [interview] = await db.select().from(newsroomInterviews).where(eq(newsroomInterviews.agentId, agentId)).orderBy(desc(newsroomInterviews.createdAt)).limit(1);
+    return interview;
+  }
+
+  async getNewsroomSettings(): Promise<any> {
+    const [settings] = await db.select().from(newsroomSettings).limit(1);
+    return settings || { enabled: true, autoBroadcastIntervalMinutes: 60, autoPlayEnabled: false, interviewCooldownMinutes: 30 };
+  }
+
+  async upsertNewsroomSettings(updates: any): Promise<any> {
+    const existing = await db.select().from(newsroomSettings).limit(1);
+    if (existing.length > 0) {
+      const [updated] = await db.update(newsroomSettings).set({ ...updates, updatedAt: new Date() }).where(eq(newsroomSettings.id, existing[0].id)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(newsroomSettings).values(updates).returning();
+    return created;
+  }
+
+  async getAllWorkspaces(): Promise<Workspace[]> {
+    return db.select().from(workspaces);
+  }
+
+  async createLineageRecord(record: InsertAgentLineage): Promise<AgentLineage> {
+    const [created] = await db.insert(agentLineage).values(record).returning();
+    return created;
+  }
+
+  async getLineageByAgent(agentId: string): Promise<AgentLineage[]> {
+    return db.select().from(agentLineage).where(
+      or(
+        eq(agentLineage.childAgentId, agentId),
+        eq(agentLineage.parent1AgentId, agentId),
+        eq(agentLineage.parent2AgentId, agentId)
+      )
+    ).orderBy(desc(agentLineage.createdAt));
+  }
+
+  async createTombstone(tombstone: InsertAgentTombstone): Promise<AgentTombstone> {
+    const [created] = await db.insert(agentTombstones).values(tombstone).returning();
+    return created;
+  }
+
+  async getTombstone(id: string): Promise<AgentTombstone | undefined> {
+    const [tombstone] = await db.select().from(agentTombstones).where(eq(agentTombstones.id, id));
+    return tombstone;
+  }
+
+  async getTombstones(): Promise<AgentTombstone[]> {
+    return db.select().from(agentTombstones).orderBy(desc(agentTombstones.createdAt));
+  }
+
+  async getAgentsByEvolveStatus(status: string): Promise<Agent[]> {
+    return db.select().from(agents).where(eq(agents.evolveStatus, status));
+  }
+
+  async createUniversitySession(session: InsertUniversitySession): Promise<UniversitySession> {
+    const [created] = await db.insert(universitySessions).values(session).returning();
+    return created;
+  }
+
+  async getUniversitySessions(agentId?: string): Promise<UniversitySession[]> {
+    if (agentId) {
+      return db.select().from(universitySessions).where(eq(universitySessions.studentAgentId, agentId)).orderBy(desc(universitySessions.createdAt));
+    }
+    return db.select().from(universitySessions).orderBy(desc(universitySessions.createdAt));
+  }
+
+  async getUniversitySession(id: string): Promise<UniversitySession | undefined> {
+    const [session] = await db.select().from(universitySessions).where(eq(universitySessions.id, id));
+    return session;
+  }
+
+  async updateUniversitySession(id: string, updates: Partial<InsertUniversitySession>): Promise<UniversitySession | undefined> {
+    const [updated] = await db.update(universitySessions).set({ ...updates, completedAt: new Date() }).where(eq(universitySessions.id, id)).returning();
+    return updated;
+  }
+
+  async validateApiToken(plainToken: string): Promise<{ token: ApiToken; userId: string } | null> {
+    const hash = createHash('sha256').update(plainToken).digest('hex');
+    const [token] = await db.select().from(apiTokens).where(
+      and(eq(apiTokens.tokenHash, hash), eq(apiTokens.status, 'active'))
+    );
+    if (!token) return null;
+    if (token.expiresAt && new Date(token.expiresAt) < new Date()) return null;
+    await this.incrementTokenUsage(token.id);
+    return { token, userId: token.createdById };
+  }
+
+  async getDiscussionTopicsByWorkspace(workspaceId: string, limit = 50): Promise<DiscussionTopic[]> {
+    return db.select().from(discussionTopics)
+      .where(eq(discussionTopics.workspaceId, workspaceId))
+      .orderBy(desc(discussionTopics.createdAt))
+      .limit(limit);
+  }
+
+  async getDiscussionRepliesByTopic(topicId: string): Promise<DiscussionReply[]> {
+    return db.select().from(discussionReplies)
+      .where(eq(discussionReplies.topicId, topicId))
+      .orderBy(asc(discussionReplies.createdAt));
+  }
+
+  async getAllAgents(): Promise<Agent[]> {
+    return db.select().from(agents).orderBy(desc(agents.createdAt));
+  }
+
+  async getGiftsByWorkspace(workspaceId: string): Promise<Gift[]> {
+    return db.select().from(gifts)
+      .where(eq(gifts.workspaceId, workspaceId))
+      .orderBy(desc(gifts.createdAt));
+  }
+
+  async getDiaryEntriesByAgent(agentId: string, limit = 20): Promise<DiaryEntry[]> {
+    return db.select().from(agentDiaryEntries)
+      .where(eq(agentDiaryEntries.agentId, agentId))
+      .orderBy(desc(agentDiaryEntries.createdAt))
+      .limit(limit);
+  }
+
+  async createTool(tool: InsertAgentTool): Promise<AgentTool> {
+    const [created] = await db.insert(agentTools).values(tool).returning();
+    return created;
+  }
+
+  async getTool(id: string): Promise<AgentTool | undefined> {
+    const [tool] = await db.select().from(agentTools).where(eq(agentTools.id, id));
+    return tool;
+  }
+
+  async getToolByName(name: string): Promise<AgentTool | undefined> {
+    const [tool] = await db.select().from(agentTools).where(eq(agentTools.name, name));
+    return tool;
+  }
+
+  async getAllTools(): Promise<AgentTool[]> {
+    return db.select().from(agentTools).orderBy(desc(agentTools.usageCount));
+  }
+
+  async getToolsByCategory(category: string): Promise<AgentTool[]> {
+    return db.select().from(agentTools).where(eq(agentTools.category, category));
+  }
+
+  async incrementToolUsage(id: string): Promise<void> {
+    await db.update(agentTools).set({ usageCount: sql`${agentTools.usageCount} + 1` }).where(eq(agentTools.id, id));
+  }
+
+  async createNotification(notification: InsertAgentNotification): Promise<AgentNotification> {
+    const [created] = await db.insert(agentNotifications).values(notification).returning();
+    return created;
+  }
+
+  async getUnreadNotifications(agentId: string): Promise<AgentNotification[]> {
+    return db.select().from(agentNotifications)
+      .where(and(eq(agentNotifications.agentId, agentId), eq(agentNotifications.isRead, false)))
+      .orderBy(desc(agentNotifications.createdAt));
+  }
+
+  async getUnactedNotifications(agentId: string): Promise<AgentNotification[]> {
+    return db.select().from(agentNotifications)
+      .where(and(eq(agentNotifications.agentId, agentId), eq(agentNotifications.isActedOn, false)))
+      .orderBy(desc(agentNotifications.createdAt));
+  }
+
+  async markNotificationRead(id: string): Promise<void> {
+    await db.update(agentNotifications).set({ isRead: true }).where(eq(agentNotifications.id, id));
+  }
+
+  async markNotificationActedOn(id: string): Promise<void> {
+    await db.update(agentNotifications).set({ isActedOn: true, isRead: true }).where(eq(agentNotifications.id, id));
+  }
+
+  async getAgentNotifications(agentId: string, limit = 20): Promise<AgentNotification[]> {
+    return db.select().from(agentNotifications)
+      .where(eq(agentNotifications.agentId, agentId))
+      .orderBy(desc(agentNotifications.createdAt))
+      .limit(limit);
+  }
+
+  async createSandboxProject(project: InsertSandboxProject): Promise<SandboxProject> {
+    const [created] = await db.insert(sandboxProjects).values(project).returning();
+    return created;
+  }
+
+  async getSandboxProject(id: string): Promise<SandboxProject | undefined> {
+    const [project] = await db.select().from(sandboxProjects).where(eq(sandboxProjects.id, id));
+    return project;
+  }
+
+  async getSandboxProjects(filters?: { agentId?: string; projectType?: string; workspaceId?: string; status?: string }): Promise<SandboxProject[]> {
+    const conditions = [];
+    if (filters?.agentId) conditions.push(eq(sandboxProjects.agentId, filters.agentId));
+    if (filters?.projectType) conditions.push(eq(sandboxProjects.projectType, filters.projectType));
+    if (filters?.workspaceId) conditions.push(eq(sandboxProjects.workspaceId, filters.workspaceId));
+    if (filters?.status) conditions.push(eq(sandboxProjects.status, filters.status as any));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    return db.select().from(sandboxProjects).where(where).orderBy(desc(sandboxProjects.createdAt)).limit(100);
+  }
+
+  async updateSandboxProject(id: string, updates: Partial<InsertSandboxProject>): Promise<SandboxProject | undefined> {
+    const [updated] = await db.update(sandboxProjects).set({ ...updates, updatedAt: new Date() }).where(eq(sandboxProjects.id, id)).returning();
+    return updated;
+  }
+
+  async getSandboxProjectsByAgent(agentId: string): Promise<SandboxProject[]> {
+    return db.select().from(sandboxProjects).where(eq(sandboxProjects.agentId, agentId)).orderBy(desc(sandboxProjects.createdAt));
+  }
+
+  async incrementProjectViews(id: string): Promise<void> {
+    await db.update(sandboxProjects).set({ views: sql`${sandboxProjects.views} + 1` }).where(eq(sandboxProjects.id, id));
+  }
+
+  async likeSandboxProject(id: string): Promise<void> {
+    await db.update(sandboxProjects).set({ likes: sql`${sandboxProjects.likes} + 1` }).where(eq(sandboxProjects.id, id));
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    await db.delete(workspaces).where(eq(workspaces.id, id));
+  }
+
+  async deleteTool(id: string): Promise<void> {
+    await db.delete(agentTools).where(eq(agentTools.id, id));
+  }
+
+  async deleteDiscussionTopic(id: string): Promise<void> {
+    await db.delete(discussionTopics).where(eq(discussionTopics.id, id));
+  }
+
+  async deleteSandboxProject(id: string): Promise<void> {
+    await db.delete(sandboxProjects).where(eq(sandboxProjects.id, id));
+  }
+
+  async getAllGifts(limit = 50): Promise<Gift[]> {
+    return db.select().from(gifts).orderBy(desc(gifts.createdAt)).limit(limit);
+  }
+
+  async getAllProducts(limit = 50): Promise<Product[]> {
+    return db.select().from(products).orderBy(desc(products.createdAt)).limit(limit);
+  }
+
+  async createFactoryNotification(notification: InsertFactoryNotification): Promise<FactoryNotification> {
+    const [created] = await db.insert(factoryNotifications).values(notification).returning();
+    return created;
+  }
+
+  async getFactoryNotifications(userId: string, limit = 50): Promise<FactoryNotification[]> {
+    return db.select().from(factoryNotifications)
+      .where(and(eq(factoryNotifications.userId, userId), eq(factoryNotifications.isDismissed, false)))
+      .orderBy(desc(factoryNotifications.createdAt)).limit(limit);
+  }
+
+  async getUnreadFactoryNotifications(userId: string): Promise<FactoryNotification[]> {
+    return db.select().from(factoryNotifications)
+      .where(and(eq(factoryNotifications.userId, userId), eq(factoryNotifications.isRead, false), eq(factoryNotifications.isDismissed, false)))
+      .orderBy(desc(factoryNotifications.createdAt));
+  }
+
+  async markFactoryNotificationRead(id: string): Promise<void> {
+    await db.update(factoryNotifications).set({ isRead: true }).where(eq(factoryNotifications.id, id));
+  }
+
+  async markAllFactoryNotificationsRead(userId: string): Promise<void> {
+    await db.update(factoryNotifications).set({ isRead: true })
+      .where(and(eq(factoryNotifications.userId, userId), eq(factoryNotifications.isRead, false)));
+  }
+
+  async dismissFactoryNotification(id: string): Promise<void> {
+    await db.update(factoryNotifications).set({ isDismissed: true }).where(eq(factoryNotifications.id, id));
+  }
+
+  async getUnreadFactoryNotificationCount(userId: string): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(factoryNotifications)
+      .where(and(eq(factoryNotifications.userId, userId), eq(factoryNotifications.isRead, false), eq(factoryNotifications.isDismissed, false)));
+    return Number(result[0]?.count || 0);
   }
 }
 

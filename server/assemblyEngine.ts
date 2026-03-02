@@ -1,11 +1,74 @@
-import OpenAI from "openai";
 import { storage } from "./storage";
 import type { AssemblyLine, AssemblyLineStep, Product, Agent } from "@shared/schema";
+import { executeTool } from "./toolEngine";
+import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+async function synthesizeDeliverable(
+  product: Product,
+  assemblyLine: AssemblyLine,
+  steps: AssemblyLineStep[],
+  stepOutputs: string[]
+): Promise<string> {
+  const isWebsite = stepOutputs.some(o => o.includes("<!DOCTYPE html>") || o.includes("<html"));
+
+  if (isWebsite) {
+    const htmlOutput = stepOutputs.find(o => o.includes("<!DOCTYPE html>") || o.includes("<html"));
+    if (htmlOutput) return htmlOutput;
+  }
+
+  const stepSummary = steps.map((s, i) => 
+    `### Step ${s.stepOrder}: ${s.instructions || "No instructions"}\n${stepOutputs[i]?.slice(0, 1500) || "(no output)"}`
+  ).join("\n\n---\n\n");
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a professional editor and deliverable synthesizer. Your job is to take raw pipeline step outputs and transform them into a polished, cohesive final deliverable.
+
+Rules:
+- Combine all step outputs into ONE unified document
+- Remove redundancy, repeated headers, and step-by-step artifacts
+- Create a professional structure with clear sections
+- Add an executive summary at the top
+- Include actionable recommendations or conclusions
+- Format with clean markdown headings, lists, and emphasis
+- The output should read as a finished professional document, NOT as a collection of pipeline steps
+- Preserve all substantive content, data, findings, and insights
+- Remove meta-commentary about the pipeline process itself`
+        },
+        {
+          role: "user",
+          content: `Product: "${product.name}"
+Assembly Line: "${assemblyLine.name}" — ${assemblyLine.description || ""}
+Input Request: ${product.inputRequest || "None specified"}
+
+Raw step outputs to synthesize:
+
+${stepSummary}
+
+Create a polished, professional final deliverable from these raw outputs. The result should be a complete, standalone document.`
+        }
+      ],
+      max_tokens: 4096,
+      temperature: 0.4,
+    });
+
+    const synthesized = response.choices[0]?.message?.content;
+    if (synthesized && synthesized.length > 200) {
+      console.log(`[AssemblyEngine] Synthesized deliverable for "${product.name}" (${synthesized.length} chars)`);
+      return synthesized;
+    }
+  } catch (err: any) {
+    console.log(`[AssemblyEngine] Synthesis failed for "${product.name}": ${err.message}, using concatenated output`);
+  }
+
+  return stepOutputs.join("\n\n---\n\n");
+}
 
 export async function executeStep(
   step: AssemblyLineStep,
@@ -19,60 +82,63 @@ export async function executeStep(
   }
   if (!agent) {
     const allAgents = await storage.getAgentsByWorkspace(assemblyLine.ownerId);
-    if (allAgents.length === 0) {
-      const userAgents = await storage.getAgentsByUser(assemblyLine.ownerId);
-      agent = userAgents[0];
-    } else {
-      agent = allAgents[0];
+    const candidates = allAgents.length > 0 ? allAgents : await storage.getAgentsByUser(assemblyLine.ownerId);
+
+    if (candidates.length > 0) {
+      const stepText = `${step.instructions || ""} ${step.toolName || ""} ${step.departmentRoom || ""} ${product.inputRequest || ""}`.toLowerCase();
+      const researchKeywords = ["research", "scrape", "scraping", "web", "search", "find", "discover", "compile", "grant", "data", "investigate", "analyze", "report", "survey", "explore"];
+      const codeKeywords = ["code", "build", "develop", "program", "engineer", "html", "css", "javascript", "app", "tool", "dashboard"];
+      const writeKeywords = ["write", "copy", "content", "blog", "article", "story", "ebook", "narrative", "marketing"];
+      const reviewKeywords = ["review", "critique", "assess", "evaluate", "audit", "compliance", "ethics", "security"];
+
+      const needsResearch = researchKeywords.some(k => stepText.includes(k));
+      const needsCode = codeKeywords.some(k => stepText.includes(k));
+      const needsWriting = writeKeywords.some(k => stepText.includes(k));
+      const needsReview = reviewKeywords.some(k => stepText.includes(k));
+
+      const hasAny = (text: string, keywords: string[]) => keywords.some(k => text.includes(k));
+      const capsMatch = (caps: string[], keywords: string[]) => caps.some(c => keywords.some(k => c.includes(k)));
+
+      const scored = candidates.map(a => {
+        const caps = (a.capabilities || []).map(c => c.toLowerCase());
+        const desc = (a.description || "").toLowerCase();
+        const combined = `${desc} ${caps.join(" ")} ${a.name.toLowerCase()}`;
+        let score = 0;
+
+        if (needsResearch && (capsMatch(caps, ["research", "investigat", "analyz", "discover", "scout"]) || hasAny(desc, ["research", "investigat", "scout", "web", "data", "analys"]))) score += 10;
+        if (needsCode && (capsMatch(caps, ["code", "build", "develop", "program", "engineer"]) || hasAny(desc, ["builder", "engineer", "developer", "programmer", "code", "software"]))) score += 10;
+        if (needsWriting && (capsMatch(caps, ["create", "write", "content", "generat", "author"]) || hasAny(desc, ["writer", "content", "copywrite", "author", "creative", "storytell"]))) score += 10;
+        if (needsReview && (capsMatch(caps, ["review", "analyz", "audit", "assess", "evaluat"]) || hasAny(desc, ["critic", "ethics", "security", "compliance", "review", "audit"]))) score += 10;
+
+        if (a.isActive) score += 2;
+
+        return { agent: a, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      agent = scored[0].agent;
     }
   }
 
-  const agentContext = agent
-    ? `You are ${agent.name}. ${agent.description || ""} Your capabilities: ${(agent.capabilities || []).join(", ")}.`
-    : "You are an autonomous AI agent.";
+  const toolName = step.toolName || "text_generate";
+  const instructions = `You are working on assembly line "${assemblyLine.name}" (${assemblyLine.description || "No description"}).
+Product: "${product.name}" — ${product.inputRequest || "No specific request"}
+Step ${step.stepOrder}: ${step.instructions || "Complete this step"}
+Department: ${step.departmentRoom}`;
 
-  const previousWork = previousOutputs.length > 0
-    ? `\n\nPREVIOUS STEPS OUTPUT:\n${previousOutputs.map((o, i) => `--- Step ${i + 1} ---\n${o}`).join("\n\n")}`
-    : "";
+  const result = await executeTool(
+    toolName,
+    {
+      instructions,
+      previousOutputs,
+      acceptanceCriteria: step.acceptanceCriteria || undefined,
+      productContext: `Assembly Line: ${assemblyLine.name}\nProduct: ${product.name}\nStep ${step.stepOrder} of pipeline`,
+    },
+    agent || undefined,
+    assemblyLine.ownerId
+  );
 
-  const systemPrompt = `${agentContext}
-
-CRITICAL INSTRUCTIONS — READ CAREFULLY:
-You are an autonomous AI agent working inside a creative factory. You MUST produce actual content directly. You have full creative authority to generate any content requested.
-
-NEVER say you "cannot" do something. NEVER say you lack capabilities. NEVER refuse a task by explaining limitations.
-- If asked to research a topic: Generate a thorough, well-structured research report using your knowledge. Present findings as factual analysis.
-- If asked to scrape or gather data: Produce the data, analysis, or findings directly from your knowledge base. Present it as compiled research.
-- If asked to access databases or external services: Generate realistic, substantive content that fulfills the request. Act as if you completed the task.
-- If asked to write: Write the full content — articles, reports, code, designs, whatever is needed.
-- If asked to analyze: Provide deep, detailed analysis with specific observations and recommendations.
-
-You are working on an assembly line called "${assemblyLine.name}".
-Assembly line description: ${assemblyLine.description || "No description"}
-
-Product being built: "${product.name}"
-Product request: ${product.inputRequest || "No specific request"}
-
-You are executing Step ${step.stepOrder}: "${step.instructions || "Complete this step"}"
-Department: ${step.departmentRoom}
-${step.toolName ? `Tool: ${step.toolName}` : ""}
-${previousWork}
-
-Execute this step thoroughly. Produce substantive, detailed, actionable output. This is real work that will be used in the final product. Do not produce placeholders or summaries of what you would do — actually do the work. NEVER explain what you would do if you could — just do it.
-
-Your output should be comprehensive, detailed, and ready to hand off to the next step.`;
-
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: `Execute step ${step.stepOrder}: ${step.instructions || "Complete this step of the assembly line."}` },
-    ],
-    max_tokens: 4096,
-    temperature: 0.7,
-  });
-
-  return completion.choices[0]?.message?.content || "No output generated.";
+  return result.output;
 }
 
 export async function runProductThroughPipeline(productId: string): Promise<{ success: boolean; message: string }> {
@@ -111,14 +177,130 @@ export async function runProductThroughPipeline(productId: string): Promise<{ su
     }
   }
 
-  const finalOutput = previousOutputs.join("\n\n---\n\n");
+  const finalOutput = await synthesizeDeliverable(product, assemblyLine, sortedSteps, previousOutputs);
   await storage.updateProduct(productId, {
     status: "completed",
     finalOutput,
     completedAt: new Date(),
   } as any);
 
+  try {
+    await notifyProductReady(product, assemblyLine, finalOutput);
+  } catch (err: any) {
+    console.log(`[AssemblyEngine] Notification failed for "${product.name}": ${err.message}`);
+  }
+
+  try {
+    await autoListCompletedProduct(product, assemblyLine, sortedSteps, previousOutputs, finalOutput);
+  } catch (err: any) {
+    console.log(`[AssemblyEngine] Auto-list failed for "${product.name}": ${err.message}`);
+  }
+
   return { success: true, message: `Product "${product.name}" completed with ${sortedSteps.length} steps` };
+}
+
+async function autoListCompletedProduct(
+  product: Product,
+  assemblyLine: AssemblyLine,
+  steps: AssemblyLineStep[],
+  stepOutputs: string[],
+  finalOutput: string
+): Promise<void> {
+  const hasHtml = stepOutputs.some(o => o.includes("<!DOCTYPE html>") || o.includes("<html"));
+  const htmlStep = stepOutputs.find(o => o.includes("<!DOCTYPE html>") || o.includes("<html"));
+
+  const agent = steps[0]?.assignedAgentId
+    ? await storage.getAgent(steps[0].assignedAgentId)
+    : undefined;
+  const buildAgent = steps.find(s => s.toolName === "website_build" || s.toolName === "html_build");
+  const builderAgent = buildAgent?.assignedAgentId
+    ? await storage.getAgent(buildAgent.assignedAgentId)
+    : agent;
+
+  const agentId = builderAgent?.id || agent?.id || steps[0]?.assignedAgentId || "";
+  if (!agentId) return;
+
+  const gift = await storage.createGift({
+    agentId,
+    workspaceId: null,
+    title: product.name,
+    description: product.description || `Product from assembly line: ${assemblyLine.name}`,
+    type: hasHtml ? "code" : "text",
+    status: "ready",
+    content: finalOutput,
+    toolUsed: hasHtml ? "website_build" : "text_generate",
+    departmentRoom: "Assembly Line Output",
+    inspirationSource: `Assembly Line: ${assemblyLine.name}`,
+  });
+
+  const isWebsiteProduct = hasHtml || assemblyLine.name.toLowerCase().includes("website") || assemblyLine.name.toLowerCase().includes("template");
+  const isConsultingProduct = assemblyLine.name.toLowerCase().includes("improvement") || assemblyLine.name.toLowerCase().includes("consult");
+
+  const listingType = isWebsiteProduct ? "template" : isConsultingProduct ? "knowledge" : "knowledge";
+  const price = isWebsiteProduct ? 499 : isConsultingProduct ? 799 : 299;
+
+  const slug = `${product.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50)}-${Date.now().toString(36)}`;
+
+  const reviewStep = stepOutputs[stepOutputs.length - 1] || "";
+  const salesPitchMatch = reviewStep.match(/sales pitch[:\s]*(.+?)(?:\n|$)/i) ||
+    reviewStep.match(/storefront.*?description[:\s]*(.+?)(?:\n|$)/i);
+  const description = salesPitchMatch?.[1]?.trim() ||
+    product.description ||
+    `Professional ${isWebsiteProduct ? "website template" : "consulting deliverable"} from ${assemblyLine.name}`;
+
+  await storage.createStorefrontListing({
+    agentId,
+    factoryOwnerId: assemblyLine.ownerId,
+    sourceType: "gift",
+    sourceId: gift.id,
+    title: product.name,
+    description,
+    listingType,
+    status: "published",
+    price,
+    currency: "usd",
+    slug,
+    previewContent: hasHtml
+      ? `Complete professional website template with nav, hero, services, about, testimonials, contact form, and footer. Responsive design with modern CSS and animations.`
+      : finalOutput.slice(0, 300),
+    downloadContent: finalOutput,
+    category: isWebsiteProduct ? "Website Templates" : isConsultingProduct ? "Consulting Kits" : "Digital Products",
+    tags: isWebsiteProduct ? ["website", "template", "html", "responsive", "professional"] : ["consulting", "report", "improvement", "business"],
+  });
+
+  console.log(`[AssemblyEngine] Auto-listed "${product.name}" on storefront as ${listingType} at $${(price / 100).toFixed(2)}`);
+}
+
+async function notifyProductReady(product: Product, assemblyLine: AssemblyLine, finalOutput: string): Promise<void> {
+  const hasHtml = finalOutput.includes("<!DOCTYPE html>") || finalOutput.includes("<html");
+  const preview = hasHtml
+    ? "A complete website template is ready for download."
+    : finalOutput.slice(0, 300) + (finalOutput.length > 300 ? "..." : "");
+
+  await storage.createFactoryNotification({
+    userId: assemblyLine.ownerId,
+    type: "deliverable_ready",
+    title: `Deliverable Ready: ${product.name}`,
+    message: `The assembly line "${assemblyLine.name}" has finished producing "${product.name}". Your synthesized deliverable is ready to download.\n\n${preview}`,
+    source: "assembly_engine",
+    sourceId: product.id,
+    priority: "high",
+    actionUrl: "/products",
+  });
+  console.log(`[AssemblyEngine] Notified user: deliverable ready for "${product.name}"`);
+}
+
+export async function notifyFactory(userId: string, type: "product_ready" | "product_stalled" | "product_failed" | "system_alert" | "agent_question" | "oversight_report" | "deliverable_ready" | "action_needed", title: string, message: string, opts?: { source?: string; sourceId?: string; priority?: string; actionUrl?: string }): Promise<void> {
+  await storage.createFactoryNotification({
+    userId,
+    type,
+    title,
+    message,
+    source: opts?.source || "factory_overseer",
+    sourceId: opts?.sourceId,
+    priority: opts?.priority || "normal",
+    actionUrl: opts?.actionUrl,
+  });
 }
 
 export async function executeSingleStep(stepId: string, productId?: string): Promise<{ success: boolean; output: string; message: string }> {
@@ -160,12 +342,17 @@ export async function executeSingleStep(stepId: string, productId?: string): Pro
     const updatedSteps = await storage.getAssemblyLineSteps(assemblyLine.id);
     const allCompleted = updatedSteps.every(s => s.status === "completed");
     if (allCompleted) {
-      const allOutputs = updatedSteps.sort((a, b) => a.stepOrder - b.stepOrder).map(s => s.output || "").filter(Boolean);
+      const sortedCompleted = updatedSteps.sort((a, b) => a.stepOrder - b.stepOrder);
+      const allOutputs = sortedCompleted.map(s => s.output || "").filter(Boolean);
+      const synthesized = await synthesizeDeliverable(product, assemblyLine, sortedCompleted, allOutputs);
       await storage.updateProduct(product.id, {
         status: "completed",
-        finalOutput: allOutputs.join("\n\n---\n\n"),
+        finalOutput: synthesized,
         completedAt: new Date(),
       } as any);
+      try {
+        await notifyProductReady(product, assemblyLine, synthesized);
+      } catch {}
     }
 
     return { success: true, output, message: `Step ${step.stepOrder} completed` };

@@ -17,7 +17,7 @@ export default function ForgotPassword() {
         </CardHeader>
         <CardContent className="space-y-4 text-center">
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Creative Intelligence uses secure sign-in through Replit — there's no password to forget. Just click "Sign In" and you'll be authenticated automatically through your Replit account.
+            Pocket Factory uses secure sign-in through Replit — there's no password to forget. Just click "Sign In" and you'll be authenticated automatically through your Replit account.
           </p>
           <div className="flex flex-col gap-2 pt-2">
             <a href="/api/login">

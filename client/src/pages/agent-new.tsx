@@ -65,8 +65,28 @@ export default function AgentNew() {
   const [isActive, setIsActive] = useState(true);
   const [newCapability, setNewCapability] = useState("");
   const [customCapInput, setCustomCapInput] = useState("");
+  const [provider, setProvider] = useState<"openai" | "anthropic" | "minimax">("openai");
+  const [modelName, setModelName] = useState("");
   const [heygenAvatarId, setHeygenAvatarId] = useState("");
   const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState("");
+
+  const MODEL_OPTIONS: Record<string, { label: string; value: string }[]> = {
+    openai: [
+      { label: "GPT-4o Mini (Fast & Efficient)", value: "gpt-4o-mini" },
+      { label: "GPT-4o (Balanced)", value: "gpt-4o" },
+    ],
+    anthropic: [
+      { label: "Claude Sonnet 4 (Latest)", value: "claude-sonnet-4-20250514" },
+      { label: "Claude 3.5 Haiku (Fast)", value: "claude-3-5-haiku-20241022" },
+    ],
+    minimax: [
+      { label: "MiniMax M2.5 (Flagship)", value: "MiniMax-M2.5" },
+      { label: "MiniMax M2.5 Highspeed", value: "MiniMax-M2.5-highspeed" },
+      { label: "MiniMax M2.1", value: "MiniMax-M2.1" },
+      { label: "MiniMax M2.1 Highspeed", value: "MiniMax-M2.1-highspeed" },
+      { label: "MiniMax M2", value: "MiniMax-M2" },
+    ],
+  };
 
   const { data: workspaces } = useQuery<Workspace[]>({
     queryKey: ["/api/workspaces"],
@@ -79,6 +99,8 @@ export default function AgentNew() {
       workspaceId: string; 
       capabilities: string[];
       isActive: boolean;
+      provider?: string;
+      modelName?: string;
       heygenAvatarId?: string;
       elevenLabsVoiceId?: string;
     }) => {
@@ -124,6 +146,8 @@ export default function AgentNew() {
     }
     createMutation.mutate({ 
       name, description, workspaceId, capabilities, isActive,
+      provider: provider || "openai",
+      modelName: modelName || undefined,
       heygenAvatarId: heygenAvatarId || undefined,
       elevenLabsVoiceId: elevenLabsVoiceId || undefined,
     });
@@ -200,6 +224,46 @@ export default function AgentNew() {
                 rows={3}
                 data-testid="input-agent-description"
               />
+            </div>
+
+            <div className="space-y-4 p-4 rounded-lg border bg-muted/30">
+              <div className="flex items-center gap-2 mb-2">
+                <Bot className="h-4 w-4 text-primary" />
+                <Label className="text-sm font-medium">AI Provider & Model</Label>
+              </div>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Choose which AI powers this agent's thinking
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="provider" className="text-xs">Provider</Label>
+                  <Select value={provider} onValueChange={(value: "openai" | "anthropic" | "minimax") => { setProvider(value); setModelName(""); }}>
+                    <SelectTrigger data-testid="select-provider">
+                      <SelectValue placeholder="Select provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                      <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                      <SelectItem value="minimax">MiniMax</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="modelName" className="text-xs">Model</Label>
+                  <Select value={modelName} onValueChange={setModelName}>
+                    <SelectTrigger data-testid="select-model">
+                      <SelectValue placeholder="Default model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODEL_OPTIONS[provider]?.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-4">

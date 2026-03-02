@@ -19,7 +19,7 @@ export function SubscriptionBanner() {
 
   if (!profile) return null;
   if (profile.isAdmin) return null;
-  if (profile.subscriptionStatus === "active") return null;
+  if (profile.subscriptionStatus === "active" || profile.subscriptionStatus === "trialing") return null;
   if (dismissed) return null;
 
   const handleSubscribe = async () => {
@@ -50,7 +50,7 @@ export function SubscriptionBanner() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold truncate">Upgrade to Pro</span>
-                <Badge variant="outline" className="text-[10px] shrink-0">$9/mo</Badge>
+                <Badge variant="outline" className="text-[10px] shrink-0">90-day free trial</Badge>
               </div>
               <p className="text-xs text-muted-foreground truncate">
                 Unlock full platform access with unlimited agents, assembly lines, and more
@@ -75,7 +75,7 @@ export function SubscriptionBanner() {
               data-testid="button-banner-subscribe"
             >
               {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-              Subscribe
+              Start Free Trial
             </Button>
             <Button
               size="sm"

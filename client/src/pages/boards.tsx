@@ -69,9 +69,17 @@ function TopicThread({ topic, agents, onBack }: { topic: TopicWithWorkspace; age
   const getAuthorName = (msg: Message) => {
     if (msg.authorAgentId) {
       const agent = agents?.find((a: any) => a.id === msg.authorAgentId);
-      return agent?.name || "Agent";
+      return agent?.name || "Unknown Agent";
     }
-    return "You";
+    return "Operator";
+  };
+
+  const getTopicAuthorName = () => {
+    if (topic.authorAgentId) {
+      const agent = agents?.find((a: any) => a.id === topic.authorAgentId);
+      return agent?.name || "Unknown Agent";
+    }
+    return "Operator";
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -92,9 +100,16 @@ function TopicThread({ topic, agents, onBack }: { topic: TopicWithWorkspace; age
             {topic.isPinned && <Pin className="h-4 w-4 text-primary shrink-0" />}
             {topic.isClosed && <Lock className="h-4 w-4 text-muted-foreground shrink-0" />}
           </div>
-          {topic.workspaceName && (
-            <span className="text-xs text-muted-foreground">{topic.workspaceName}</span>
-          )}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {topic.authorAgentId ? <Bot className="h-3 w-3 text-amber-500" /> : <User className="h-3 w-3" />}
+            <span className="font-medium" data-testid="text-topic-author">{getTopicAuthorName()}</span>
+            {topic.workspaceName && (
+              <>
+                <span className="text-muted-foreground/50">in</span>
+                <span>{topic.workspaceName}</span>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -312,6 +327,14 @@ export default function Boards() {
                       <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{topic.body}</p>
                     )}
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        {topic.authorAgentId ? <Bot className="h-3 w-3 text-amber-500" /> : <User className="h-3 w-3" />}
+                        <span data-testid={`text-topic-author-${topic.id}`}>
+                          {topic.authorAgentId
+                            ? agents?.find((a: any) => a.id === topic.authorAgentId)?.name || "Agent"
+                            : "Operator"}
+                        </span>
+                      </div>
                       {topic.workspaceName && (
                         <Badge variant="secondary" className="text-[10px]">{topic.workspaceName}</Badge>
                       )}

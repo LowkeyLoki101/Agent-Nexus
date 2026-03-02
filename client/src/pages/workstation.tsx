@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { StickyNote, FileCode, ClipboardCheck, Plus, Trash2, Check, X, Bot, FolderOpen, Loader2, Terminal, Send, Zap } from "lucide-react";
+import { MarkdownMessage } from "@/components/markdown-message";
 
 const DRAFT_STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
   draft: { label: "Draft", variant: "secondary" },
@@ -559,6 +560,15 @@ function CommandCenterTab() {
             try {
               const data = JSON.parse(line.slice(6));
               if (data.done) break;
+              if (data.actions && Array.isArray(data.actions)) {
+                const actionText = `*[Actions performed: ${data.actions.join(", ")}]*\n\n`;
+                assistantContent += actionText;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: assistantContent };
+                  return updated;
+                });
+              }
               if (data.content) {
                 assistantContent += data.content;
                 setMessages(prev => {
@@ -594,7 +604,7 @@ function CommandCenterTab() {
               <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
               <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
               <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
-                Chat with Creative Intelligence to plan operations, create tools, configure departments, or get factory insights.
+                Plan operations, create tools, configure departments, or get factory insights.
               </p>
               <div className="flex flex-wrap gap-2 justify-center mt-4">
                 {["Show factory health", "Check for cold zones", "Assign agents to rooms", "Review productivity"].map(suggestion => (
@@ -618,7 +628,7 @@ function CommandCenterTab() {
                 msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
               }`} data-testid={`cmd-message-${msg.role}-${i}`}>
                 {msg.content ? (
-                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                  <MarkdownMessage content={msg.content} />
                 ) : (isStreaming && i === messages.length - 1 ? (
                   <span className="flex items-center gap-1">
                     <Loader2 className="h-3 w-3 animate-spin" /> Thinking...

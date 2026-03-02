@@ -1,11 +1,7 @@
-import OpenAI from "openai";
 import { storage } from "./storage";
 import type { Agent, NewsroomInterview } from "@shared/schema";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { SOUL_DOCUMENT } from "./soulDocument";
+import { getOpenAIClient, trackUsage } from "./lib/openai";
 
 const HERALD_MODEL = "gpt-4o";
 const INTERVIEW_QUESTIONS = [
@@ -77,13 +73,16 @@ export async function interviewAgent(agent: Agent): Promise<NewsroomInterview> {
     const questions = INTERVIEW_QUESTIONS.map(q => q.replace("{agentName}", agent.name));
     const answers: string[] = [];
 
+    const { client: openaiClient } = await getOpenAIClient();
     for (const question of questions) {
-      const completion = await openai.chat.completions.create({
+      const completion = await openaiClient.chat.completions.create({
         model: HERALD_MODEL,
         messages: [
           {
             role: "system",
-            content: `You are ${agent.name}, an AI agent in the Creative Intelligence platform. Your role: ${agent.description || "team member"}.
+            content: `${SOUL_DOCUMENT}
+
+You are ${agent.name}, an AI agent in the Pocket Factory platform. Your role: ${agent.description || "team member"}.
 Your capabilities: ${(agent.capabilities || []).join(", ")}.
 Your recent context:
 ${agentContext}
@@ -96,10 +95,13 @@ You are being interviewed by Herald, the newsroom agent. Answer naturally and co
         temperature: 0.8,
       });
 
+      if (completion.usage) {
+        trackUsage("system", HERALD_MODEL, "herald-interview", completion.usage.prompt_tokens, completion.usage.completion_tokens).catch(() => {});
+      }
       answers.push(completion.choices[0]?.message?.content || "No response.");
     }
 
-    const excerptCompletion = await openai.chat.completions.create({
+    const excerptCompletion = await openaiClient.chat.completions.create({
       model: HERALD_MODEL,
       messages: [
         {
@@ -115,6 +117,9 @@ You are being interviewed by Herald, the newsroom agent. Answer naturally and co
       temperature: 0.7,
     });
 
+    if (excerptCompletion.usage) {
+      trackUsage("system", HERALD_MODEL, "herald-interview", excerptCompletion.usage.prompt_tokens, excerptCompletion.usage.completion_tokens).catch(() => {});
+    }
     const excerpt = excerptCompletion.choices[0]?.message?.content || `${agent.name} shared insights on recent work.`;
 
     const updated = await storage.updateNewsroomInterview(interview.id, {
@@ -168,12 +173,15 @@ export async function generateBroadcast(): Promise<any> {
       recentGifts.length > 0 ? `Recent gifts: ${recentGifts.map(g => `${g.title} by agent`).join(", ")}` : "",
     ].filter(Boolean).join("\n");
 
-    const broadcastCompletion = await openai.chat.completions.create({
+    const { client: broadcastClient } = await getOpenAIClient();
+    const broadcastCompletion = await broadcastClient.chat.completions.create({
       model: HERALD_MODEL,
       messages: [
         {
           role: "system",
-          content: `You are Herald, the lead newsroom agent for Emergent Intelligence. You produce radio-style news broadcasts about the Creative Intelligence factory.
+          content: `${SOUL_DOCUMENT}
+
+You are Herald, the lead newsroom agent for Emergent Intelligence. You produce radio-style news broadcasts about the Creative Intelligence factory.
 
 Your broadcast style:
 - Warm, conversational radio host tone — like a beloved morning show host
@@ -215,6 +223,9 @@ Respond in this exact JSON format:
       temperature: 0.8,
     });
 
+    if (broadcastCompletion.usage) {
+      trackUsage("system", HERALD_MODEL, "herald-broadcast", broadcastCompletion.usage.prompt_tokens, broadcastCompletion.usage.completion_tokens).catch(() => {});
+    }
     let broadcastData: any;
     const rawContent = broadcastCompletion.choices[0]?.message?.content || "";
     try {
@@ -336,8 +347,8 @@ function scheduleNext() {
 export function startHeraldNewsroom() {
   if (state.running) return;
 
-  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-    console.log("[Herald] Skipped: AI_INTEGRATIONS_OPENAI_API_KEY not set");
+  if (!process.env.OPENAI_API_KEY) {
+    console.log("[Herald] Skipped: OPENAI_API_KEY not set");
     return;
   }
 

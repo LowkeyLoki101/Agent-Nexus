@@ -32,12 +32,12 @@ async function seedStripeProducts() {
 
   const price = await stripe.prices.create({
     product: product.id,
-    unit_amount: 900,
+    unit_amount: 4900,
     currency: 'usd',
     recurring: { interval: 'month' },
     metadata: { plan: 'pro_monthly' },
   });
-  console.log('Price created:', price.id, '($9/month)');
+  console.log('Price created:', price.id, '($49/month)');
 
   const coupon = await stripe.coupons.create({
     name: 'FOUNDING_MEMBER',

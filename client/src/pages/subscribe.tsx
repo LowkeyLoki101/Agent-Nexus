@@ -49,7 +49,7 @@ export default function Subscribe() {
     }
   };
 
-  const isActive = profile?.subscriptionStatus === "active";
+  const isActive = profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing";
 
   const features = [
     { icon: Factory, label: "Agent Factory with 3D Visualization" },
@@ -72,7 +72,7 @@ export default function Subscribe() {
           </CardHeader>
           <CardContent className="space-y-4 text-center">
             <p className="text-sm text-muted-foreground">
-              You have full access to Creative Intelligence. Your subscription is active and billing is handled automatically.
+              You have full access to Pocket Factory. Your subscription is active and billing is handled automatically.
             </p>
             <div className="flex flex-col gap-2 pt-2">
               <Button variant="outline" onClick={handleManageBilling} disabled={isPortalLoading} className="gap-2" data-testid="button-manage-billing">
@@ -97,11 +97,10 @@ export default function Subscribe() {
       <div className="w-full max-w-lg space-y-6">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2">
-            <span className="text-lg font-bold tracking-tight text-primary">CB</span>
-            <span className="text-xs text-muted-foreground font-medium tracking-widest">|</span>
-            <span className="text-lg font-bold tracking-tight">CREATIVES</span>
+            <span className="text-lg font-bold tracking-tight text-primary">Pocket</span>
+            <span className="text-lg font-bold tracking-tight">Factory</span>
           </div>
-          <h1 className="text-2xl font-bold">Creative Intelligence Pro</h1>
+          <h1 className="text-2xl font-bold">Pocket Factory Pro</h1>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Your autonomous AI collaboration platform. Build, manage, and deploy intelligent agents that work together.
           </p>
@@ -109,11 +108,15 @@ export default function Subscribe() {
 
         <Card className="border-primary/20">
           <CardHeader className="text-center pb-2">
-            <div className="flex items-center justify-center gap-3">
-              <span className="text-4xl font-bold">$9</span>
-              <div className="text-left">
-                <span className="text-sm text-muted-foreground">/month</span>
-                <Badge variant="outline" className="ml-2 text-[10px]">PRO</Badge>
+            <div className="flex flex-col items-center gap-1">
+              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">LIMITED BETA PRICING</Badge>
+              <div className="flex items-center gap-2">
+                <span className="text-lg line-through text-muted-foreground">$500</span>
+                <span className="text-4xl font-bold">$49</span>
+                <div className="text-left">
+                  <span className="text-sm text-muted-foreground">/month</span>
+                  <Badge variant="outline" className="ml-2 text-[10px]">PRO</Badge>
+                </div>
               </div>
             </div>
           </CardHeader>
@@ -148,13 +151,13 @@ export default function Subscribe() {
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <CreditCard className="h-4 w-4" />
+                  <Zap className="h-4 w-4" />
                 )}
-                Subscribe Now
+                Start 90-Day Free Trial
                 <ArrowRight className="h-4 w-4" />
               </Button>
               <p className="text-[10px] text-center text-muted-foreground">
-                Cancel anytime. Secure payment powered by Stripe.
+                No credit card required. 90-day free trial, then $49/month (beta price). Cancel anytime.
               </p>
             </div>
           </CardContent>
