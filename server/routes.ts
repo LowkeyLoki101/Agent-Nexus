@@ -1156,27 +1156,43 @@ export async function registerRoutes(
         const usage = getUsage();
         trackUsage(userId, modelName, "agent-chat", usage.inputTokens, usage.outputTokens).catch(() => {});
       } else {
-        const { client } = await getOpenAIClient(userId);
-        const stream = await client.chat.completions.create({
-          model: modelName,
-          messages,
-          max_completion_tokens: 1024,
-          stream: true,
-          stream_options: { include_usage: true },
-        });
-        let promptTokens = 0, completionTokens = 0;
-        for await (const chunk of stream) {
-          if (chunk.usage) {
-            promptTokens = chunk.usage.prompt_tokens;
-            completionTokens = chunk.usage.completion_tokens;
+        try {
+          const { client } = await getOpenAIClient(userId);
+          const stream = await client.chat.completions.create({
+            model: modelName,
+            messages,
+            max_completion_tokens: 1024,
+            stream: true,
+            stream_options: { include_usage: true },
+          });
+          let promptTokens = 0, completionTokens = 0;
+          for await (const chunk of stream) {
+            if (chunk.usage) {
+              promptTokens = chunk.usage.prompt_tokens;
+              completionTokens = chunk.usage.completion_tokens;
+            }
+            const content = chunk.choices?.[0]?.delta?.content;
+            if (content) {
+              fullReply += content;
+              res.write(`data: ${JSON.stringify({ content })}\n\n`);
+            }
           }
-          const content = chunk.choices?.[0]?.delta?.content;
-          if (content) {
-            fullReply += content;
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          trackUsage(userId, modelName, "agent-chat", promptTokens, completionTokens).catch(() => {});
+        } catch (openaiErr: any) {
+          if (openaiErr?.status === 429 || openaiErr?.code === "insufficient_quota") {
+            console.log(`[Chat] OpenAI 429 for ${agent.name}, falling back to Anthropic claude-haiku-4-5`);
+            const fallbackModel = "claude-haiku-4-5";
+            const { stream: fallbackStream, getUsage: getFallbackUsage } = await anthropicStream(fallbackModel, messages, 1024);
+            for await (const text of fallbackStream) {
+              fullReply += text;
+              res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+            }
+            const fbUsage = getFallbackUsage();
+            trackUsage(userId, fallbackModel, "agent-chat-fallback", fbUsage.inputTokens, fbUsage.outputTokens).catch(() => {});
+          } else {
+            throw openaiErr;
           }
         }
-        trackUsage(userId, modelName, "agent-chat", promptTokens, completionTokens).catch(() => {});
       }
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);

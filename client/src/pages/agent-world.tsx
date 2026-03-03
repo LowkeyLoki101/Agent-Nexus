@@ -2438,11 +2438,17 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
                     </span>
                   </div>
                   {ctx.room && <p className="text-[10px] text-muted-foreground">Room: {ctx.room}</p>}
+                  {entry.entryType && entry.entryType !== "observation" && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0">{entry.entryType}</Badge>
+                  )}
                   {entry.userMessage && (
                     <p className="text-xs"><span className="font-medium text-muted-foreground">User:</span> {entry.userMessage.slice(0, 150)}{entry.userMessage.length > 150 ? "..." : ""}</p>
                   )}
                   {entry.agentResponse && (
                     <p className="text-xs"><span className="font-medium text-muted-foreground">Agent:</span> {entry.agentResponse.slice(0, 150)}{entry.agentResponse.length > 150 ? "..." : ""}</p>
+                  )}
+                  {!entry.userMessage && !entry.agentResponse && entry.content && (
+                    <p className="text-xs text-muted-foreground">{entry.content.slice(0, 200)}{entry.content.length > 200 ? "..." : ""}</p>
                   )}
                 </div>
               );
