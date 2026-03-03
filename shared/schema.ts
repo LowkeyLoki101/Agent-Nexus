@@ -98,6 +98,9 @@ export const agents = pgTable("agents", {
   lastWeeklyDiaryAt: timestamp("last_weekly_diary_at"),
   heygenAvatarId: text("heygen_avatar_id"),
   elevenLabsVoiceId: text("elevenlabs_voice_id"),
+  generation: integer("generation").default(0),
+  parentIds: text("parent_ids").array(),
+  evolveStatus: text("evolve_status").default("alive"),
   createdById: varchar("created_by_id").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -208,6 +211,8 @@ export const gifts = pgTable("gifts", {
   departmentRoom: text("department_room"),
   inspirationSource: text("inspiration_source"),
   likes: integer("likes").default(0),
+  exchangeAlignment: text("exchange_alignment"),
+  courtNotes: text("court_notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -259,6 +264,7 @@ export const assemblyLineSteps = pgTable("assembly_line_steps", {
   instructions: text("instructions"),
   status: stepStatusEnum("status").notNull().default("pending"),
   output: text("output"),
+  acceptanceCriteria: text("acceptance_criteria"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -403,6 +409,10 @@ export const discussionTopics = pgTable("discussion_topics", {
   body: text("body"),
   authorId: varchar("author_id").notNull(),
   authorAgentId: varchar("author_agent_id").references(() => agents.id),
+  content: text("content"),
+  authorType: entityTypeEnum("author_type").notNull().default("human"),
+  authorName: text("author_name").notNull().default("Unknown"),
+  category: text("category"),
   isPinned: boolean("is_pinned").default(false),
   isClosed: boolean("is_closed").default(false),
   createdAt: timestamp("created_at").defaultNow(),
@@ -477,6 +487,8 @@ export const ebooks = pgTable("ebooks", {
   price: integer("price").notNull().default(0),
   status: ebookStatusEnum("status").notNull().default("writing"),
   totalSales: integer("total_sales").default(0),
+  audioUrl: text("audio_url"),
+  audioGenerating: boolean("audio_generating").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -579,6 +591,7 @@ export const agentMemory = pgTable("agent_memory", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
   summary: text("summary").notNull(),
+  lastUpdated: timestamp("last_updated").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 

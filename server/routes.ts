@@ -1099,6 +1099,629 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== Gifts ====================
+
+  app.get("/api/gifts", isAuthenticated, async (_req, res) => {
+    try {
+      const allGifts = await storage.getAllGifts(200);
+      res.json(allGifts);
+    } catch (error) {
+      console.error("Error fetching gifts:", error);
+      res.status(500).json({ message: "Failed to fetch gifts" });
+    }
+  });
+
+  app.get("/api/gifts/recent", isAuthenticated, async (_req, res) => {
+    try {
+      const recent = await storage.getRecentGifts(50);
+      res.json(recent);
+    } catch (error) {
+      console.error("Error fetching recent gifts:", error);
+      res.status(500).json({ message: "Failed to fetch recent gifts" });
+    }
+  });
+
+  app.get("/api/gifts/heatmap", isAuthenticated, async (_req, res) => {
+    try {
+      const allGifts = await storage.getAllGifts(500);
+      const heatmap: Record<string, number> = {};
+      for (const gift of allGifts) {
+        if (gift.workspaceId) {
+          heatmap[gift.workspaceId] = (heatmap[gift.workspaceId] || 0) + 1;
+        }
+      }
+      res.json(heatmap);
+    } catch (error) {
+      console.error("Error fetching gift heatmap:", error);
+      res.status(500).json({ message: "Failed to fetch heatmap" });
+    }
+  });
+
+  app.get("/api/gifts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const gift = await storage.getGift(req.params.id);
+      if (!gift) return res.status(404).json({ message: "Gift not found" });
+      res.json(gift);
+    } catch (error) {
+      console.error("Error fetching gift:", error);
+      res.status(500).json({ message: "Failed to fetch gift" });
+    }
+  });
+
+  app.post("/api/gifts/spark", isAuthenticated, async (req, res) => {
+    try {
+      const { agentId, giftType } = req.body;
+      if (!agentId) return res.status(400).json({ message: "Agent ID is required" });
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const gift = await storage.createGift({
+        agentId,
+        workspaceId: agent.workspaceId,
+        title: `Sparked ${giftType || "gift"} from ${agent.name}`,
+        description: `A ${giftType || "gift"} sparked by request`,
+        content: "Being created...",
+        giftType: giftType || "other",
+        status: "draft",
+      });
+      res.json(gift);
+    } catch (error) {
+      console.error("Error sparking gift:", error);
+      res.status(500).json({ message: "Failed to spark gift" });
+    }
+  });
+
+  app.post("/api/gifts/:id/like", isAuthenticated, async (req, res) => {
+    try {
+      await storage.likeGift(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error liking gift:", error);
+      res.status(500).json({ message: "Failed to like gift" });
+    }
+  });
+
+  app.post("/api/gifts/:id/send-to-codeshop", isAuthenticated, async (req, res) => {
+    try {
+      const gift = await storage.getGift(req.params.id);
+      if (!gift) return res.status(404).json({ message: "Gift not found" });
+      const userId = getUserId(req as AuthenticatedRequest);
+      const note = await storage.createAgentNote({
+        agentId: gift.agentId,
+        title: `Gift: ${gift.title}`,
+        content: gift.content || gift.description || "",
+        category: "gift_import",
+        createdById: userId,
+      });
+      res.json(note);
+    } catch (error) {
+      console.error("Error sending gift to codeshop:", error);
+      res.status(500).json({ message: "Failed to send to codeshop" });
+    }
+  });
+
+  app.get("/api/gifts/:id/comments", isAuthenticated, async (req, res) => {
+    try {
+      const comments = await storage.getGiftComments(req.params.id);
+      res.json(comments);
+    } catch (error) {
+      console.error("Error fetching comments:", error);
+      res.status(500).json({ message: "Failed to fetch comments" });
+    }
+  });
+
+  app.post("/api/gifts/:id/comments", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const comment = await storage.createGiftComment({
+        giftId: req.params.id,
+        authorId: userId,
+        authorType: req.body.authorType || "human",
+        content: req.body.content,
+      });
+      res.json(comment);
+    } catch (error) {
+      console.error("Error creating comment:", error);
+      res.status(500).json({ message: "Failed to create comment" });
+    }
+  });
+
+  // ==================== Assembly Lines ====================
+
+  app.get("/api/assembly-lines", isAuthenticated, async (_req, res) => {
+    try {
+      const lines = await storage.getAllAssemblyLines();
+      res.json(lines);
+    } catch (error) {
+      console.error("Error fetching assembly lines:", error);
+      res.status(500).json({ message: "Failed to fetch assembly lines" });
+    }
+  });
+
+  app.get("/api/assembly-lines/:id", isAuthenticated, async (req, res) => {
+    try {
+      const line = await storage.getAssemblyLine(req.params.id);
+      if (!line) return res.status(404).json({ message: "Assembly line not found" });
+      res.json(line);
+    } catch (error) {
+      console.error("Error fetching assembly line:", error);
+      res.status(500).json({ message: "Failed to fetch assembly line" });
+    }
+  });
+
+  app.post("/api/assembly-lines", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const line = await storage.createAssemblyLine({
+        ...req.body,
+        createdById: userId,
+      });
+      res.json(line);
+    } catch (error) {
+      console.error("Error creating assembly line:", error);
+      res.status(500).json({ message: "Failed to create assembly line" });
+    }
+  });
+
+  app.patch("/api/assembly-lines/:id", isAuthenticated, async (req, res) => {
+    try {
+      const line = await storage.updateAssemblyLine(req.params.id, req.body);
+      if (!line) return res.status(404).json({ message: "Assembly line not found" });
+      res.json(line);
+    } catch (error) {
+      console.error("Error updating assembly line:", error);
+      res.status(500).json({ message: "Failed to update assembly line" });
+    }
+  });
+
+  app.delete("/api/assembly-lines/:id", isAuthenticated, async (req, res) => {
+    try {
+      await storage.deleteAssemblyLine(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting assembly line:", error);
+      res.status(500).json({ message: "Failed to delete assembly line" });
+    }
+  });
+
+  app.get("/api/assembly-lines/:id/steps", isAuthenticated, async (req, res) => {
+    try {
+      const steps = await storage.getAssemblyLineSteps(req.params.id);
+      res.json(steps);
+    } catch (error) {
+      console.error("Error fetching steps:", error);
+      res.status(500).json({ message: "Failed to fetch steps" });
+    }
+  });
+
+  app.post("/api/assembly-lines/:id/steps", isAuthenticated, async (req, res) => {
+    try {
+      const step = await storage.createAssemblyLineStep({
+        ...req.body,
+        assemblyLineId: req.params.id,
+      });
+      res.json(step);
+    } catch (error) {
+      console.error("Error creating step:", error);
+      res.status(500).json({ message: "Failed to create step" });
+    }
+  });
+
+  app.post("/api/assembly-line-steps/:id/execute", isAuthenticated, async (req, res) => {
+    try {
+      const step = await storage.getAssemblyLineStepById(req.params.id);
+      if (!step) return res.status(404).json({ message: "Step not found" });
+      const updated = await storage.updateAssemblyLineStep(req.params.id, { status: "processing" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error executing step:", error);
+      res.status(500).json({ message: "Failed to execute step" });
+    }
+  });
+
+  // ==================== Products ====================
+
+  app.get("/api/products", isAuthenticated, async (_req, res) => {
+    try {
+      const products = await storage.getAllProducts(100);
+      res.json(products);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res.status(500).json({ message: "Failed to fetch products" });
+    }
+  });
+
+  app.get("/api/products/:id", isAuthenticated, async (req, res) => {
+    try {
+      const product = await storage.getProduct(req.params.id);
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      res.json(product);
+    } catch (error) {
+      console.error("Error fetching product:", error);
+      res.status(500).json({ message: "Failed to fetch product" });
+    }
+  });
+
+  app.post("/api/products/:id/run", isAuthenticated, async (req, res) => {
+    try {
+      const product = await storage.updateProduct(req.params.id, { status: "processing" });
+      if (!product) return res.status(404).json({ message: "Product not found" });
+      res.json(product);
+    } catch (error) {
+      console.error("Error running product:", error);
+      res.status(500).json({ message: "Failed to run product" });
+    }
+  });
+
+  app.post("/api/products/run-all", isAuthenticated, async (_req, res) => {
+    try {
+      const queued = await storage.getQueuedProducts();
+      for (const p of queued) {
+        await storage.updateProduct(p.id, { status: "processing" });
+      }
+      res.json({ processed: queued.length });
+    } catch (error) {
+      console.error("Error running all products:", error);
+      res.status(500).json({ message: "Failed to run products" });
+    }
+  });
+
+  // ==================== Discussion Topics ====================
+
+  app.get("/api/topics", isAuthenticated, async (_req, res) => {
+    try {
+      const topics = await storage.getDiscussionTopics(100);
+      res.json(topics);
+    } catch (error) {
+      console.error("Error fetching topics:", error);
+      res.status(500).json({ message: "Failed to fetch topics" });
+    }
+  });
+
+  app.get("/api/topics/:id", isAuthenticated, async (req, res) => {
+    try {
+      const topic = await storage.getDiscussionTopic(req.params.id);
+      if (!topic) return res.status(404).json({ message: "Topic not found" });
+      res.json(topic);
+    } catch (error) {
+      console.error("Error fetching topic:", error);
+      res.status(500).json({ message: "Failed to fetch topic" });
+    }
+  });
+
+  app.post("/api/topics", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const topic = await storage.createDiscussionTopic({
+        ...req.body,
+        authorId: userId,
+        authorType: req.body.authorType || "human",
+      });
+      res.json(topic);
+    } catch (error) {
+      console.error("Error creating topic:", error);
+      res.status(500).json({ message: "Failed to create topic" });
+    }
+  });
+
+  app.get("/api/topics/:id/messages", isAuthenticated, async (req, res) => {
+    try {
+      const messages = await storage.getMessagesByTopic(req.params.id);
+      res.json(messages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+      res.status(500).json({ message: "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/topics/:id/messages", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const message = await storage.createMessage({
+        topicId: req.params.id,
+        authorId: userId,
+        authorType: req.body.authorType || "human",
+        content: req.body.content,
+      });
+      res.json(message);
+    } catch (error) {
+      console.error("Error creating message:", error);
+      res.status(500).json({ message: "Failed to create message" });
+    }
+  });
+
+  app.get("/api/workspaces/:id/topics", isAuthenticated, async (req, res) => {
+    try {
+      const topics = await storage.getDiscussionTopics(100);
+      const filtered = topics.filter((t: any) => t.workspaceId === req.params.id);
+      res.json(filtered);
+    } catch (error) {
+      console.error("Error fetching workspace topics:", error);
+      res.status(500).json({ message: "Failed to fetch topics" });
+    }
+  });
+
+  app.post("/api/workspaces/:id/topics", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const topic = await storage.createDiscussionTopic({
+        ...req.body,
+        workspaceId: req.params.id,
+        authorId: userId,
+        authorType: req.body.authorType || "human",
+      });
+      res.json(topic);
+    } catch (error) {
+      console.error("Error creating topic:", error);
+      res.status(500).json({ message: "Failed to create topic" });
+    }
+  });
+
+  // ==================== eBooks & Library ====================
+
+  app.get("/api/ebooks", isAuthenticated, async (_req, res) => {
+    try {
+      const ebooks = await storage.getEbooks(100);
+      res.json(ebooks);
+    } catch (error) {
+      console.error("Error fetching ebooks:", error);
+      res.status(500).json({ message: "Failed to fetch ebooks" });
+    }
+  });
+
+  app.get("/api/ebooks/:id", isAuthenticated, async (req, res) => {
+    try {
+      const ebook = await storage.getEbook(req.params.id);
+      if (!ebook) return res.status(404).json({ message: "eBook not found" });
+      res.json(ebook);
+    } catch (error) {
+      console.error("Error fetching ebook:", error);
+      res.status(500).json({ message: "Failed to fetch ebook" });
+    }
+  });
+
+  app.post("/api/ebooks/:id/purchase", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const purchase = await storage.createEbookPurchase({
+        ebookId: req.params.id,
+        buyerId: userId,
+        price: req.body.price || 0,
+      });
+      res.json(purchase);
+    } catch (error) {
+      console.error("Error purchasing ebook:", error);
+      res.status(500).json({ message: "Failed to purchase ebook" });
+    }
+  });
+
+  app.get("/api/book-requests", isAuthenticated, async (_req, res) => {
+    try {
+      const requests = await storage.getBookRequests();
+      res.json(requests);
+    } catch (error) {
+      console.error("Error fetching book requests:", error);
+      res.status(500).json({ message: "Failed to fetch book requests" });
+    }
+  });
+
+  app.post("/api/book-requests", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const request = await storage.createBookRequest({
+        ...req.body,
+        requesterId: userId,
+      });
+      res.json(request);
+    } catch (error) {
+      console.error("Error creating book request:", error);
+      res.status(500).json({ message: "Failed to create book request" });
+    }
+  });
+
+  // ==================== Agent Notes & File Drafts ====================
+
+  app.get("/api/agent-notes", isAuthenticated, async (req, res) => {
+    try {
+      const agentId = req.query.agentId as string | undefined;
+      const notes = await storage.getAgentNotes(agentId);
+      res.json(notes);
+    } catch (error) {
+      console.error("Error fetching agent notes:", error);
+      res.status(500).json({ message: "Failed to fetch notes" });
+    }
+  });
+
+  app.post("/api/agent-notes", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const note = await storage.createAgentNote({
+        ...req.body,
+        createdById: userId,
+      });
+      res.json(note);
+    } catch (error) {
+      console.error("Error creating agent note:", error);
+      res.status(500).json({ message: "Failed to create note" });
+    }
+  });
+
+  app.patch("/api/agent-notes/:id", isAuthenticated, async (req, res) => {
+    try {
+      const note = await storage.updateAgentNote(req.params.id, req.body);
+      if (!note) return res.status(404).json({ message: "Note not found" });
+      res.json(note);
+    } catch (error) {
+      console.error("Error updating agent note:", error);
+      res.status(500).json({ message: "Failed to update note" });
+    }
+  });
+
+  app.delete("/api/agent-notes/:id", isAuthenticated, async (req, res) => {
+    try {
+      await storage.deleteAgentNote(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting agent note:", error);
+      res.status(500).json({ message: "Failed to delete note" });
+    }
+  });
+
+  app.get("/api/agent-file-drafts", isAuthenticated, async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const drafts = await storage.getAgentFileDrafts(status);
+      res.json(drafts);
+    } catch (error) {
+      console.error("Error fetching file drafts:", error);
+      res.status(500).json({ message: "Failed to fetch drafts" });
+    }
+  });
+
+  app.patch("/api/agent-file-drafts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const draft = await storage.updateAgentFileDraft(req.params.id, req.body);
+      if (!draft) return res.status(404).json({ message: "Draft not found" });
+      res.json(draft);
+    } catch (error) {
+      console.error("Error updating file draft:", error);
+      res.status(500).json({ message: "Failed to update draft" });
+    }
+  });
+
+  // ==================== Daemon Control ====================
+
+  app.get("/api/daemon/status", isAuthenticated, async (_req, res) => {
+    try {
+      const { getDaemonStatus } = await import("./agentDaemon");
+      res.json(getDaemonStatus());
+    } catch (error) {
+      res.json({ running: false, activityCount: 0, lastAction: null, errors: 0 });
+    }
+  });
+
+  app.post("/api/daemon/start", isAuthenticated, async (_req, res) => {
+    try {
+      const { startDaemon } = await import("./agentDaemon");
+      startDaemon();
+      res.json({ success: true, message: "Daemon started" });
+    } catch (error) {
+      console.error("Error starting daemon:", error);
+      res.status(500).json({ message: "Failed to start daemon" });
+    }
+  });
+
+  app.post("/api/daemon/stop", isAuthenticated, async (_req, res) => {
+    try {
+      const { stopDaemon } = await import("./agentDaemon");
+      stopDaemon();
+      res.json({ success: true, message: "Daemon stopped" });
+    } catch (error) {
+      console.error("Error stopping daemon:", error);
+      res.status(500).json({ message: "Failed to stop daemon" });
+    }
+  });
+
+  app.post("/api/daemon/trigger", isAuthenticated, async (_req, res) => {
+    try {
+      const { triggerManualTick } = await import("./agentDaemon");
+      await triggerManualTick();
+      res.json({ success: true, message: "Daemon triggered" });
+    } catch (error) {
+      console.error("Error triggering daemon:", error);
+      res.status(500).json({ message: "Failed to trigger daemon" });
+    }
+  });
+
+  // ==================== Factory Health ====================
+
+  app.get("/api/factory/health", isAuthenticated, async (_req, res) => {
+    try {
+      const allAgents = await storage.getAllAgents();
+      const workspaces = await storage.getAllWorkspaces();
+      const assemblyLines = await storage.getAllAssemblyLines();
+      const activeAgents = allAgents.filter((a: any) => a.isActive);
+      const activeLines = assemblyLines.filter((l: any) => l.status === "active");
+
+      const roomActivity = workspaces.map((ws: any) => {
+        const wsAgents = allAgents.filter((a: any) => a.workspaceId === ws.id && a.isActive);
+        return {
+          roomId: ws.id,
+          roomName: ws.name,
+          agentCount: wsAgents.length,
+          agentNames: wsAgents.map((a: any) => a.name),
+          isCold: wsAgents.length === 0,
+        };
+      });
+
+      const coldZones = roomActivity.filter((r: any) => r.isCold && !r.roomName.toLowerCase().includes("break room"));
+
+      const driftRisks: any[] = [];
+      for (const agent of allAgents) {
+        if (!agent.isActive) {
+          driftRisks.push({ agentName: agent.name, issue: "Agent inactive", severity: "low" as const });
+        }
+      }
+
+      let pendingSteps: any[] = [];
+      for (const line of activeLines) {
+        const steps = await storage.getAssemblyLineSteps(line.id);
+        const pending = steps.filter((s: any) => s.status === "pending" || s.status === "in_progress");
+        pendingSteps.push(...pending.map((s: any) => ({
+          lineName: line.name,
+          stepOrder: s.stepOrder,
+          room: s.departmentRoom,
+          status: s.status,
+        })));
+      }
+
+      res.json({
+        summary: {
+          totalAgents: allAgents.length,
+          activeAgents: activeAgents.length,
+          inactiveAgents: allAgents.length - activeAgents.length,
+          departments: workspaces.length,
+          assemblyLines: assemblyLines.length,
+          activeLines: activeLines.length,
+        },
+        coldZones,
+        roomActivity,
+        driftRisks,
+        pendingAssemblySteps: pendingSteps,
+      });
+    } catch (error) {
+      console.error("Error fetching factory health:", error);
+      res.status(500).json({ message: "Failed to fetch health" });
+    }
+  });
+
+  app.get("/api/factory/heatmap", isAuthenticated, async (_req, res) => {
+    try {
+      const allGifts = await storage.getAllGifts(500);
+      const heatmap: Record<string, number> = {};
+      for (const gift of allGifts) {
+        if (gift.workspaceId) {
+          heatmap[gift.workspaceId] = (heatmap[gift.workspaceId] || 0) + 1;
+        }
+      }
+      res.json(heatmap);
+    } catch (error) {
+      console.error("Error fetching factory heatmap:", error);
+      res.status(500).json({ message: "Failed to fetch heatmap" });
+    }
+  });
+
+  app.post("/api/factory/assign", isAuthenticated, async (req, res) => {
+    try {
+      const { agentId, workspaceId } = req.body;
+      if (!agentId || !workspaceId) return res.status(400).json({ message: "Agent ID and workspace ID required" });
+      const agent = await storage.updateAgent(agentId, { workspaceId });
+      res.json(agent);
+    } catch (error) {
+      console.error("Error assigning agent:", error);
+      res.status(500).json({ message: "Failed to assign agent" });
+    }
+  });
+
   // ==================== Sandbox Projects ====================
 
   app.get("/api/sandbox-projects", isAuthenticated, async (req, res) => {
