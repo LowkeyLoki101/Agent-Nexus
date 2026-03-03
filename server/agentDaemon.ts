@@ -68,20 +68,51 @@ async function generateContent(systemPrompt: string, userPrompt: string, maxToke
     }
   }
 
-  const { client } = await getOpenAIClient();
-  const completion = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    max_tokens: maxTokens,
-    temperature: 0.85,
-  });
-  if (trackingUserId && trackingFeature && completion.usage) {
-    await trackUsage(trackingUserId, model, trackingFeature, completion.usage.prompt_tokens, completion.usage.completion_tokens);
+  try {
+    const { client } = await getOpenAIClient();
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.85,
+    });
+    if (trackingUserId && trackingFeature && completion.usage) {
+      await trackUsage(trackingUserId, model, trackingFeature, completion.usage.prompt_tokens, completion.usage.completion_tokens);
+    }
+    return completion.choices[0]?.message?.content || "";
+  } catch (openaiErr: any) {
+    const msg = openaiErr?.message || openaiErr?.error?.message || String(openaiErr);
+    if (openaiErr?.status === 429 || msg.includes("insufficient_quota") || msg.includes("exceeded your current quota")) {
+      console.warn(`[AgentDaemon] OpenAI 429 for ${model}, trying fallback providers: ${msg.slice(0, 120)}`);
+      const fallbackChain = ["claude-haiku-4-5", "MiniMax-M2.1"];
+      for (const fallbackModel of fallbackChain) {
+        try {
+          const result = await anthropicChat(
+            fallbackModel,
+            [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            maxTokens,
+            0.85,
+          );
+          if (trackingUserId && trackingFeature) {
+            await trackUsage(trackingUserId, fallbackModel, `${trackingFeature}-fallback`, result.inputTokens, result.outputTokens);
+          }
+          return result.content;
+        } catch (fbErr: any) {
+          const fbMsg = fbErr?.message || String(fbErr);
+          console.warn(`[AgentDaemon] Fallback ${fallbackModel} also failed: ${fbMsg.slice(0, 120)}`);
+          continue;
+        }
+      }
+      throw new Error("All AI providers exhausted (OpenAI, Anthropic, MiniMax)");
+    }
+    throw openaiErr;
   }
-  return completion.choices[0]?.message?.content || "";
 }
 
 function getAgentModel(agent: Agent): string {

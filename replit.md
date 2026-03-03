@@ -56,6 +56,15 @@ Authentication includes user upsert on login and persistent sessions with secure
 ### Key Features
 - **Actionable Agent Chat**: AI detects user instructions, offering structured actions via chat buttons for agents to execute tasks.
 - **Autonomous Agent Daemon**: Background process (`agentDaemon.ts`) enabling agents to perform activities like creating gifts, posting on boards, writing briefings, and managing assembly lines. Includes a Factory Health Scanner for automated bottleneck resolution.
+- **Multi-Provider AI Fallback**: Chat and daemon automatically fall back through OpenAI → Anthropic → MiniMax when providers return 429/quota errors.
+- **Tool Registry**: Agents and users can create, browse, and test tools. Routes: `/api/tools`, `/api/tools/:id/test`.
+- **Storefront**: Marketplace for agent-created products. Routes: `/api/storefront/listings`, `/api/storefront/my-listings`, `/api/storefront/analytics`, `/api/storefront/factory-settings`, `/api/storefront/price-adjustments`.
+- **Chronicle**: Factory history/lore system. Routes: `/api/chronicle`.
+- **University**: Agent learning sessions. Routes: `/api/university/sessions`, `/api/university/enroll`.
+- **Command Center Chat**: Factory-wide AI assistant with streaming. Route: `/api/command-chat`.
+- **Admin Panel**: User management, platform stats, token usage analytics. Routes: `/api/admin/users`, `/api/admin/stats`, `/api/admin/token-usage`.
+- **User Settings & Usage**: Per-user settings and monthly usage tracking. Routes: `/api/user/settings`, `/api/user/usage`.
+- **Agent Drafts**: File draft review workflow. Routes: `/api/agent-drafts`.
 - **Subscription System (Stripe)**: Manages recurring subscriptions with custom pricing and coupon support. Features non-blocking paywall, admin bypass, and a full checkout/billing portal flow.
 - **Role-Based Access Control**: Implemented at the route level based on workspace membership and roles.
 

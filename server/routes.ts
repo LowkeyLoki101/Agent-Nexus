@@ -1181,14 +1181,25 @@ export async function registerRoutes(
         } catch (openaiErr: any) {
           if (openaiErr?.status === 429 || openaiErr?.code === "insufficient_quota") {
             console.log(`[Chat] OpenAI 429 for ${agent.name}, falling back to Anthropic claude-haiku-4-5`);
-            const fallbackModel = "claude-haiku-4-5";
-            const { stream: fallbackStream, getUsage: getFallbackUsage } = await anthropicStream(fallbackModel, messages, 1024);
-            for await (const text of fallbackStream) {
-              fullReply += text;
-              res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+            const fallbackChain = ["claude-haiku-4-5", "MiniMax-M2.1"];
+            let fallbackSucceeded = false;
+            for (const fallbackModel of fallbackChain) {
+              try {
+                const { stream: fallbackStream, getUsage: getFallbackUsage } = await anthropicStream(fallbackModel, messages, 1024);
+                for await (const text of fallbackStream) {
+                  fullReply += text;
+                  res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+                }
+                const fbUsage = getFallbackUsage();
+                trackUsage(userId, fallbackModel, "agent-chat-fallback", fbUsage.inputTokens, fbUsage.outputTokens).catch(() => {});
+                fallbackSucceeded = true;
+                break;
+              } catch (fbErr: any) {
+                console.warn(`[Chat] Fallback ${fallbackModel} failed: ${fbErr?.message?.slice(0, 120)}`);
+                continue;
+              }
             }
-            const fbUsage = getFallbackUsage();
-            trackUsage(userId, fallbackModel, "agent-chat-fallback", fbUsage.inputTokens, fbUsage.outputTokens).catch(() => {});
+            if (!fallbackSucceeded) throw new Error("All AI providers exhausted");
           } else {
             throw openaiErr;
           }
@@ -2231,6 +2242,455 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error generating narration:", error.message);
       res.status(500).json({ message: `Failed to generate narration: ${error.message}` });
+    }
+  });
+
+  // ==================== Tools ====================
+
+  app.get("/api/tools", isAuthenticated, async (_req, res) => {
+    try {
+      const tools = await storage.getAllTools();
+      res.json(tools);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch tools" });
+    }
+  });
+
+  app.post("/api/tools", isAuthenticated, async (req, res) => {
+    try {
+      const tool = await storage.createTool(req.body);
+      res.json(tool);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create tool" });
+    }
+  });
+
+  app.post("/api/tools/:id/test", isAuthenticated, async (req, res) => {
+    try {
+      const tool = await storage.getTool(req.params.id);
+      if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+      const { checkSpendingLimit, isClaudeModel, anthropicStream, getOpenAIClient } = await import("./lib/openai");
+      const userId = getUserId(req as AuthenticatedRequest);
+      const spendCheck = await checkSpendingLimit(userId);
+      if (!spendCheck.allowed) return res.status(429).json({ error: "Spending limit reached" });
+
+      const systemPrompt = tool.systemPrompt || `You are a tool called "${tool.name}". ${tool.description}. Respond with the output only.`;
+      const messages = [
+        { role: "user" as const, content: req.body.instructions || "Run the tool" },
+      ];
+      const model = "claude-haiku-4-5";
+      const { stream, getUsage } = await anthropicStream(model, [{ role: "system" as const, content: systemPrompt }, ...messages], 1024);
+      let output = "";
+      for await (const text of stream) { output += text; }
+      const usage = getUsage();
+      const { trackUsage } = await import("./lib/openai");
+      trackUsage(userId, model, "tool-test", usage.inputTokens, usage.outputTokens).catch(() => {});
+      await storage.incrementToolUsage(tool.id);
+      res.json({ output });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to test tool" });
+    }
+  });
+
+  // ==================== Chronicle ====================
+
+  app.get("/api/chronicle", isAuthenticated, async (_req, res) => {
+    try {
+      const entries = await storage.getChronicleEntries(200);
+      res.json(entries);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch chronicle" });
+    }
+  });
+
+  app.post("/api/chronicle", isAuthenticated, async (req, res) => {
+    try {
+      const entry = await storage.createChronicleEntry(req.body);
+      res.json(entry);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create chronicle entry" });
+    }
+  });
+
+  // ==================== University ====================
+
+  app.get("/api/university/sessions", isAuthenticated, async (req, res) => {
+    try {
+      const agentId = req.query.agentId as string | undefined;
+      const sessions = await storage.getUniversitySessions(agentId);
+      res.json(sessions);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch university sessions" });
+    }
+  });
+
+  app.post("/api/university/enroll", isAuthenticated, async (req, res) => {
+    try {
+      const session = await storage.createUniversitySession(req.body);
+      res.json(session);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to enroll agent" });
+    }
+  });
+
+  // ==================== Storefront ====================
+
+  app.get("/api/storefront/listings", isAuthenticated, async (req, res) => {
+    try {
+      const slug = req.query.slug as string | undefined;
+      if (slug) {
+        const listing = await storage.getStorefrontListingBySlug(slug);
+        if (!listing) return res.status(404).json({ message: "Listing not found" });
+        return res.json(listing);
+      }
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const listings = await storage.getPublishedStorefrontListings(limit, offset);
+      res.json(listings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch listings" });
+    }
+  });
+
+  app.get("/api/storefront/my-listings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const listings = await storage.getStorefrontListingsByOwner(userId);
+      res.json(listings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch your listings" });
+    }
+  });
+
+  app.post("/api/storefront/listings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const listing = await storage.createStorefrontListing({ ...req.body, ownerId: userId });
+      res.json(listing);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create listing" });
+    }
+  });
+
+  app.patch("/api/storefront/listings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const existing = await storage.getStorefrontListingById(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Listing not found" });
+      if (existing.ownerId !== userId) return res.status(403).json({ message: "Not your listing" });
+      const listing = await storage.updateStorefrontListing(req.params.id, req.body);
+      res.json(listing);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update listing" });
+    }
+  });
+
+  app.delete("/api/storefront/listings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const existing = await storage.getStorefrontListingById(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Listing not found" });
+      if (existing.ownerId !== userId) return res.status(403).json({ message: "Not your listing" });
+      await storage.deleteStorefrontListing(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete listing" });
+    }
+  });
+
+  app.post("/api/storefront/analytics", isAuthenticated, async (req, res) => {
+    try {
+      const event = await storage.recordStorefrontAnalyticsEvent(req.body);
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to record analytics" });
+    }
+  });
+
+  app.get("/api/storefront/analytics", isAuthenticated, async (req, res) => {
+    try {
+      const listingId = req.query.listingId as string;
+      if (!listingId) return res.status(400).json({ message: "listingId required" });
+      const summary = await storage.getStorefrontAnalyticsSummary(listingId);
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch analytics" });
+    }
+  });
+
+  app.get("/api/storefront/factory-settings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const settings = await storage.getUserSettings(userId);
+      res.json(settings || { autoStockEnabled: false, markupPercentage: 20, autoApproveListings: false });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch factory settings" });
+    }
+  });
+
+  app.post("/api/storefront/factory-settings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const settings = await storage.upsertUserSettings(userId, req.body);
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update factory settings" });
+    }
+  });
+
+  app.get("/api/storefront/price-adjustments", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const adjustments = await storage.getPendingPriceAdjustments(userId);
+      res.json(adjustments);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch price adjustments" });
+    }
+  });
+
+  app.post("/api/storefront/price-adjustments/:id/approve", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const result = await storage.approvePriceAdjustment(req.params.id, userId);
+      if (!result) return res.status(404).json({ message: "Adjustment not found" });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to approve adjustment" });
+    }
+  });
+
+  app.post("/api/storefront/price-adjustments/:id/reject", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const result = await storage.rejectPriceAdjustment(req.params.id, userId);
+      if (!result) return res.status(404).json({ message: "Adjustment not found" });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to reject adjustment" });
+    }
+  });
+
+  app.post("/api/storefront/stripe/connect", isAuthenticated, async (_req, res) => {
+    try {
+      res.json({ connected: false, message: "Stripe Connect not yet configured" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check Stripe Connect" });
+    }
+  });
+
+  // ==================== Admin ====================
+
+  async function requireAdmin(req: any, res: any): Promise<boolean> {
+    const userId = getUserId(req as AuthenticatedRequest);
+    const isAdmin = await storage.checkIsAdmin(userId);
+    if (!isAdmin) {
+      res.status(403).json({ message: "Admin access required" });
+      return false;
+    }
+    return true;
+  }
+
+  app.get("/api/admin/users", isAuthenticated, async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const users = await storage.getAllUsersWithUsage();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/admin/users/:userId", isAuthenticated, async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const user = await storage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const usage = await storage.getTokenUsageByUser(req.params.userId);
+      res.json({ ...user, usage });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  app.patch("/api/admin/users/:userId", isAuthenticated, async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const user = await storage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const updated = await storage.updateUser(req.params.userId, req.body);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.get("/api/admin/stats", isAuthenticated, async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const stats = await storage.getPlatformStats();
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch stats" });
+    }
+  });
+
+  app.get("/api/admin/token-usage", isAuthenticated, async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const period = (req.query.period as string) || "day";
+      const userId = req.query.userId as string | undefined;
+      const data = await storage.getTokenUsageAggregated(period as "day" | "week" | "month", userId);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch token usage" });
+    }
+  });
+
+  app.get("/api/admin/impersonation-status", isAuthenticated, async (req, res) => {
+    if (!(await requireAdmin(req, res))) return;
+    res.json({ impersonating: false });
+  });
+
+  app.post("/api/admin/impersonate/:userId", isAuthenticated, async (req, res) => {
+    if (!(await requireAdmin(req, res))) return;
+    res.json({ success: false, message: "Impersonation not implemented" });
+  });
+
+  app.post("/api/admin/stop-impersonate", isAuthenticated, async (req, res) => {
+    if (!(await requireAdmin(req, res))) return;
+    res.json({ success: true });
+  });
+
+  // ==================== User Settings & Usage ====================
+
+  app.get("/api/user/settings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const settings = await storage.getUserSettings(userId);
+      res.json(settings || {});
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch settings" });
+    }
+  });
+
+  app.put("/api/user/settings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const settings = await storage.upsertUserSettings(userId, req.body);
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update settings" });
+    }
+  });
+
+  app.get("/api/user/usage", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const summary = await storage.getTokenUsageSummary(userId, startOfMonth, now);
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch usage" });
+    }
+  });
+
+  // ==================== Command Chat (Factory Command Center) ====================
+
+  app.post("/api/command-chat", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const { message, history, factoryContext } = req.body;
+      if (!message) return res.status(400).json({ error: "Message is required" });
+
+      const { checkSpendingLimit, anthropicStream, trackUsage } = await import("./lib/openai");
+      const spendCheck = await checkSpendingLimit(userId);
+      if (!spendCheck.allowed) return res.status(429).json({ error: "Spending limit reached" });
+
+      const agents = await storage.getAgents();
+      const agentList = agents.map(a => `${a.name} (${a.status})`).join(", ");
+
+      const systemPrompt = `You are the Factory Command Center AI assistant. You help manage the Pocket Factory — an autonomous AI collaboration platform.
+
+Current factory context: ${factoryContext || "unknown"}
+Active agents: ${agentList}
+
+You can help with:
+- Monitoring agent activities and status
+- Explaining factory operations
+- Suggesting optimizations
+- Answering questions about the platform
+
+Be concise and helpful. Use factory/production metaphors when appropriate.`;
+
+      const messages: { role: "user" | "assistant" | "system"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+      ];
+      if (history && Array.isArray(history)) {
+        for (const msg of history.slice(-20)) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            messages.push({ role: msg.role, content: msg.content });
+          }
+        }
+      }
+      messages.push({ role: "user", content: message });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const model = "claude-haiku-4-5";
+      const { stream, getUsage } = await anthropicStream(model, messages, 1024);
+      for await (const text of stream) {
+        res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+      }
+      const usage = getUsage();
+      trackUsage(userId, model, "command-chat", usage.inputTokens, usage.outputTokens).catch(() => {});
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } catch (error: any) {
+      if (!res.headersSent) {
+        res.status(500).json({ message: error.message || "Command chat failed" });
+      } else {
+        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  // ==================== Agent Drafts (file drafts/reviews) ====================
+
+  app.get("/api/agent-drafts", isAuthenticated, async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      let drafts = await storage.getAgentFileDrafts();
+      if (status) {
+        drafts = drafts.filter((d: any) => d.status === status);
+      }
+      res.json(drafts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch drafts" });
+    }
+  });
+
+  app.post("/api/agent-drafts", isAuthenticated, async (req, res) => {
+    try {
+      const draft = await storage.createAgentFileDraft(req.body);
+      res.json(draft);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create draft" });
+    }
+  });
+
+  app.patch("/api/agent-drafts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const draft = await storage.updateAgentFileDraft(req.params.id, req.body);
+      if (!draft) return res.status(404).json({ message: "Draft not found" });
+      res.json(draft);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update draft" });
     }
   });
 
