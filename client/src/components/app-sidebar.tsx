@@ -34,6 +34,7 @@ import {
   Globe,
   Gift,
   Package,
+  Download,
   Factory,
   BookOpen,
   Wrench,
@@ -63,7 +64,7 @@ const mainNavItems = [
   {
     title: "Products",
     url: "/products",
-    icon: Package,
+    icon: Download,
   },
   {
     title: "Heatmap",
