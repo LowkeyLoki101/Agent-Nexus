@@ -1099,6 +1099,164 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== Agent Chat (Streaming) ====================
+
+  app.post("/api/agents/:id/chat", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const agentId = req.params.id;
+      const { message, history, context } = req.body;
+      if (!message) return res.status(400).json({ error: "Message is required" });
+
+      const { checkSpendingLimit, trackUsage, isClaudeModel, isMinimaxModel, anthropicStream, getOpenAIClient } = await import("./lib/openai");
+      const { SOUL_DOCUMENT } = await import("./soulDocument");
+
+      const spendCheck = await checkSpendingLimit(userId);
+      if (!spendCheck.allowed) {
+        return res.status(429).json({ error: "Monthly spending limit reached" });
+      }
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+      const workspace = await storage.getWorkspace(agent.workspaceId);
+      const memory = await storage.getAgentMemory(agentId);
+      const diaryEntries = await storage.getDiaryEntriesByAgent(agentId, 5);
+
+      const contextInfo = context ? `\nCurrent Location: ${context.room || "factory"}\nCurrent Activity: ${context.activity || "working"}\nObjective: ${context.objective || "general tasks"}` : "";
+
+      const systemPrompt = `${SOUL_DOCUMENT}\n\nYou are ${agent.name}. ${agent.description || ""}\n\n${agent.identityCard || ""}\n\n${agent.operatingPrinciples ? `Operating Principles: ${agent.operatingPrinciples}` : ""}\n\nWorkspace: ${workspace?.name || "Unknown"}${contextInfo}\n\n${memory?.summary ? `Working Memory:\n${memory.summary}` : ""}\n\n${agent.scratchpad ? `Current Scratchpad:\n${agent.scratchpad}` : ""}\n\n${diaryEntries.length > 0 ? `Recent Diary:\n${diaryEntries.map(d => `[${d.entryType}] ${d.content?.slice(0, 200)}`).join("\n")}` : ""}`;
+
+      const messages: { role: "user" | "assistant" | "system"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+      ];
+      if (history && Array.isArray(history)) {
+        for (const msg of history.slice(-20)) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            messages.push({ role: msg.role, content: msg.content });
+          }
+        }
+      }
+      messages.push({ role: "user", content: message });
+
+      const modelName = agent.modelName || "gpt-4o-mini";
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      let fullReply = "";
+
+      if (isClaudeModel(modelName) || isMinimaxModel(modelName)) {
+        const { stream, getUsage } = await anthropicStream(modelName, messages, 1024);
+        for await (const text of stream) {
+          fullReply += text;
+          res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+        }
+        const usage = getUsage();
+        trackUsage(userId, modelName, "agent-chat", usage.inputTokens, usage.outputTokens).catch(() => {});
+      } else {
+        const { client } = await getOpenAIClient(userId);
+        const stream = await client.chat.completions.create({
+          model: modelName,
+          messages,
+          max_completion_tokens: 1024,
+          stream: true,
+          stream_options: { include_usage: true },
+        });
+        let promptTokens = 0, completionTokens = 0;
+        for await (const chunk of stream) {
+          if (chunk.usage) {
+            promptTokens = chunk.usage.prompt_tokens;
+            completionTokens = chunk.usage.completion_tokens;
+          }
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (content) {
+            fullReply += content;
+            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          }
+        }
+        trackUsage(userId, modelName, "agent-chat", promptTokens, completionTokens).catch(() => {});
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+
+      storage.createDiaryEntry({
+        agentId,
+        userMessage: message,
+        agentResponse: fullReply,
+        source: "chat",
+        sourceContext: `Chat with user`,
+        entryType: "chat_log",
+        content: fullReply.slice(0, 500),
+      }).catch(() => {});
+
+    } catch (error: any) {
+      console.error("Error in agent chat:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message || "Chat failed" });
+      } else {
+        res.write(`data: ${JSON.stringify({ error: error.message || "Chat failed", done: true })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  // ==================== Agent Diary / Memory / Profiles ====================
+
+  app.get("/api/agents/:id/diary", isAuthenticated, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 20;
+      const entries = await storage.getDiaryEntriesByAgent(req.params.id, limit);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching diary:", error);
+      res.status(500).json({ message: "Failed to fetch diary" });
+    }
+  });
+
+  app.get("/api/agents/:id/memory", isAuthenticated, async (req, res) => {
+    try {
+      const memory = await storage.getAgentMemory(req.params.id);
+      res.json(memory || { summary: "", agentId: req.params.id });
+    } catch (error) {
+      console.error("Error fetching memory:", error);
+      res.status(500).json({ message: "Failed to fetch memory" });
+    }
+  });
+
+  app.get("/api/agents/:id/profiles", isAuthenticated, async (req, res) => {
+    try {
+      const profiles = await storage.getAgentProfiles(req.params.id);
+      res.json(profiles);
+    } catch (error) {
+      console.error("Error fetching profiles:", error);
+      res.status(500).json({ message: "Failed to fetch profiles" });
+    }
+  });
+
+  app.post("/api/agents/:id/execute-task", isAuthenticated, async (req, res) => {
+    try {
+      const agentId = req.params.id;
+      const { action, context: taskContext } = req.body;
+      if (!action) return res.status(400).json({ error: "Action is required" });
+
+      const agent = await storage.getAgent(agentId);
+      if (!agent) return res.status(404).json({ error: "Agent not found" });
+      const workspace = await storage.getWorkspace(agent.workspaceId);
+      if (!workspace) return res.status(404).json({ error: "Workspace not found" });
+
+      const { triggerSingleActivity } = await import("./agentDaemon");
+      const result = await triggerSingleActivity(agent, workspace, action);
+
+      res.json({ success: true, result });
+    } catch (error: any) {
+      console.error("Error executing task:", error);
+      res.status(500).json({ error: error.message || "Task execution failed" });
+    }
+  });
+
   // ==================== Gifts ====================
 
   app.get("/api/gifts", isAuthenticated, async (_req, res) => {
