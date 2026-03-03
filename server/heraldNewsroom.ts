@@ -268,6 +268,25 @@ Respond in this exact JSON format:
     });
 
     console.log(`[Herald] Broadcast published: ${briefing.title}`);
+
+    // Auto-generate ElevenLabs audio narration
+    try {
+      const { generateNarration } = await import("./elevenlabs");
+      const herald = await findHeraldAgent();
+      const voiceId = (herald as any)?.elevenLabsVoiceId || undefined;
+      const content = briefing.content || broadcastData.content || "";
+      if (content.length > 20) {
+        console.log(`[Herald] Auto-generating audio narration for broadcast...`);
+        const audioBuffer = await generateNarration(content, voiceId);
+        const audioBase64 = audioBuffer.toString("base64");
+        const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+        await storage.updateBriefing(briefing.id, { audioUrl } as any);
+        console.log(`[Herald] Audio narration generated (${audioBuffer.length} bytes)`);
+      }
+    } catch (audioErr: any) {
+      console.error(`[Herald] Audio narration failed (non-blocking): ${audioErr.message}`);
+    }
+
     return briefing;
   } catch (error: any) {
     console.error("[Herald] Broadcast generation failed:", error.message);

@@ -2081,5 +2081,142 @@ export async function registerRoutes(
     }
   });
 
+  // ============ NEWSROOM ROUTES ============
+
+  app.get("/api/newsroom/settings", isAuthenticated, async (_req, res) => {
+    try {
+      const settings = await storage.getNewsroomSettings();
+      if (!settings) {
+        const created = await storage.upsertNewsroomSettings({
+          autoBroadcastIntervalMinutes: 60,
+          autoPlayEnabled: false,
+          enabled: true,
+          interviewCooldownMinutes: 30,
+          broadcastStatus: "idle",
+        });
+        return res.json(created);
+      }
+      res.json(settings);
+    } catch (error) {
+      console.error("Error fetching newsroom settings:", error);
+      res.status(500).json({ message: "Failed to fetch newsroom settings" });
+    }
+  });
+
+  app.put("/api/newsroom/settings", isAuthenticated, async (req, res) => {
+    try {
+      const allowed = ["autoBroadcastIntervalMinutes", "autoPlayEnabled", "enabled", "interviewCooldownMinutes", "broadcastStatus"];
+      const updates: Record<string, any> = {};
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+          if (key === "autoBroadcastIntervalMinutes" || key === "interviewCooldownMinutes") {
+            const val = Number(req.body[key]);
+            if (!Number.isFinite(val) || val < 1 || val > 1440) continue;
+            updates[key] = val;
+          } else if (key === "autoPlayEnabled" || key === "enabled") {
+            updates[key] = Boolean(req.body[key]);
+          } else if (key === "broadcastStatus") {
+            if (["idle", "generating"].includes(req.body[key])) updates[key] = req.body[key];
+          }
+        }
+      }
+      const result = await storage.upsertNewsroomSettings(updates);
+      res.json(result);
+    } catch (error) {
+      console.error("Error updating newsroom settings:", error);
+      res.status(500).json({ message: "Failed to update newsroom settings" });
+    }
+  });
+
+  app.get("/api/newsroom/interviews", isAuthenticated, async (_req, res) => {
+    try {
+      const interviews = await storage.getRecentNewsroomInterviews(30);
+      res.json(interviews);
+    } catch (error) {
+      console.error("Error fetching interviews:", error);
+      res.status(500).json({ message: "Failed to fetch interviews" });
+    }
+  });
+
+  app.get("/api/newsroom/agent-status", isAuthenticated, async (_req, res) => {
+    try {
+      const { getAgentInterviewStatus } = await import("./heraldNewsroom");
+      const statuses = await getAgentInterviewStatus();
+      res.json(statuses);
+    } catch (error) {
+      console.error("Error fetching agent interview status:", error);
+      res.status(500).json({ message: "Failed to fetch agent interview status" });
+    }
+  });
+
+  app.post("/api/newsroom/interview/:agentId", isAuthenticated, async (req, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.agentId);
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      const { interviewAgent } = await import("./heraldNewsroom");
+      const interview = await interviewAgent(agent);
+      res.json(interview);
+    } catch (error) {
+      console.error("Error interviewing agent:", error);
+      res.status(500).json({ message: "Failed to interview agent" });
+    }
+  });
+
+  app.post("/api/newsroom/interview-all", isAuthenticated, async (_req, res) => {
+    try {
+      const { runInterviewRound } = await import("./heraldNewsroom");
+      const results = await runInterviewRound();
+      res.json({ interviews: results, count: results.length });
+    } catch (error) {
+      console.error("Error running interview round:", error);
+      res.status(500).json({ message: "Failed to run interview round" });
+    }
+  });
+
+  app.post("/api/newsroom/generate-broadcast", isAuthenticated, async (_req, res) => {
+    try {
+      const { generateBroadcast } = await import("./heraldNewsroom");
+      const briefing = await generateBroadcast();
+      if (!briefing) return res.json({ message: "No interviews available for broadcast" });
+      res.json(briefing);
+    } catch (error) {
+      console.error("Error generating broadcast:", error);
+      res.status(500).json({ message: "Failed to generate broadcast" });
+    }
+  });
+
+  app.get("/api/newsroom/herald-status", isAuthenticated, async (_req, res) => {
+    try {
+      const { getHeraldStatus } = await import("./heraldNewsroom");
+      res.json(getHeraldStatus());
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get herald status" });
+    }
+  });
+
+  app.post("/api/briefings/:id/narrate", isAuthenticated, async (req, res) => {
+    try {
+      const briefing = await storage.getBriefing(req.params.id);
+      if (!briefing) return res.status(404).json({ message: "Briefing not found" });
+      if (!briefing.content) return res.status(400).json({ message: "Briefing has no content to narrate" });
+
+      const { generateNarration } = await import("./elevenlabs");
+
+      const agent = briefing.authorAgentId ? await storage.getAgent(briefing.authorAgentId) : null;
+      const voiceId = (agent as any)?.elevenLabsVoiceId || undefined;
+
+      const audioBuffer = await generateNarration(briefing.content, voiceId);
+      const audioBase64 = audioBuffer.toString("base64");
+      const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+
+      await storage.updateBriefing(briefing.id, { audioUrl } as any);
+
+      res.json({ audioUrl, success: true });
+    } catch (error: any) {
+      console.error("Error generating narration:", error.message);
+      res.status(500).json({ message: `Failed to generate narration: ${error.message}` });
+    }
+  });
+
   return httpServer;
 }
