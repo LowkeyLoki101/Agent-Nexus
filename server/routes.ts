@@ -1282,13 +1282,54 @@ export async function registerRoutes(
   app.get("/api/gifts/heatmap", isAuthenticated, async (_req, res) => {
     try {
       const allGifts = await storage.getAllGifts(500);
-      const heatmap: Record<string, number> = {};
-      for (const gift of allGifts) {
-        if (gift.workspaceId) {
-          heatmap[gift.workspaceId] = (heatmap[gift.workspaceId] || 0) + 1;
+      const allAgents = await storage.getAllAgents();
+      const allWorkspaces = await storage.getAllWorkspaces();
+
+      const giftTypes = ["redesign", "content", "tool", "analysis", "prototype", "artwork", "other"];
+
+      const heatmap: Record<string, Record<string, number>> = {};
+      const agentInfo: Record<string, { name: string; capabilities: string[]; workspaceId: string }> = {};
+
+      for (const agent of allAgents) {
+        agentInfo[agent.id] = { name: agent.name, capabilities: agent.capabilities || [], workspaceId: agent.workspaceId };
+        heatmap[agent.id] = {};
+        for (const t of giftTypes) {
+          heatmap[agent.id][t] = 0;
         }
       }
-      res.json(heatmap);
+
+      const typeBreakdownMap: Record<string, number> = {};
+      for (const gift of allGifts) {
+        const agentId = gift.agentId || "unknown";
+        if (!heatmap[agentId]) {
+          heatmap[agentId] = {};
+          for (const t of giftTypes) heatmap[agentId][t] = 0;
+        }
+        const gType = gift.type || "other";
+        heatmap[agentId][gType] = (heatmap[agentId][gType] || 0) + 1;
+        typeBreakdownMap[gType] = (typeBreakdownMap[gType] || 0) + 1;
+      }
+
+      const agentTotals: { id: string; name: string; total: number }[] = [];
+      const coldSpots: { agentId: string; agentName: string; type: string; count: number; suggestion: string }[] = [];
+
+      for (const [agentId, types] of Object.entries(heatmap)) {
+        const total = Object.values(types).reduce((s, c) => s + c, 0);
+        const name = agentInfo[agentId]?.name || agentId;
+        if (total > 0) agentTotals.push({ id: agentId, name, total });
+        for (const t of giftTypes) {
+          if (types[t] === 0 && agentInfo[agentId]) {
+            coldSpots.push({ agentId, agentName: name, type: t, count: 0, suggestion: `${name} hasn't created any ${t} gifts yet` });
+          }
+        }
+      }
+
+      agentTotals.sort((a, b) => b.total - a.total);
+      const topAgents = agentTotals.slice(0, 10);
+      const typeBreakdown = Object.entries(typeBreakdownMap).map(([type, count]) => ({ type, count }));
+      const workspaces = allWorkspaces.map(w => ({ id: w.id, name: w.name }));
+
+      res.json({ heatmap, agents: agentInfo, giftTypes, totalGifts: allGifts.length, coldSpots: coldSpots.slice(0, 20), topAgents, typeBreakdown, workspaces });
     } catch (error) {
       console.error("Error fetching gift heatmap:", error);
       res.status(500).json({ message: "Failed to fetch heatmap" });
