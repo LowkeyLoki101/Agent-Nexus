@@ -25,17 +25,27 @@ import Tokens from "@/pages/tokens";
 import AuditLogs from "@/pages/audit-logs";
 import AgentWorld from "@/pages/agent-world";
 import Gifts from "@/pages/gifts";
+import GiftDetail from "@/pages/gift-detail";
 import Products from "@/pages/products";
 import AssemblyLinesPage from "@/pages/assembly-lines";
 import Library from "@/pages/library";
 import Workstation from "@/pages/workstation";
 import Boards from "@/pages/boards";
+import Discussions from "@/pages/discussions";
 import Heatmap from "@/pages/heatmap";
 import NotFound from "@/pages/not-found";
 import ForgotPassword from "@/pages/forgot-password";
 import Subscribe from "@/pages/subscribe";
 import Admin from "@/pages/admin";
 import Sandbox from "@/pages/sandbox";
+import Tools from "@/pages/tools";
+import Chronicle from "@/pages/chronicle";
+import University from "@/pages/university";
+import SettingsPage from "@/pages/settings";
+import Storefront from "@/pages/storefront";
+import StorefrontListing from "@/pages/storefront-listing";
+import StorefrontManage from "@/pages/storefront-manage";
+import StorefrontSuccess from "@/pages/storefront-success";
 import { SubscriptionBanner } from "@/components/subscription-banner";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -78,6 +88,7 @@ function AuthenticatedRouter() {
         <Route path="/agents/new" component={AgentNew} />
         <Route path="/agent-world" component={AgentWorld} />
         <Route path="/gifts" component={Gifts} />
+        <Route path="/gifts/:id" component={GiftDetail} />
         <Route path="/products" component={Products} />
         <Route path="/assembly-lines" component={AssemblyLinesPage} />
         <Route path="/library" component={Library} />
@@ -86,6 +97,7 @@ function AuthenticatedRouter() {
         <Route path="/briefings/new" component={BriefingNew} />
         <Route path="/briefings/:id" component={BriefingDetail} />
         <Route path="/boards" component={Boards} />
+        <Route path="/discussions" component={Discussions} />
         <Route path="/heatmap" component={Heatmap} />
         <Route path="/forgot-password" component={ForgotPassword} />
         <Route path="/tokens" component={Tokens} />
@@ -93,6 +105,14 @@ function AuthenticatedRouter() {
         <Route path="/admin" component={Admin} />
         <Route path="/sandbox" component={Sandbox} />
         <Route path="/subscribe" component={Subscribe} />
+        <Route path="/tools" component={Tools} />
+        <Route path="/chronicle" component={Chronicle} />
+        <Route path="/university" component={University} />
+        <Route path="/settings" component={SettingsPage} />
+        <Route path="/storefront" component={Storefront} />
+        <Route path="/storefront/manage" component={StorefrontManage} />
+        <Route path="/storefront/success" component={StorefrontSuccess} />
+        <Route path="/storefront/:slug" component={StorefrontListing} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>

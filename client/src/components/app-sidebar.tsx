@@ -26,7 +26,6 @@ import {
   Bot,
   Key,
   FileText,
-  ClipboardList,
   Settings,
   LogOut,
   ChevronUp,
@@ -43,79 +42,46 @@ import {
   CreditCard,
   Activity,
   Code2,
+  Hammer,
+  GraduationCap,
+  ShoppingBag,
+  ScrollText,
+  MessageSquare,
+  Store,
 } from "lucide-react";
 
-const mainNavItems = [
-  {
-    title: "Agent Factory",
-    url: "/",
-    icon: Globe,
-  },
-  {
-    title: "Gifts",
-    url: "/gifts",
-    icon: Gift,
-  },
-  {
-    title: "Assembly Lines",
-    url: "/assembly-lines",
-    icon: Factory,
-  },
-  {
-    title: "Products",
-    url: "/products",
-    icon: Package,
-  },
-  {
-    title: "Heatmap",
-    url: "/heatmap",
-    icon: Activity,
-  },
-  {
-    title: "Agent Sandbox",
-    url: "/sandbox",
-    icon: Code2,
-  },
-  {
-    title: "Code Shop",
-    url: "/workstation",
-    icon: Wrench,
-  },
-  {
-    title: "eBook Library",
-    url: "/library",
-    icon: BookOpen,
-  },
-  {
-    title: "Departments",
-    url: "/workspaces",
-    icon: Building2,
-  },
-  {
-    title: "Agents",
-    url: "/agents",
-    icon: Bot,
-  },
-  {
-    title: "Newsroom",
-    url: "/briefings",
-    icon: Newspaper,
-  },
-  {
-    title: "Message Boards",
-    url: "/boards",
-    icon: MessageCircle,
-  },
-  {
-    title: "API Tokens",
-    url: "/tokens",
-    icon: Key,
-  },
-  {
-    title: "Audit Logs",
-    url: "/audit-logs",
-    icon: FileText,
-  },
+const factoryItems = [
+  { title: "Agent Factory", url: "/", icon: Globe },
+  { title: "Newsroom", url: "/briefings", icon: Newspaper },
+  { title: "Gifts", url: "/gifts", icon: Gift },
+];
+
+const communityItems = [
+  { title: "Message Boards", url: "/boards", icon: MessageCircle },
+  { title: "Discussions", url: "/discussions", icon: MessageSquare },
+];
+
+const operationsItems = [
+  { title: "Departments", url: "/workspaces", icon: Building2 },
+  { title: "Agents", url: "/agents", icon: Bot },
+  { title: "Assembly Lines", url: "/assembly-lines", icon: Factory },
+  { title: "Products", url: "/products", icon: Package },
+];
+
+const toolsItems = [
+  { title: "Sandbox", url: "/sandbox", icon: Code2 },
+  { title: "Tool Registry", url: "/tools", icon: Hammer },
+  { title: "Heatmap", url: "/heatmap", icon: Activity },
+  { title: "University", url: "/university", icon: GraduationCap },
+  { title: "Code Shop", url: "/workstation", icon: Wrench },
+  { title: "eBook Library", url: "/library", icon: BookOpen },
+  { title: "Storefront", url: "/storefront", icon: Store },
+];
+
+const governanceItems = [
+  { title: "API Tokens", url: "/tokens", icon: Key },
+  { title: "Audit Logs", url: "/audit-logs", icon: FileText },
+  { title: "Chronicle", url: "/chronicle", icon: ScrollText },
 ];
 
 export function AppSidebar() {
@@ -128,41 +94,45 @@ export function AppSidebar() {
     return location.startsWith(url);
   };
 
+  const renderGroup = (label: string, items: typeof factoryItems) => (
+    <SidebarGroup>
+      <SidebarGroupLabel>{label}</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {items.map((item) => (
+            <SidebarMenuItem key={item.title}>
+              <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                  <item.icon className="h-4 w-4" />
+                  <span>{item.title}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
         <Link href="/">
           <div className="flex flex-col cursor-pointer" data-testid="link-home">
             <div className="flex items-center gap-1">
-              <span className="text-sm font-bold tracking-tight text-primary">CB</span>
-              <span className="text-sidebar-foreground/50">|</span>
-              <span className="text-sm font-bold tracking-tight text-sidebar-foreground">CREATIVES</span>
+              <span className="text-sm font-bold tracking-tight text-sidebar-foreground">Pocket</span>
+              <span className="text-sm font-bold tracking-tight text-primary">Factory</span>
             </div>
             <span className="text-xs font-medium tracking-wider text-sidebar-foreground/70">CREATIVE INTELLIGENCE</span>
           </div>
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {mainNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive(item.url)}
-                  >
-                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {renderGroup("Factory", factoryItems)}
+        {renderGroup("Community", communityItems)}
+        {renderGroup("Operations", operationsItems)}
+        {renderGroup("Tools", toolsItems)}
+        {renderGroup("Governance", governanceItems)}
         {profile?.isAdmin && (
           <SidebarGroup>
             <SidebarGroupLabel>Administration</SidebarGroupLabel>
@@ -181,6 +151,14 @@ export function AppSidebar() {
                     <Link href="/subscribe" data-testid="nav-billing">
                       <CreditCard className="h-4 w-4" />
                       <span>Billing</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/settings")}>
+                    <Link href="/settings" data-testid="nav-settings">
+                      <Settings className="h-4 w-4" />
+                      <span>Settings</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -224,9 +202,11 @@ export function AppSidebar() {
                 align="start"
                 sideOffset={4}
               >
-                <DropdownMenuItem data-testid="menu-item-settings">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
+                <DropdownMenuItem asChild>
+                  <Link href="/settings" data-testid="menu-item-settings">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
