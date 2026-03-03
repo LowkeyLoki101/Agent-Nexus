@@ -2608,8 +2608,8 @@ export async function registerRoutes(
       const spendCheck = await checkSpendingLimit(userId);
       if (!spendCheck.allowed) return res.status(429).json({ error: "Spending limit reached" });
 
-      const agents = await storage.getAgents();
-      const agentList = agents.map(a => `${a.name} (${a.status})`).join(", ");
+      const agents = await storage.getAllAgents();
+      const agentList = agents.map((a: any) => `${a.name} (${a.isActive ? "active" : "inactive"})`).join(", ");
 
       const systemPrompt = `You are the Factory Command Center AI assistant. You help manage the Pocket Factory — an autonomous AI collaboration platform.
 
@@ -2640,13 +2640,21 @@ Be concise and helpful. Use factory/production metaphors when appropriate.`;
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      const model = "claude-haiku-4-5";
-      const { stream, getUsage } = await anthropicStream(model, messages, 1024);
-      for await (const text of stream) {
-        res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+      const { trackedStreamingChat } = await import("./lib/openai");
+      const model = "gpt-4o-mini";
+      const { stream, cleanup } = await trackedStreamingChat(userId, "command-chat", {
+        model,
+        messages,
+        max_tokens: 1024,
+        stream: true,
+      });
+      for await (const chunk of stream) {
+        const text = chunk.choices?.[0]?.delta?.content;
+        if (text) {
+          res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+        }
       }
-      const usage = getUsage();
-      trackUsage(userId, model, "command-chat", usage.inputTokens, usage.outputTokens).catch(() => {});
+      await cleanup();
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.end();
