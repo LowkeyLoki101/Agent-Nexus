@@ -6,7 +6,7 @@ import type { AuthenticatedRequest } from "./replit_integrations/auth";
 import { z } from "zod";
 import { getUncachableStripeClient } from "./stripeClient";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 function getUserId(req: AuthenticatedRequest): string {
   return req.user.claims.sub;
@@ -66,8 +66,7 @@ export async function registerRoutes(
     try {
       const userId = getUserId(req as AuthenticatedRequest);
       const result = await db.execute(
-        `SELECT id, email, first_name, last_name, profile_image_url, is_admin, subscription_status, stripe_customer_id, stripe_subscription_id, coupon_code FROM users WHERE id = $1`,
-        [userId]
+        sql`SELECT id, email, first_name, last_name, profile_image_url, is_admin, subscription_status, stripe_customer_id, stripe_subscription_id, coupon_code FROM users WHERE id = ${userId}`
       );
       if (!result.rows || result.rows.length === 0) {
         return res.status(404).json({ message: "User not found" });
@@ -120,8 +119,7 @@ export async function registerRoutes(
       const stripe = await getUncachableStripeClient();
 
       const userResult = await db.execute(
-        `SELECT email, stripe_customer_id FROM users WHERE id = $1`,
-        [userId]
+        sql`SELECT email, stripe_customer_id FROM users WHERE id = ${userId}`
       );
       if (!userResult.rows || userResult.rows.length === 0) {
         return res.status(404).json({ message: "User not found" });
@@ -136,8 +134,7 @@ export async function registerRoutes(
         });
         customerId = customer.id;
         await db.execute(
-          `UPDATE users SET stripe_customer_id = $1 WHERE id = $2`,
-          [customerId, userId]
+          sql`UPDATE users SET stripe_customer_id = ${customerId} WHERE id = ${userId}`
         );
       }
 
@@ -164,8 +161,7 @@ export async function registerRoutes(
             sessionParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
 
             await db.execute(
-              `UPDATE users SET coupon_code = $1 WHERE id = $2`,
-              [couponCode, userId]
+              sql`UPDATE users SET coupon_code = ${couponCode} WHERE id = ${userId}`
             );
           }
         } catch (promoErr) {
@@ -187,8 +183,7 @@ export async function registerRoutes(
       const stripe = await getUncachableStripeClient();
 
       const userResult = await db.execute(
-        `SELECT stripe_customer_id FROM users WHERE id = $1`,
-        [userId]
+        sql`SELECT stripe_customer_id FROM users WHERE id = ${userId}`
       );
       if (!userResult.rows || userResult.rows.length === 0) {
         return res.status(404).json({ message: "User not found" });
@@ -216,8 +211,7 @@ export async function registerRoutes(
     try {
       const userId = getUserId(req as AuthenticatedRequest);
       const userResult = await db.execute(
-        `SELECT stripe_customer_id FROM users WHERE id = $1`,
-        [userId]
+        sql`SELECT stripe_customer_id FROM users WHERE id = ${userId}`
       );
       if (!userResult.rows || userResult.rows.length === 0) {
         return res.status(404).json({ message: "User not found" });
@@ -250,8 +244,7 @@ export async function registerRoutes(
       }
 
       await db.execute(
-        `UPDATE users SET subscription_status = $1 WHERE id = $2`,
-        [status, userId]
+        sql`UPDATE users SET subscription_status = ${status} WHERE id = ${userId}`
       );
 
       res.json({ status });
