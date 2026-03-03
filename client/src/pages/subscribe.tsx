@@ -153,11 +153,11 @@ export default function Subscribe() {
                 ) : (
                   <Zap className="h-4 w-4" />
                 )}
-                Start 90-Day Free Trial
+                Subscribe Now
                 <ArrowRight className="h-4 w-4" />
               </Button>
               <p className="text-[10px] text-center text-muted-foreground">
-                No credit card required. 90-day free trial, then $49/month (beta price). Cancel anytime.
+                $49/month (beta price). Use code <span className="font-semibold text-primary">TRYFREE</span> for your first month free. Cancel anytime.
               </p>
             </div>
           </CardContent>

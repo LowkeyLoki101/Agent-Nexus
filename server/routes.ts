@@ -4,6 +4,9 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import type { AuthenticatedRequest } from "./replit_integrations/auth";
 import { z } from "zod";
+import { getUncachableStripeClient } from "./stripeClient";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 function getUserId(req: AuthenticatedRequest): string {
   return req.user.claims.sub;
@@ -56,6 +59,207 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
+
+  // --- User profile route ---
+
+  app.get("/api/user/profile", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const result = await db.execute(
+        `SELECT id, email, first_name, last_name, profile_image_url, is_admin, subscription_status, stripe_customer_id, stripe_subscription_id, coupon_code FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (!result.rows || result.rows.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const user = result.rows[0] as any;
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        profileImageUrl: user.profile_image_url,
+        isAdmin: user.is_admin,
+        subscriptionStatus: user.subscription_status,
+        stripeCustomerId: user.stripe_customer_id,
+        stripeSubscriptionId: user.stripe_subscription_id,
+        couponCode: user.coupon_code,
+      });
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      res.status(500).json({ message: "Failed to fetch profile" });
+    }
+  });
+
+  // --- Stripe subscription routes ---
+
+  app.get("/api/stripe/subscription-price", async (_req, res) => {
+    try {
+      res.json({
+        price_id: "price_1T5AdQPo0Kn2QjEryJ9rKr8b",
+        amount: 4900,
+        currency: "usd",
+        interval: "month",
+        display: "$49/month",
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch price" });
+    }
+  });
+
+  app.post("/api/stripe/create-checkout", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const { priceId, couponCode } = req.body;
+
+      const ALLOWED_PRICE_IDS = ["price_1T5AdQPo0Kn2QjEryJ9rKr8b"];
+      if (!priceId || !ALLOWED_PRICE_IDS.includes(priceId)) {
+        return res.status(400).json({ message: "Invalid price ID" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+
+      const userResult = await db.execute(
+        `SELECT email, stripe_customer_id FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (!userResult.rows || userResult.rows.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const user = userResult.rows[0] as any;
+
+      let customerId = user.stripe_customer_id;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          metadata: { userId },
+        });
+        customerId = customer.id;
+        await db.execute(
+          `UPDATE users SET stripe_customer_id = $1 WHERE id = $2`,
+          [customerId, userId]
+        );
+      }
+
+      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN}`;
+
+      const sessionParams: any = {
+        mode: "subscription",
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${baseUrl}/subscribe?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/subscribe`,
+        allow_promotion_codes: true,
+      };
+
+      if (couponCode) {
+        try {
+          const promoCodes = await stripe.promotionCodes.list({
+            code: couponCode,
+            active: true,
+            limit: 1,
+          });
+          if (promoCodes.data.length > 0) {
+            delete sessionParams.allow_promotion_codes;
+            sessionParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
+
+            await db.execute(
+              `UPDATE users SET coupon_code = $1 WHERE id = $2`,
+              [couponCode, userId]
+            );
+          }
+        } catch (promoErr) {
+          console.error("Error looking up promo code:", promoErr);
+        }
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error("Checkout error:", error);
+      res.status(500).json({ message: error.message || "Failed to create checkout" });
+    }
+  });
+
+  app.post("/api/stripe/create-portal", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const stripe = await getUncachableStripeClient();
+
+      const userResult = await db.execute(
+        `SELECT stripe_customer_id FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (!userResult.rows || userResult.rows.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const user = userResult.rows[0] as any;
+
+      if (!user.stripe_customer_id) {
+        return res.status(400).json({ message: "No billing account found" });
+      }
+
+      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN}`;
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: user.stripe_customer_id,
+        return_url: `${baseUrl}/subscribe`,
+      });
+
+      res.json({ url: portalSession.url });
+    } catch (error: any) {
+      console.error("Portal error:", error);
+      res.status(500).json({ message: error.message || "Failed to create portal" });
+    }
+  });
+
+  app.get("/api/stripe/sync-subscription", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const userResult = await db.execute(
+        `SELECT stripe_customer_id FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (!userResult.rows || userResult.rows.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const user = userResult.rows[0] as any;
+
+      if (!user.stripe_customer_id) {
+        return res.json({ status: "none" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const subscriptions = await stripe.subscriptions.list({
+        customer: user.stripe_customer_id,
+        status: "all",
+        limit: 1,
+      });
+
+      let status = "none";
+      if (subscriptions.data.length > 0) {
+        const sub = subscriptions.data[0];
+        if (sub.status === "active" || sub.status === "trialing") {
+          status = "active";
+        } else if (sub.status === "past_due") {
+          status = "past_due";
+        } else if (sub.status === "canceled" || sub.status === "unpaid") {
+          status = "cancelled";
+        } else {
+          status = sub.status;
+        }
+      }
+
+      await db.execute(
+        `UPDATE users SET subscription_status = $1 WHERE id = $2`,
+        [status, userId]
+      );
+
+      res.json({ status });
+    } catch (error: any) {
+      console.error("Sync error:", error);
+      res.status(500).json({ message: "Failed to sync subscription" });
+    }
+  });
 
   // --- Workspace routes ---
 

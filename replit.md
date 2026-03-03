@@ -134,17 +134,20 @@ Authentication is handled through `server/replit_integrations/auth/` with user u
 - **Factory Integration**: Agent World (main dashboard at `/`) shows recent gifts and active assembly lines
 
 ### Subscription System (Stripe)
-- **Plan**: Creative Intelligence Pro — $9/month (price_1T3okiPo0Kn2QjErPumcuzCP)
-- **Coupon**: FOUNDING2026 (100% off forever, max 50 uses)
+- **Plan**: Pocket Factory Pro — $49/month (price_1T5AdQPo0Kn2QjEryJ9rKr8b)
+- **Coupons**:
+  - FOUNDING2026 (100% off forever, max 50 uses — founding member perk)
+  - TRYFREE (100% off first month only, then auto-charges $49/month, max 500 uses)
 - **Stripe Integration**: stripe-replit-sync for automatic webhook handling, schema management, and data sync
 - **Paywall**: Non-blocking inline `SubscriptionBanner` at bottom of layout for non-subscribed users (app remains fully accessible). `isSubscribed` middleware available but not enforced.
 - **Admin Bypass**: Admin users (isAdmin=true) bypass the paywall. Admin emails auto-assigned in auth upsert
 - **Admin Emails**: emergent.intel@gmail.com, colby@emergerind.com
 - **Checkout Flow**: `/api/stripe/create-checkout` → Stripe Checkout → webhook syncs subscription → `/api/stripe/sync-subscription` on return
 - **Billing Portal**: `/api/stripe/create-portal` for subscription management
+- **User Profile**: `/api/user/profile` returns user info, subscription status, admin flag
 - **Admin Panel**: `/admin` route for managing users, roles, and subscription status
 - **Subscribe Page**: `/subscribe` shown to non-admin, non-subscribed users as paywall
-- **Key Files**: `server/stripeClient.ts`, `server/webhookHandlers.ts`, `server/seed-stripe.ts`, `client/src/pages/subscribe.tsx`, `client/src/pages/admin.tsx`
+- **Key Files**: `server/stripeClient.ts`, `server/webhookHandlers.ts`, `server/seed-stripe.ts`, `server/routes.ts` (Stripe routes), `client/src/pages/subscribe.tsx`, `client/src/pages/admin.tsx`
 - **Library Page**: Hidden from sidebar navigation but route preserved for AI/model context
 
 ### Role-Based Access Control

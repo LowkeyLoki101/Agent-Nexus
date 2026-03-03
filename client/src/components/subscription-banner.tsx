@@ -50,7 +50,7 @@ export function SubscriptionBanner() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold truncate">Upgrade to Pro</span>
-                <Badge variant="outline" className="text-[10px] shrink-0">90-day free trial</Badge>
+                <Badge variant="outline" className="text-[10px] shrink-0">$49/mo</Badge>
               </div>
               <p className="text-xs text-muted-foreground truncate">
                 Unlock full platform access with unlimited agents, assembly lines, and more
@@ -75,7 +75,7 @@ export function SubscriptionBanner() {
               data-testid="button-banner-subscribe"
             >
               {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-              Start Free Trial
+              Subscribe
             </Button>
             <Button
               size="sm"
