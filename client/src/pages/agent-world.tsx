@@ -1669,7 +1669,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("factory");
   const [actionResults, setActionResults] = useState<{ action: string; result: string; success: boolean }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -2728,51 +2728,51 @@ export default function AgentWorld() {
         simStates={simStates}
       />
 
-      <div className="grid grid-cols-2 gap-3 mt-3">
-        <div className="rounded-lg border border-border bg-card p-3" data-testid="panel-room-legend">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Departments</p>
-          <div className="space-y-1">
-            {factoryRooms.map(room => (
-              <button
-                key={room.id}
-                className="flex items-center gap-2 w-full text-left hover:bg-muted rounded px-1 py-0.5 transition-colors"
-                onClick={() => setSelectedRoom(selectedRoom?.id === room.id ? null : room)}
-                data-testid={`button-room-${room.id}`}
-              >
-                <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: room.color }} />
-                <span className="text-xs">{room.name}</span>
-              </button>
-            ))}
-          </div>
-          <button
-            className="flex items-center gap-2 w-full text-left mt-2 pt-2 border-t hover:bg-muted rounded px-1 py-0.5 transition-colors"
-            data-testid="button-add-department"
-          >
-            <Plus className="h-3 w-3 text-primary" />
-            <span className="text-xs text-primary">Add Department</span>
-          </button>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-3" data-testid="panel-activity-feed">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Live Activity</p>
-          <div className="space-y-1.5">
-            {agentList.filter(a => a.isActive).slice(0, 5).map(agent => {
-              const sim = simStates.get(agent.id);
-              if (!sim) return null;
-              const agentColor = getAgentColor(agent);
-              return (
-                <div key={agent.id} className="flex items-start gap-2">
-                  <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0 ${sim.phase === "working" ? "bg-green-500" : sim.phase === "walking" ? "bg-amber-500" : "bg-gray-400"}`} />
-                  <div className="min-w-0">
-                    <span className="text-xs font-medium" style={{ color: agentColor }}>{agent.name}</span>
-                    <span className="text-xs text-muted-foreground ml-1">
-                      {sim.phase === "walking" ? `heading to ${sim.targetRoom}` : sim.phase === "working" ? sim.objective : "selecting next objective"}
-                    </span>
+      <div className="rounded-lg border border-border bg-card" data-testid="panel-departments-agents">
+        <div className="p-3 space-y-3">
+          {factoryRooms.map(room => {
+            const roomAgents = agentList.filter(a => {
+              const sim = simStates.get(a.id);
+              return a.workspaceId === room.workspaceId || (sim && sim.currentRoomId === room.id);
+            });
+            const isRoomSelected = selectedRoom?.id === room.id;
+            return (
+              <div key={room.id} data-testid={`department-row-${room.id}`}>
+                <button
+                  className={`flex items-center gap-2 w-full text-left rounded-lg px-2 py-1.5 transition-colors ${isRoomSelected ? "bg-primary/10 border border-primary/30" : "hover:bg-muted"}`}
+                  onClick={() => setSelectedRoom(isRoomSelected ? null : room)}
+                  data-testid={`button-room-${room.id}`}
+                >
+                  <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: room.color }} />
+                  <span className="text-sm font-medium flex-1">{room.name}</span>
+                  <Badge variant="secondary" className="text-[10px] h-5">{roomAgents.length} agent{roomAgents.length !== 1 ? "s" : ""}</Badge>
+                  {isRoomSelected ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                </button>
+                {isRoomSelected && roomAgents.length > 0 && (
+                  <div className="ml-5 mt-1 space-y-0.5">
+                    {roomAgents.map(agent => {
+                      const sim = simStates.get(agent.id);
+                      const agentColor = getAgentColor(agent);
+                      return (
+                        <button
+                          key={agent.id}
+                          className="flex items-center gap-2 w-full text-left rounded px-2 py-1 hover:bg-muted/60 transition-colors"
+                          onClick={(e) => { e.stopPropagation(); setSelectedAgent(agent); }}
+                          data-testid={`button-agent-${agent.id}`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${agent.isActive ? (sim?.phase === "working" ? "bg-green-500" : sim?.phase === "walking" ? "bg-amber-500" : "bg-gray-400") : "bg-red-400"}`} />
+                          <span className="text-xs font-medium" style={{ color: agentColor }}>{agent.name}</span>
+                          <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[40%]">
+                            {sim?.phase === "working" ? sim.objective : sim?.phase === "walking" ? `→ ${sim.targetRoom}` : agent.isActive ? "idle" : "inactive"}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
