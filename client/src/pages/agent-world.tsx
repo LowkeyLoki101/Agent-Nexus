@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Bot, X, Shield, Zap, Maximize2, Minimize2, AlertTriangle, Activity,
   Send, MessageSquare, ChevronDown, ChevronUp, Loader2,
@@ -1669,8 +1670,11 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("factory");
   const [actionResults, setActionResults] = useState<{ action: string; result: string; success: boolean }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const selectedAgent = selectedAgentId !== "factory" ? agents.find(a => a.id === selectedAgentId) : null;
 
   const executeActions = useCallback(async (actions: FactoryAction[]) => {
     for (const action of actions) {
@@ -1778,6 +1782,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
           history: chatMessages,
           factoryContext: `${agents.length} agents, ${workspaces.length} departments`,
           uploadedFiles: uploadedFiles.map(f => ({ name: f.name, type: f.type, size: f.size, preview: f.preview })),
+          agentId: selectedAgentId !== "factory" ? selectedAgentId : undefined,
         }),
       });
 
@@ -1829,7 +1834,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
     } finally {
       setIsStreaming(false);
     }
-  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles, executeActions]);
+  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles, executeActions, selectedAgentId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1859,13 +1864,43 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
 
         {isExpanded && (
           <CardContent className="p-0">
+            <div className="px-4 py-2 border-b flex items-center gap-2">
+              <span className="text-xs text-muted-foreground shrink-0">Talk to:</span>
+              <Select value={selectedAgentId} onValueChange={(val) => { setSelectedAgentId(val); setChatMessages([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} }}>
+                <SelectTrigger className="h-8 text-xs" data-testid="select-command-agent">
+                  <SelectValue placeholder="Select agent..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="factory" data-testid="select-agent-factory">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="h-3 w-3 text-primary" />
+                      <span>Factory AI (General)</span>
+                    </div>
+                  </SelectItem>
+                  {agents.filter(a => a.isActive).map(agent => (
+                    <SelectItem key={agent.id} value={agent.id} data-testid={`select-agent-${agent.id}`}>
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-3 w-3" />
+                        <span>{agent.name}</span>
+                        <span className="text-muted-foreground text-[10px]">({agent.modelName || agent.provider})</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div ref={scrollRef} className="h-[300px] overflow-y-auto px-4 py-3 space-y-3">
               {chatMessages.length === 0 && (
                 <div className="text-center py-8">
                   <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-sm font-medium text-muted-foreground/70">Factory Command Center</p>
+                  <p className="text-sm font-medium text-muted-foreground/70">
+                    {selectedAgent ? `Chat with ${selectedAgent.name}` : "Factory Command Center"}
+                  </p>
                   <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
-                    Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights.
+                    {selectedAgent
+                      ? `Talk directly to ${selectedAgent.name}. Ask about their work, diary, current projects, or give them instructions.`
+                      : "Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights."
+                    }
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center mt-4">
                     {["Show factory health", "Check for cold zones", "Assign agents to rooms", "Show drift risks"].map(suggestion => (

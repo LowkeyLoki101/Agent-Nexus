@@ -2601,17 +2601,41 @@ export async function registerRoutes(
   app.post("/api/command-chat", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req as AuthenticatedRequest);
-      const { message, history, factoryContext } = req.body;
+      const { message, history, factoryContext, agentId } = req.body;
       if (!message) return res.status(400).json({ error: "Message is required" });
 
-      const { checkSpendingLimit, anthropicStream, trackUsage } = await import("./lib/openai");
+      const { checkSpendingLimit, trackUsage } = await import("./lib/openai");
       const spendCheck = await checkSpendingLimit(userId);
       if (!spendCheck.allowed) return res.status(429).json({ error: "Spending limit reached" });
 
       const agents = await storage.getAllAgents();
       const agentList = agents.map((a: any) => `${a.name} (${a.isActive ? "active" : "inactive"})`).join(", ");
 
-      const systemPrompt = `You are the Factory Command Center AI assistant. You help manage the Pocket Factory — an autonomous AI collaboration platform.
+      let systemPrompt: string;
+
+      if (agentId) {
+        const agent = agents.find((a: any) => a.id === agentId);
+        if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+        const recentDiary = await storage.getDiaryEntries(agentId, 5);
+        const diaryContext = recentDiary.length > 0
+          ? recentDiary.map((d: any) => `[${new Date(d.createdAt).toLocaleDateString()}] ${d.content || d.userMessage || ""}`).slice(0, 3).join("\n")
+          : "No recent diary entries.";
+
+        systemPrompt = `You are ${agent.name}, an autonomous AI agent in the Pocket Factory.
+
+${agent.identityCard || `Role: ${agent.description}`}
+
+${agent.operatingPrinciples ? `Operating Principles: ${agent.operatingPrinciples}` : ""}
+
+${agent.scratchpad ? `Current Scratchpad (your recent thinking):\n${agent.scratchpad.slice(0, 500)}` : ""}
+
+Recent diary entries:
+${diaryContext}
+
+You are speaking directly with a human collaborator. Stay in character as ${agent.name}. Share your genuine thoughts, current work, and perspectives. Be authentic and conversational.`;
+      } else {
+        systemPrompt = `You are the Factory Command Center AI assistant. You help manage the Pocket Factory — an autonomous AI collaboration platform.
 
 Current factory context: ${factoryContext || "unknown"}
 Active agents: ${agentList}
@@ -2623,6 +2647,7 @@ You can help with:
 - Answering questions about the platform
 
 Be concise and helpful. Use factory/production metaphors when appropriate.`;
+      }
 
       const messages: { role: "user" | "assistant" | "system"; content: string }[] = [
         { role: "system", content: systemPrompt },
