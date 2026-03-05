@@ -24,7 +24,10 @@ import {
   Play, Pause, Volume2, VolumeX,
   Upload, Paperclip, Table2, BarChart3, List, Image as ImageIcon, Video, Trash2,
   BookOpen, CircleUser, CheckCircle2,
+  FileDown, Share2,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import jsPDF from "jspdf";
 
 function detectWebGL(): boolean {
   try {
@@ -2278,8 +2281,173 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
     }
   }, [chatInput, isStreaming, agent.id, chatMessages, simState, chatImage, chatImagePreview]);
 
+  const { toast } = useToast();
+
+  const exportChatPDF = useCallback(() => {
+    if (chatMessages.length === 0) {
+      toast({ title: "No messages", description: "Start a conversation before exporting.", variant: "destructive" });
+      return;
+    }
+    const doc = new jsPDF();
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    // --- Cover Sheet ---
+    doc.setFillColor(20, 20, 30);
+    doc.rect(0, 0, pageW, pageH, "F");
+
+    // Gold accent bar
+    doc.setFillColor(229, 168, 36);
+    doc.rect(0, 70, pageW, 4, "F");
+
+    // Agent avatar circle
+    doc.setFillColor(229, 168, 36);
+    doc.circle(pageW / 2, 45, 18, "F");
+    doc.setTextColor(20, 20, 30);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    const initials = agent.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+    doc.text(initials, pageW / 2, 51, { align: "center" });
+
+    // Title
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Chat with ${agent.name}`, pageW / 2, 95, { align: "center" });
+
+    // Date
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(180, 180, 180);
+    doc.text(new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" }), pageW / 2, 108, { align: "center" });
+
+    // Message count
+    doc.text(`${chatMessages.length} messages`, pageW / 2, 118, { align: "center" });
+
+    // Agent description
+    if (agent.description) {
+      doc.setFontSize(10);
+      doc.setTextColor(150, 150, 150);
+      const descLines = doc.splitTextToSize(agent.description, pageW - 60);
+      doc.text(descLines, pageW / 2, 135, { align: "center" });
+    }
+
+    // Branding footer
+    doc.setFontSize(9);
+    doc.setTextColor(229, 168, 36);
+    doc.text("CB | CREATIVES — Creative Intelligence", pageW / 2, pageH - 25, { align: "center" });
+    doc.setTextColor(100, 100, 100);
+    doc.setFontSize(8);
+    doc.text("Exported from Agent Factory", pageW / 2, pageH - 18, { align: "center" });
+
+    // --- Chat Transcript Pages ---
+    doc.addPage();
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, pageW, pageH, "F");
+
+    // Header
+    doc.setFillColor(229, 168, 36);
+    doc.rect(0, 0, pageW, 12, "F");
+    doc.setTextColor(20, 20, 30);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Chat Transcript — ${agent.name}`, 10, 8);
+    doc.text(new Date().toLocaleDateString(), pageW - 10, 8, { align: "right" });
+
+    let y = 22;
+    const margin = 14;
+    const maxTextW = pageW - margin * 2 - 10;
+
+    for (const msg of chatMessages) {
+      const label = msg.role === "user" ? "You" : agent.name;
+      const content = msg.content || "";
+      if (!content.trim()) continue;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(msg.role === "user" ? 59 : 229, msg.role === "user" ? 130 : 168, msg.role === "user" ? 246 : 36);
+      const labelText = `${label}:`;
+
+      const lines = doc.splitTextToSize(content, maxTextW);
+      const blockH = 6 + lines.length * 4.5 + 4;
+
+      if (y + blockH > pageH - 20) {
+        doc.addPage();
+        doc.setFillColor(229, 168, 36);
+        doc.rect(0, 0, pageW, 12, "F");
+        doc.setTextColor(20, 20, 30);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Chat Transcript — ${agent.name}`, 10, 8);
+        doc.text(new Date().toLocaleDateString(), pageW - 10, 8, { align: "right" });
+        y = 22;
+      }
+
+      // Light background for message block
+      doc.setFillColor(msg.role === "user" ? 240 : 248, msg.role === "user" ? 245 : 248, msg.role === "user" ? 255 : 240);
+      doc.roundedRect(margin - 2, y - 2, pageW - margin * 2 + 4, blockH, 2, 2, "F");
+
+      doc.setTextColor(msg.role === "user" ? 59 : 229, msg.role === "user" ? 130 : 168, msg.role === "user" ? 246 : 36);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(labelText, margin, y + 4);
+
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.text(lines, margin, y + 10);
+
+      y += blockH + 3;
+    }
+
+    // Footer on last page
+    doc.setFontSize(7);
+    doc.setTextColor(150, 150, 150);
+    doc.text("Generated by Creative Intelligence — CB | CREATIVES", pageW / 2, pageH - 8, { align: "center" });
+
+    doc.save(`chat-${agent.name.replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    toast({ title: "PDF exported", description: `Chat with ${agent.name} saved as PDF.` });
+  }, [chatMessages, agent, toast]);
+
+  const postToMessageBoard = useCallback(async () => {
+    if (chatMessages.length === 0) {
+      toast({ title: "No messages", description: "Start a conversation before sharing.", variant: "destructive" });
+      return;
+    }
+    if (!confirm(`Post this chat with ${agent.name} (${chatMessages.length} messages) to the public message board?`)) return;
+
+    const transcript = chatMessages
+      .filter(m => m.content?.trim())
+      .map(m => `**${m.role === "user" ? "You" : agent.name}:** ${m.content}`)
+      .join("\n\n");
+
+    const body = `## Chat with ${agent.name}\n\n*${new Date().toLocaleString()}* — ${chatMessages.length} messages\n\n---\n\n${transcript}`;
+
+    try {
+      const res = await fetch("/api/topics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title: `Chat with ${agent.name} — ${new Date().toLocaleDateString()}`,
+          body,
+          content: body,
+          authorType: "human",
+          authorName: "User",
+          category: "chat-export",
+          workspaceId: agent.workspaceId || "default",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to post");
+      toast({ title: "Posted to message board", description: "Your chat is now visible on the discussions board." });
+      queryClient.invalidateQueries({ queryKey: ["/api/topics"] });
+    } catch {
+      toast({ title: "Failed to post", description: "Could not share the chat. Try again.", variant: "destructive" });
+    }
+  }, [chatMessages, agent, toast]);
+
   return (
-    <Card className={`absolute bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isExpanded ? "inset-4" : "right-4 top-4 w-[380px] max-h-[calc(100%-2rem)]"}`} data-testid={`panel-agent-detail-${agent.id}`}>
+    <Card className={`absolute bg-background/95 backdrop-blur-lg border-primary/30 z-20 shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isExpanded ? "inset-4" : "right-4 top-4 w-[440px] max-h-[calc(100%-2rem)]"}`} data-testid={`panel-agent-detail-${agent.id}`}>
       <CardHeader className="pb-2 shrink-0">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
@@ -2351,8 +2519,33 @@ function AgentDetailPanel({ agent, simState, onClose }: { agent: Agent; simState
           </TabsTrigger>
         </TabsList>
 
+        {activeTab === "chat" && chatMessages.length > 0 && (
+          <div className="flex items-center gap-1.5 px-3 pt-1.5 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-[10px] h-7 gap-1.5 px-2"
+              onClick={exportChatPDF}
+              data-testid="button-export-pdf"
+            >
+              <FileDown className="h-3 w-3" />
+              Export PDF
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-[10px] h-7 gap-1.5 px-2"
+              onClick={postToMessageBoard}
+              data-testid="button-post-board"
+            >
+              <Share2 className="h-3 w-3" />
+              Post to Board
+            </Button>
+          </div>
+        )}
+
         <TabsContent value="chat" className="flex flex-col min-h-0 flex-1 mt-0 data-[state=inactive]:hidden">
-          <div ref={scrollRef} className={`flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] ${isExpanded ? "" : "max-h-[300px]"}`}>
+          <div ref={scrollRef} className={`flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[120px] ${isExpanded ? "" : "max-h-[400px]"}`}>
             {chatMessages.length === 0 && (
               <div className="text-center py-6">
                 <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
@@ -2670,7 +2863,7 @@ export default function AgentWorld() {
         </div>
       </div>
 
-      <div className={`relative rounded-lg overflow-hidden border border-primary/20 bg-[#0a0a1a] ${fpvMode ? "h-[600px]" : "h-[450px]"}`} data-testid="canvas-agent-world">
+      <div className={`relative rounded-lg overflow-hidden border border-primary/20 bg-[#0a0a1a] ${isFullscreen ? (fpvMode ? "h-[calc(100vh-160px)]" : "h-[calc(100vh-200px)]") : fpvMode ? "h-[600px]" : "h-[450px]"}`} data-testid="canvas-agent-world">
         {selectedAgent && (
           <AgentDetailPanel agent={selectedAgent} simState={simStates.get(selectedAgent.id)} onClose={() => setSelectedAgent(null)} />
         )}
