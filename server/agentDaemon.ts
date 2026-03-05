@@ -967,11 +967,7 @@ Respond with JSON only: {"reflection_title": "A title for this reflection", "ins
 
     if (memory) {
       const updatedSummary = `${memory.summary}\n\nRecent reflection: ${parsed.insights.slice(0, 200)}`;
-      await storage.upsertAgentMemory({
-        agentId: agent.id,
-        summary: updatedSummary.slice(0, 2000),
-        priority: memory.priority || "background",
-      });
+      await storage.upsertAgentMemory(agent.id, updatedSummary.slice(0, 2000));
     }
 
     return `${agent.name} reflected: "${parsed.reflection_title}" (mood: ${parsed.mood})`;
@@ -1621,7 +1617,7 @@ async function tick() {
     }
 
     const now = new Date();
-    const activeAgents = allAgents.filter(a => a.agent.status === "active" && a.agent.evolveStatus !== "dead");
+    const activeAgents = allAgents.filter(a => a.agent.isActive && a.agent.evolveStatus !== "dead");
 
     const idleAgents = activeAgents.filter(a => {
       const lastActive = agentLastActive.get(a.agent.id);
@@ -2033,10 +2029,10 @@ If you cannot think of a genuinely useful new tool, respond with {"skip": true, 
 
     await storage.createDiaryEntry({
       agentId: agent.id,
-      workspaceId: workspace.id,
       entryType: "reflection",
       content: `I created a new tool for the factory: "${parsed.name}" — ${parsed.description}`,
       source: "daemon",
+      sourceContext: "tool_creation",
     });
 
     return `${agent.name} created new tool: "${parsed.name}" — ${parsed.description}`;

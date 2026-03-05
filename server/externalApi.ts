@@ -53,6 +53,11 @@ function requirePermission(...perms: string[]) {
   };
 }
 
+function qp(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0];
+  return value ?? "";
+}
+
 export function registerExternalApi(app: Express) {
   const prefix = "/api/v1";
 
@@ -431,7 +436,7 @@ export function registerExternalApi(app: Express) {
   app.get(`${prefix}/briefings`, authenticateApiToken, async (req: ApiTokenRequest, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 20;
-      const briefings = await storage.getRecentBriefings(limit);
+      const briefings = await storage.getRecentBriefings(String(req.apiToken!.userId), limit);
       res.json(briefings);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -487,7 +492,7 @@ export function registerExternalApi(app: Express) {
       const { parent1Id, parent2Id } = req.body;
       if (!parent1Id || !parent2Id) return res.status(400).json({ error: "parent1Id and parent2Id are required" });
       const { mergeAgents } = await import("./evolveEngine");
-      const result = await mergeAgents(parent1Id, parent2Id, req.apiToken!.userId);
+      const result = await mergeAgents(parent1Id, parent2Id);
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -635,6 +640,7 @@ export function registerExternalApi(app: Express) {
         chatMessages.push(assistantMessage as any);
 
         for (const toolCall of assistantMessage.tool_calls) {
+          if (toolCall.type !== 'function') continue;
           const result = await executeCommandCenterTool(toolCall.function.name, JSON.parse(toolCall.function.arguments), userId);
           toolResults.push(`[${toolCall.function.name}]: ${JSON.stringify(result).slice(0, 500)}`);
           chatMessages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(result) });
@@ -1383,7 +1389,7 @@ export async function executeCommandCenterTool(name: string, args: any, userId: 
     case "run_product": {
       const { runProductThroughPipeline } = await import("./assemblyEngine");
       const result = await runProductThroughPipeline(args.productId);
-      return { success: true, result: { id: result.id, status: result.status, finalOutput: result.finalOutput?.slice(0, 500) } };
+      return { success: true, result: { success: result.success, message: result.message } };
     }
     case "post_discussion": {
       const topic = await storage.createDiscussionTopic({
@@ -1415,10 +1421,9 @@ export async function executeCommandCenterTool(name: string, args: any, userId: 
       const gift = await storage.createGift({
         title: args.title,
         content: args.content,
-        giftType: args.giftType,
+        type: args.giftType,
         workspaceId: args.workspaceId,
-        agentId: args.agentId || null,
-        createdById: userId,
+        agentId: args.agentId || userId,
       });
       return { success: true, gift: { id: gift.id, title: gift.title } };
     }
@@ -1609,13 +1614,13 @@ export async function executeCommandCenterTool(name: string, args: any, userId: 
       const entries = await storage.getDiaryEntries(args.agentId, args.limit || 20);
       return entries.map(e => ({
         id: e.id, entryType: e.entryType, content: e.content?.slice(0, 500),
-        mood: e.mood, priority: e.priority, createdAt: e.createdAt,
+        mood: e.mood, createdAt: e.createdAt,
       }));
     }
     case "get_agent_memory": {
       const memory = await storage.getAgentMemory(args.agentId);
       if (!memory) return { message: "No working memory found for this agent" };
-      return { summary: memory.summary, priorities: memory.priorities, lastUpdated: memory.updatedAt };
+      return { summary: memory.summary, lastUpdated: memory.updatedAt };
     }
     case "update_agent_scratchpad": {
       const updated = await storage.updateAgent(args.agentId, { scratchpad: args.scratchpad });
@@ -1679,7 +1684,7 @@ export async function executeCommandCenterTool(name: string, args: any, userId: 
     case "list_ebooks": {
       const ebooks = await storage.getEbooks(args.limit || 20);
       return ebooks.map(e => ({
-        id: e.id, title: e.title, agentId: e.agentId,
+        id: e.id, title: e.title, authorAgentId: e.authorAgentId,
         status: e.status, genre: e.genre, createdAt: e.createdAt,
       }));
     }
@@ -1709,7 +1714,7 @@ export async function executeCommandCenterTool(name: string, args: any, userId: 
       const entries = await storage.getChronicleEntries(50);
       return entries.map(e => ({
         id: e.id, chapter: e.chapter, title: e.title,
-        content: e.content?.slice(0, 300), clauseNumber: e.clauseNumber,
+        content: e.content?.slice(0, 300),
       }));
     }
     case "enroll_university": {

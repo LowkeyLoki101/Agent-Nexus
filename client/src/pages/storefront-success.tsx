@@ -28,7 +28,7 @@ export default function StorefrontSuccess() {
           Thank you for your purchase. Your download will be delivered to your email.
         </p>
 
-        {listing && (
+        {!!listing && (
           <div className="border border-white/10 rounded-lg bg-[#141422] p-4 mb-8">
             <h3 className="text-sm font-semibold text-white/80" data-testid="text-purchased-item">{(listing as any).title}</h3>
             <p className="text-xs text-white/40 mt-1">

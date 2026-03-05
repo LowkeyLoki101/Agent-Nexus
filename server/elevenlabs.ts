@@ -50,7 +50,7 @@ async function getCredentials(): Promise<string> {
 
     cachedApiKey = connectionSettings.settings.api_key;
     console.log("[elevenlabs] Credentials loaded successfully");
-    return cachedApiKey;
+    return cachedApiKey!;
   } catch (err: any) {
     console.error("[elevenlabs] Failed to get credentials:", err.message);
     throw err;

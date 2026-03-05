@@ -5,7 +5,7 @@ import { z } from "zod";
 
 export * from "./models/auth";
 
-export const agentProviderEnum = pgEnum("agent_provider", ["openai", "anthropic", "xai"]);
+export const agentProviderEnum = pgEnum("agent_provider", ["openai", "anthropic", "xai", "minimax"]);
 export const memberRoleEnum = pgEnum("member_role", ["owner", "admin", "member", "viewer"]);
 export const entityTypeEnum = pgEnum("entity_type", ["human", "agent"]);
 export const tokenStatusEnum = pgEnum("token_status", ["active", "revoked", "expired"]);
@@ -1001,3 +1001,23 @@ export const factoryNotifications = pgTable("factory_notifications", {
 export const insertFactoryNotificationSchema = createInsertSchema(factoryNotifications).omit({ id: true, createdAt: true });
 export type FactoryNotification = typeof factoryNotifications.$inferSelect;
 export type InsertFactoryNotification = z.infer<typeof insertFactoryNotificationSchema>;
+
+// Chat conversations and messages (Replit integration)
+export const conversations = pgTable("conversations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const messages = pgTable("messages", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Type aliases for backward compatibility
+export type DiaryEntry = AgentDiaryEntry;
+export type InsertDiaryEntry = InsertAgentDiaryEntry;
+export type AgentMemoryRecord = AgentMemory;

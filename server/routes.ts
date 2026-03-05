@@ -1386,8 +1386,8 @@ export async function registerRoutes(
         title: `Sparked ${giftType || "gift"} from ${agent.name}`,
         description: `A ${giftType || "gift"} sparked by request`,
         content: "Being created...",
-        giftType: giftType || "other",
-        status: "draft",
+        type: (giftType as any) || "other",
+        status: "creating",
       });
       res.json(gift);
     } catch (error) {
@@ -1415,8 +1415,7 @@ export async function registerRoutes(
         agentId: gift.agentId,
         title: `Gift: ${gift.title}`,
         content: gift.content || gift.description || "",
-        category: "gift_import",
-        createdById: userId,
+        relatedPath: "gift_import",
       });
       res.json(note);
     } catch (error) {
@@ -1582,7 +1581,7 @@ export async function registerRoutes(
     try {
       const queued = await storage.getQueuedProducts();
       for (const p of queued) {
-        await storage.updateProduct(p.id, { status: "processing" });
+        await storage.updateProduct(p.id, { status: "in_progress" });
       }
       res.json({ processed: queued.length });
     } catch (error) {
@@ -2378,7 +2377,7 @@ export async function registerRoutes(
       const userId = getUserId(req as AuthenticatedRequest);
       const existing = await storage.getStorefrontListingById(req.params.id);
       if (!existing) return res.status(404).json({ message: "Listing not found" });
-      if (existing.ownerId !== userId) return res.status(403).json({ message: "Not your listing" });
+      if (existing.factoryOwnerId !== userId) return res.status(403).json({ message: "Not your listing" });
       const listing = await storage.updateStorefrontListing(req.params.id, req.body);
       res.json(listing);
     } catch (error) {
@@ -2391,7 +2390,7 @@ export async function registerRoutes(
       const userId = getUserId(req as AuthenticatedRequest);
       const existing = await storage.getStorefrontListingById(req.params.id);
       if (!existing) return res.status(404).json({ message: "Listing not found" });
-      if (existing.ownerId !== userId) return res.status(403).json({ message: "Not your listing" });
+      if (existing.factoryOwnerId !== userId) return res.status(403).json({ message: "Not your listing" });
       await storage.deleteStorefrontListing(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -2504,7 +2503,7 @@ export async function registerRoutes(
   app.get("/api/admin/users/:userId", isAuthenticated, async (req, res) => {
     try {
       if (!(await requireAdmin(req, res))) return;
-      const user = await storage.getUser(req.params.userId);
+      const user = await storage.getUserById(req.params.userId);
       if (!user) return res.status(404).json({ message: "User not found" });
       const usage = await storage.getTokenUsageByUser(req.params.userId);
       res.json({ ...user, usage });
@@ -2516,7 +2515,7 @@ export async function registerRoutes(
   app.patch("/api/admin/users/:userId", isAuthenticated, async (req, res) => {
     try {
       if (!(await requireAdmin(req, res))) return;
-      const user = await storage.getUser(req.params.userId);
+      const user = await storage.getUserById(req.params.userId);
       if (!user) return res.status(404).json({ message: "User not found" });
       const updated = await storage.updateUser(req.params.userId, req.body);
       res.json(updated);
@@ -2652,7 +2651,7 @@ Be concise and helpful. Use factory/production metaphors when appropriate.`;
           }
         }
         const usage = getUsage();
-        await trackUsage(userId, model, usage.inputTokens, usage.outputTokens);
+        await trackUsage(userId, model, "command-chat", usage.inputTokens, usage.outputTokens);
       } else {
         const { trackedStreamingChat } = await import("./lib/openai");
         const model = "gpt-4o-mini";

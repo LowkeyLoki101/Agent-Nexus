@@ -256,7 +256,7 @@ CRITICAL: You MUST produce actual content directly. Never say "I cannot", "I don
 
   const agentModel = agent?.modelName || "gpt-4o-mini";
   const agentProvider = agent?.provider || "openai";
-  const useAnthropic = (agentProvider === "anthropic" || agentProvider === "minimax") && (isClaudeModel(agentModel) || isMinimaxModel(agentModel));
+  const useAnthropic = agentProvider === "anthropic" && isClaudeModel(agentModel);
   const maxTokens = (tool.name === "website_build" || tool.name === "html_build") ? 8192 : 4096;
 
   let output = "No output generated.";
@@ -265,16 +265,16 @@ CRITICAL: You MUST produce actual content directly. Never say "I cannot", "I don
   if (useAnthropic) {
     try {
       const result = await anthropicChat(
-        systemPrompt,
-        [{ role: "user", content: inputs.instructions }],
         agentModel,
+        [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: inputs.instructions },
+        ],
         maxTokens
       );
-      output = result;
+      output = result.content;
       if (userId) {
-        const estimatedTokens = Math.ceil((systemPrompt.length + inputs.instructions.length) / 4);
-        const outputTokens = Math.ceil(result.length / 4);
-        await trackUsage(userId, agentModel, `tool:${tool.name}`, estimatedTokens, outputTokens);
+        await trackUsage(userId, agentModel, `tool:${tool.name}`, result.inputTokens, result.outputTokens);
       }
     } catch (err: any) {
       console.log(`[ToolEngine] ${agentModel} failed, falling back to gpt-4o-mini: ${err.message}`);
@@ -354,7 +354,7 @@ async function executeCodeSandbox(
     };
 
     const context = vm.createContext(sandbox);
-    const script = new vm.Script(code, { timeout: 10000 });
+    const script = new vm.Script(code);
     script.runInContext(context, { timeout: 10000 });
 
     return {

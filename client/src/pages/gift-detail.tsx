@@ -399,7 +399,7 @@ export default function GiftDetail() {
         <GiftIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground/30" />
         <h2 className="text-lg font-medium">Gift not found</h2>
         <Link href="/gifts">
-          <Button variant="link" className="mt-2">Back to Gifts</Button>
+          <Button variant="ghost" className="mt-2">Back to Gifts</Button>
         </Link>
       </div>
     );

@@ -161,7 +161,7 @@ export async function generateBroadcast(): Promise<any> {
     const allWorkspaces = await storage.getAllWorkspaces();
 
     const interviewSummaries = completedInterviews.slice(0, 6).map(i => {
-      const qaPairs = (i.questions || []).map((q, idx) =>
+      const qaPairs = (i.questions || []).map((q: string, idx: number) =>
         `Q: ${q}\nA: ${(i.answers || [])[idx] || "No answer"}`
       ).join("\n");
       return `--- Interview with ${i.agentName} (${HERALD_MODEL}) ---\n${qaPairs}\nExcerpt: ${i.excerpt}`;

@@ -255,7 +255,7 @@ export default function Discussions() {
                 if (newTitle.trim()) {
                   createMutation.mutate({
                     title: newTitle.trim(),
-                    content: newContent.trim() || undefined,
+                    content: newContent.trim() || "",
                     category: newCategory.trim() || undefined,
                   });
                 }

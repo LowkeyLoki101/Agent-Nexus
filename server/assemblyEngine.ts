@@ -220,12 +220,13 @@ async function autoListCompletedProduct(
   const agentId = builderAgent?.id || agent?.id || steps[0]?.assignedAgentId || "";
   if (!agentId) return;
 
+  const giftAgent = builderAgent || agent;
   const gift = await storage.createGift({
     agentId,
-    workspaceId: null,
+    workspaceId: giftAgent?.workspaceId || assemblyLine.ownerId,
     title: product.name,
     description: product.description || `Product from assembly line: ${assemblyLine.name}`,
-    type: hasHtml ? "code" : "text",
+    type: hasHtml ? "tool" : "content",
     status: "ready",
     content: finalOutput,
     toolUsed: hasHtml ? "website_build" : "text_generate",
