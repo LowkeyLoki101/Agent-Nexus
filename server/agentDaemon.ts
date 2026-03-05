@@ -965,14 +965,11 @@ Respond with JSON only: {"reflection_title": "A title for this reflection", "ins
       sourceContext: "reflection",
     });
 
-    if (memory) {
-      const updatedSummary = `${memory.summary}\n\nRecent reflection: ${parsed.insights.slice(0, 200)}`;
-      await storage.upsertAgentMemory({
-        agentId: agent.id,
-        summary: updatedSummary.slice(0, 2000),
-        priority: memory.priority || "background",
-      });
-    }
+    const currentSummary = memory?.summary || "";
+    const updatedSummary = currentSummary
+      ? `${currentSummary}\n\nRecent reflection: ${parsed.insights.slice(0, 200)}`
+      : `Recent reflection: ${parsed.insights.slice(0, 200)}`;
+    await storage.upsertAgentMemory(agent.id, updatedSummary.slice(0, 2000));
 
     return `${agent.name} reflected: "${parsed.reflection_title}" (mood: ${parsed.mood})`;
   } catch (e) {

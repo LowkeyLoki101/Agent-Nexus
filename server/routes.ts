@@ -1219,6 +1219,20 @@ export async function registerRoutes(
         content: fullReply.slice(0, 500),
       }).catch(() => {});
 
+      (async () => {
+        try {
+          const currentMemory = await storage.getAgentMemory(agentId);
+          const existingSummary = currentMemory?.summary || "";
+          const chatSnippet = `User: ${message.slice(0, 150)}\n${agent.name}: ${fullReply.slice(0, 250)}`;
+          const newSummary = existingSummary
+            ? `${existingSummary}\n\nRecent chat: ${chatSnippet}`
+            : `Recent chat: ${chatSnippet}`;
+          await storage.upsertAgentMemory(agentId, newSummary.slice(0, 2000));
+        } catch (memErr) {
+          console.error("Error updating working memory after chat:", memErr);
+        }
+      })();
+
     } catch (error: any) {
       console.error("Error in agent chat:", error);
       if (!res.headersSent) {
