@@ -85,6 +85,8 @@ import {
   newsroomSettings,
   agentLineage,
   agentTombstones,
+  linecuterzProducts,
+  type LinecuterzProduct,
   universitySessions,
   agentTools,
   agentNotifications,
@@ -1578,6 +1580,20 @@ export class DatabaseStorage implements IStorage {
   async getUnreadFactoryNotificationCount(userId: string): Promise<number> {
     const result = await db.select({ count: sql<number>`count(*)` }).from(factoryNotifications)
       .where(and(eq(factoryNotifications.userId, userId), eq(factoryNotifications.isRead, false), eq(factoryNotifications.isDismissed, false)));
+    return Number(result[0]?.count || 0);
+  }
+
+  async getLinecuterzProducts(limit = 50, offset = 0): Promise<LinecuterzProduct[]> {
+    return db.select().from(linecuterzProducts).limit(limit).offset(offset);
+  }
+
+  async getLinecuterzProduct(id: string): Promise<LinecuterzProduct | undefined> {
+    const [product] = await db.select().from(linecuterzProducts).where(eq(linecuterzProducts.id, id));
+    return product;
+  }
+
+  async getLinecuterzProductCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(linecuterzProducts);
     return Number(result[0]?.count || 0);
   }
 }

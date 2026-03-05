@@ -43,6 +43,7 @@ import {
   Shield,
   CreditCard,
   Activity,
+  Store,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -65,6 +66,11 @@ const mainNavItems = [
     title: "Products",
     url: "/products",
     icon: Download,
+  },
+  {
+    title: "LineCutterz Store",
+    url: "/linecutterz",
+    icon: Store,
   },
   {
     title: "Heatmap",

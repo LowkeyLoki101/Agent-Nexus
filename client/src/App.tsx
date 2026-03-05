@@ -35,6 +35,7 @@ import NotFound from "@/pages/not-found";
 import ForgotPassword from "@/pages/forgot-password";
 import Subscribe from "@/pages/subscribe";
 import Admin from "@/pages/admin";
+import LinecuterzStore from "@/pages/linecutterz-store";
 import { SubscriptionBanner } from "@/components/subscription-banner";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -91,6 +92,7 @@ function AuthenticatedRouter() {
         <Route path="/audit-logs" component={AuditLogs} />
         <Route path="/admin" component={Admin} />
         <Route path="/subscribe" component={Subscribe} />
+        <Route path="/linecutterz" component={LinecuterzStore} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>

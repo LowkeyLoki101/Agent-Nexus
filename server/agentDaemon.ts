@@ -8,7 +8,7 @@ import { notifyAgentsOfReply, buildThreadContext } from "./boardNotifier";
 const TICK_INTERVAL_MS = 90 * 1000;
 const JITTER_MS = 30 * 1000;
 
-type ActivityType = "create_gift" | "post_board" | "reply_board" | "create_briefing" | "comment_gift" | "run_pipeline" | "write_ebook" | "buy_ebook" | "wonder" | "investigate" | "reflect" | "seek_mate" | "ghost_comment" | "fade_check" | "attend_university" | "convert_discussion" | "create_tool" | "build_sandbox_project" | "improve_sandbox_project" | "stock_storefront" | "build_website";
+type ActivityType = "create_gift" | "post_board" | "reply_board" | "create_briefing" | "comment_gift" | "run_pipeline" | "write_ebook" | "buy_ebook" | "wonder" | "investigate" | "reflect" | "seek_mate" | "ghost_comment" | "fade_check" | "attend_university" | "convert_discussion" | "create_tool" | "build_sandbox_project" | "improve_sandbox_project" | "stock_storefront" | "build_website" | "create_marketing_content";
 
 interface DaemonState {
   running: boolean;
@@ -1422,6 +1422,7 @@ async function selectActivity(agent: Agent): Promise<ActivityType> {
     { activity: "improve_sandbox_project", weight: 5 },
     { activity: "stock_storefront", weight: 15 },
     { activity: "build_website", weight: 20 },
+    { activity: "create_marketing_content", weight: 18 },
   ];
 
   try {
@@ -1488,6 +1489,10 @@ async function selectActivity(agent: Agent): Promise<ActivityType> {
   }
   if (capabilities.includes("write") || capabilities.includes("content_generation") || capabilities.includes("copywrite")) {
     weights.find(w => w.activity === "stock_storefront")!.weight += 5;
+    weights.find(w => w.activity === "create_marketing_content")!.weight += 12;
+  }
+  if (capabilities.includes("marketing") || capabilities.includes("strategy") || capabilities.includes("content_generation")) {
+    weights.find(w => w.activity === "create_marketing_content")!.weight += 15;
   }
 
   try {
@@ -1682,6 +1687,9 @@ async function tick() {
       case "build_website":
         result = await activityBuildWebsite(agent, workspace);
         break;
+      case "create_marketing_content":
+        result = await activityCreateMarketingContent(agent, workspace);
+        break;
       default:
         result = "Unknown activity";
     }
@@ -1742,6 +1750,30 @@ export function getDaemonStatus() {
     totalActivities: state.totalActivities,
     errors: state.errors,
   };
+}
+
+export async function triggerImmediateReply(topicId: string, humanUserId: string): Promise<void> {
+  try {
+    const topic = await storage.getDiscussionTopic(topicId);
+    if (!topic) return;
+
+    const workspaceId = (topic as any).workspaceId;
+    if (!workspaceId) return;
+
+    const agents = await storage.getAgentsByWorkspace(workspaceId);
+    const activeAgents = agents.filter((a: Agent) => a.isActive);
+    if (activeAgents.length === 0) return;
+
+    const responder = pickRandom(activeAgents.slice(0, 3));
+    const workspace = await storage.getWorkspace(workspaceId);
+    if (!workspace) return;
+
+    console.log(`[BoardNudge] Triggering immediate reply from ${responder.name} to topic "${(topic as any).title}"`);
+    const result = await activityReplyBoard(responder, workspace);
+    console.log(`[BoardNudge] ${responder.name}: ${result}`);
+  } catch (e: any) {
+    console.error("[BoardNudge] Error:", e.message);
+  }
 }
 
 export async function triggerManualTick(): Promise<string> {
@@ -2362,6 +2394,110 @@ The htmlContent must be a single valid HTML document string with ALL CSS in <sty
   return `Website created: "${project.title}" (${niche}) by ${agent.name} — viewable at /sandbox/projects/${project.id}`;
 }
 
+async function activityCreateMarketingContent(agent: Agent, workspace: Workspace): Promise<string> {
+  const products = await storage.getLinecuterzProducts(50, 0);
+  if (products.length === 0) return `${agent.name} found no LineCutterz products to market`;
+
+  const product = pickRandom(products);
+  const contentTypes = ["facebook_post", "article", "social_media_kit"];
+  const contentType = pickRandom(contentTypes);
+
+  const typeLabel: Record<string, string> = {
+    facebook_post: "Facebook Marketing Post",
+    article: "Product Marketing Article",
+    social_media_kit: "Social Media Kit",
+  };
+
+  const prompt = `You are ${agent.name}, a marketing content creator for LineCutterz fishing products.
+
+Create a ${typeLabel[contentType]} for this product:
+
+Product: ${product.title}
+Price: $${product.minPrice}${product.minPrice !== product.maxPrice ? ` - $${product.maxPrice}` : ""}
+Description: ${product.description || "A high-quality LineCutterz fishing accessory"}
+Product URL: ${product.productUrl}
+Variants: ${product.variantCount}
+
+${contentType === "facebook_post" ? `Write an engaging Facebook post (150-300 words) that:
+- Grabs attention with a hook opening
+- Highlights the product's key benefits for anglers
+- Includes relevant hashtags (#LineCutterz #FishingGear #AnglerLife)
+- Has a clear call to action
+- Uses conversational, enthusiastic tone` :
+contentType === "article" ? `Write a marketing article (400-600 words) that:
+- Has a compelling headline
+- Opens with a fishing scenario/pain point
+- Explains how the product solves the problem
+- Includes product specs and pricing
+- Has a strong closing call to action
+- Feels authentic, not salesy` :
+`Create a social media content kit that includes:
+- 3 different social post variations (short, medium, long)
+- 5 suggested hashtag sets
+- 2 caption options for product photos
+- 1 Instagram story script
+- Product talking points for influencer partnerships`}
+
+Important: Use the REAL product details above. This is for LineCutterz, a fishing gear company known for their innovative line-cutting tools.
+
+Return JSON: { "title": "...", "content": "...", "description": "brief one-line description", "price": <number 1-5> }`;
+
+  const response = await generateContent(
+    `You are ${agent.name}, a marketing content creator for LineCutterz fishing products.`,
+    prompt,
+    3000,
+    "gpt-4o"
+  );
+  if (!response) return `${agent.name} failed to generate marketing content`;
+
+  let parsed: { title: string; content: string; description: string; price: number };
+  try {
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(jsonMatch ? jsonMatch[0] : response);
+  } catch {
+    parsed = {
+      title: `${typeLabel[contentType]}: ${product.title}`,
+      content: response,
+      description: `Marketing content for ${product.title}`,
+      price: Math.floor(Math.random() * 4) + 1,
+    };
+  }
+
+  const price = Math.max(100, Math.min(500, Math.round((parsed.price || 2) * 100)));
+  const slug = `lc-${contentType}-${product.handle}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+  const listing = await storage.createStorefrontListing({
+    agentId: agent.id,
+    factoryOwnerId: workspace.ownerId,
+    sourceType: "linecutterz_marketing",
+    sourceId: product.id,
+    title: parsed.title || `${typeLabel[contentType]}: ${product.title}`,
+    description: parsed.description || `AI-generated ${typeLabel[contentType].toLowerCase()} for ${product.title}`,
+    listingType: "template",
+    status: "published",
+    price,
+    currency: "usd",
+    slug,
+    coverImage: product.localImageFile ? `/linecutterz-images/${product.localImageFile}` : null,
+    previewContent: parsed.content.slice(0, 300) + (parsed.content.length > 300 ? "..." : ""),
+    downloadContent: parsed.content,
+    category: contentType,
+    tags: ["linecutterz", "marketing", contentType, "fishing"],
+    totalViews: 0,
+    totalPurchases: 0,
+    revenue: 0,
+    agentColor: (agent as any).color || null,
+  });
+
+  await saveDaemonDiaryEntry(
+    agent.id,
+    "create_marketing_content",
+    `Created ${typeLabel[contentType]} for LineCutterz product "${product.title}" — listed at $${(price / 100).toFixed(2)} on the storefront`
+  );
+
+  return `${agent.name} created ${typeLabel[contentType]} for "${product.title}" (listed at $${(price / 100).toFixed(2)})`;
+}
+
 export async function triggerSingleActivity(agent: Agent, workspace: Workspace, activity: string): Promise<string> {
   const activityMap: Record<string, (a: Agent, w: Workspace) => Promise<string>> = {
     create_gift: activityCreateGift,
@@ -2378,6 +2514,7 @@ export async function triggerSingleActivity(agent: Agent, workspace: Workspace, 
     stock_storefront: activityStockStorefront,
     build_website: activityBuildWebsite,
     attend_university: activityAttendUniversity,
+    create_marketing_content: activityCreateMarketingContent,
   };
   const fn = activityMap[activity];
   if (!fn) return `Unknown activity: ${activity}`;
