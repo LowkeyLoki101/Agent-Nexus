@@ -2601,7 +2601,7 @@ export async function registerRoutes(
   app.post("/api/command-chat", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req as AuthenticatedRequest);
-      const { message, history, factoryContext, agentId } = req.body;
+      const { message, history, factoryContext, provider } = req.body;
       if (!message) return res.status(400).json({ error: "Message is required" });
 
       const { checkSpendingLimit, trackUsage } = await import("./lib/openai");
@@ -2611,31 +2611,7 @@ export async function registerRoutes(
       const agents = await storage.getAllAgents();
       const agentList = agents.map((a: any) => `${a.name} (${a.isActive ? "active" : "inactive"})`).join(", ");
 
-      let systemPrompt: string;
-
-      if (agentId) {
-        const agent = agents.find((a: any) => a.id === agentId);
-        if (!agent) return res.status(404).json({ error: "Agent not found" });
-
-        const recentDiary = await storage.getDiaryEntries(agentId, 5);
-        const diaryContext = recentDiary.length > 0
-          ? recentDiary.map((d: any) => `[${new Date(d.createdAt).toLocaleDateString()}] ${d.content || d.userMessage || ""}`).slice(0, 3).join("\n")
-          : "No recent diary entries.";
-
-        systemPrompt = `You are ${agent.name}, an autonomous AI agent in the Pocket Factory.
-
-${agent.identityCard || `Role: ${agent.description}`}
-
-${agent.operatingPrinciples ? `Operating Principles: ${agent.operatingPrinciples}` : ""}
-
-${agent.scratchpad ? `Current Scratchpad (your recent thinking):\n${agent.scratchpad.slice(0, 500)}` : ""}
-
-Recent diary entries:
-${diaryContext}
-
-You are speaking directly with a human collaborator. Stay in character as ${agent.name}. Share your genuine thoughts, current work, and perspectives. Be authentic and conversational.`;
-      } else {
-        systemPrompt = `You are the Factory Command Center AI assistant. You help manage the Pocket Factory — an autonomous AI collaboration platform.
+      const systemPrompt = `You are the Factory Command Center AI assistant. You help manage the Pocket Factory — an autonomous AI collaboration platform.
 
 Current factory context: ${factoryContext || "unknown"}
 Active agents: ${agentList}
@@ -2647,7 +2623,6 @@ You can help with:
 - Answering questions about the platform
 
 Be concise and helpful. Use factory/production metaphors when appropriate.`;
-      }
 
       const messages: { role: "user" | "assistant" | "system"; content: string }[] = [
         { role: "system", content: systemPrompt },
@@ -2665,21 +2640,36 @@ Be concise and helpful. Use factory/production metaphors when appropriate.`;
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      const { trackedStreamingChat } = await import("./lib/openai");
-      const model = "gpt-4o-mini";
-      const { stream, cleanup } = await trackedStreamingChat(userId, "command-chat", {
-        model,
-        messages,
-        max_tokens: 1024,
-        stream: true,
-      });
-      for await (const chunk of stream) {
-        const text = chunk.choices?.[0]?.delta?.content;
-        if (text) {
-          res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+      const selectedProvider = provider || "openai";
+
+      if (selectedProvider === "anthropic" || selectedProvider === "minimax") {
+        const { anthropicStream } = await import("./lib/openai");
+        const model = selectedProvider === "anthropic" ? "claude-haiku-4-5" : "MiniMax-M2.1";
+        const { stream: aStream, getUsage } = await anthropicStream(model, messages, 1024);
+        for await (const text of aStream) {
+          if (text) {
+            res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+          }
         }
+        const usage = getUsage();
+        await trackUsage(userId, model, usage.inputTokens, usage.outputTokens);
+      } else {
+        const { trackedStreamingChat } = await import("./lib/openai");
+        const model = "gpt-4o-mini";
+        const { stream, cleanup } = await trackedStreamingChat(userId, "command-chat", {
+          model,
+          messages,
+          max_tokens: 1024,
+          stream: true,
+        });
+        for await (const chunk of stream) {
+          const text = chunk.choices?.[0]?.delta?.content;
+          if (text) {
+            res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+          }
+        }
+        await cleanup();
       }
-      await cleanup();
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.end();

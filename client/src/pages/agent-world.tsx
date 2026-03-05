@@ -1670,11 +1670,9 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<string>("factory");
+  const [selectedProvider, setSelectedProvider] = useState<string>("openai");
   const [actionResults, setActionResults] = useState<{ action: string; result: string; success: boolean }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const selectedAgent = selectedAgentId !== "factory" ? agents.find(a => a.id === selectedAgentId) : null;
 
   const executeActions = useCallback(async (actions: FactoryAction[]) => {
     for (const action of actions) {
@@ -1782,7 +1780,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
           history: chatMessages,
           factoryContext: `${agents.length} agents, ${workspaces.length} departments`,
           uploadedFiles: uploadedFiles.map(f => ({ name: f.name, type: f.type, size: f.size, preview: f.preview })),
-          agentId: selectedAgentId !== "factory" ? selectedAgentId : undefined,
+          provider: selectedProvider,
         }),
       });
 
@@ -1834,7 +1832,7 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
     } finally {
       setIsStreaming(false);
     }
-  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles, executeActions, selectedAgentId]);
+  }, [chatInput, isStreaming, chatMessages, agents, workspaces, uploadedFiles, executeActions, selectedProvider]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1865,27 +1863,33 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
         {isExpanded && (
           <CardContent className="p-0">
             <div className="px-4 py-2 border-b flex items-center gap-2">
-              <span className="text-xs text-muted-foreground shrink-0">Talk to:</span>
-              <Select value={selectedAgentId} onValueChange={(val) => { setSelectedAgentId(val); setChatMessages([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} }}>
-                <SelectTrigger className="h-8 text-xs" data-testid="select-command-agent">
-                  <SelectValue placeholder="Select agent..." />
+              <span className="text-xs text-muted-foreground shrink-0">AI Provider:</span>
+              <Select value={selectedProvider} onValueChange={(val) => { setSelectedProvider(val); setChatMessages([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} }}>
+                <SelectTrigger className="h-8 text-xs" data-testid="select-command-provider">
+                  <SelectValue placeholder="Select provider..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="factory" data-testid="select-agent-factory">
+                  <SelectItem value="openai" data-testid="select-provider-openai">
                     <div className="flex items-center gap-2">
-                      <Terminal className="h-3 w-3 text-primary" />
-                      <span>Factory AI (General)</span>
+                      <Zap className="h-3 w-3 text-green-500" />
+                      <span>OpenAI</span>
+                      <span className="text-muted-foreground text-[10px]">(GPT-4o Mini)</span>
                     </div>
                   </SelectItem>
-                  {agents.filter(a => a.isActive).map(agent => (
-                    <SelectItem key={agent.id} value={agent.id} data-testid={`select-agent-${agent.id}`}>
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-3 w-3" />
-                        <span>{agent.name}</span>
-                        <span className="text-muted-foreground text-[10px]">({agent.modelName || agent.provider})</span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="anthropic" data-testid="select-provider-anthropic">
+                    <div className="flex items-center gap-2">
+                      <Bot className="h-3 w-3 text-orange-500" />
+                      <span>Anthropic</span>
+                      <span className="text-muted-foreground text-[10px]">(Claude Haiku)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="minimax" data-testid="select-provider-minimax">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="h-3 w-3 text-blue-500" />
+                      <span>MiniMax</span>
+                      <span className="text-muted-foreground text-[10px]">(M2.1)</span>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1894,13 +1898,10 @@ function CommandChatPanel({ agents, workspaces }: { agents: Agent[]; workspaces:
                 <div className="text-center py-8">
                   <Terminal className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
                   <p className="text-sm font-medium text-muted-foreground/70">
-                    {selectedAgent ? `Chat with ${selectedAgent.name}` : "Factory Command Center"}
+                    Factory Command Center
                   </p>
                   <p className="text-xs text-muted-foreground/50 mt-1 max-w-sm mx-auto">
-                    {selectedAgent
-                      ? `Talk directly to ${selectedAgent.name}. Ask about their work, diary, current projects, or give them instructions.`
-                      : "Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights."
-                    }
+                    Chat with Creative Intelligence to plan operations, create agent tools, configure departments, or get factory insights. Switch AI providers using the dropdown above.
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center mt-4">
                     {["Show factory health", "Check for cold zones", "Assign agents to rooms", "Show drift risks"].map(suggestion => (
@@ -2721,6 +2722,8 @@ export default function AgentWorld() {
         )}
       </div>
 
+      <CommandChatPanel agents={agentList} workspaces={workspaces || []} />
+
       <FactoryControlsBar
         agents={agentList}
         tokens={tokens || []}
@@ -2784,8 +2787,6 @@ export default function AgentWorld() {
           onClose={() => setSelectedRoom(null)}
         />
       )}
-
-      <CommandChatPanel agents={agentList} workspaces={workspaces || []} />
 
       <DaemonStatusPanel />
 
