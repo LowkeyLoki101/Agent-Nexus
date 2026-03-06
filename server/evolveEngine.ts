@@ -2,7 +2,7 @@ import { storage } from "./storage";
 import type { Agent } from "@shared/schema";
 import { getOpenAIClient, trackUsage } from "./lib/openai";
 
-async function aiGenerate(systemPrompt: string, userPrompt: string, maxTokens = 1024, model = "gpt-4o-mini"): Promise<string> {
+async function aiGenerate(systemPrompt: string, userPrompt: string, maxTokens = 1024, model = "gpt-4o"): Promise<string> {
   const { client } = await getOpenAIClient();
   const completion = await client.chat.completions.create({
     model,

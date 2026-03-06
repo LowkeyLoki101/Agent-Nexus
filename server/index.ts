@@ -2,12 +2,14 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { seedDatabase } from "./seed";
+import { seedDatabase, seedStrategyFactory } from "./seed";
 import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./stripeClient";
 import { WebhookHandlers } from "./webhookHandlers";
 import { startDaemon, startHealthScanner } from "./agentDaemon";
 import { startHeraldNewsroom } from "./heraldNewsroom";
+import { seedBuiltInTools } from "./toolEngine";
+import path from "path";
 
 const app = express();
 const httpServer = createServer(app);
@@ -123,6 +125,8 @@ app.use((req, res, next) => {
   await initStripe();
   await registerRoutes(httpServer, app);
   await seedDatabase();
+  await seedBuiltInTools();
+  await seedStrategyFactory();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -137,9 +141,8 @@ app.use((req, res, next) => {
     return res.status(status).json({ message });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  app.use("/proflow-demo", express.static(path.resolve(process.cwd(), "public/proflow-demo")));
+
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {

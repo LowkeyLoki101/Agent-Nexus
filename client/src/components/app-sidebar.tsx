@@ -48,6 +48,7 @@ import {
   ScrollText,
   MessageSquare,
   Store,
+  BarChart3,
 } from "lucide-react";
 
 const factoryItems = [
@@ -69,6 +70,7 @@ const operationsItems = [
 ];
 
 const toolsItems = [
+  { title: "Strategy Projects", url: "/strategy-projects", icon: BarChart3 },
   { title: "Sandbox", url: "/sandbox", icon: Code2 },
   { title: "Tool Registry", url: "/tools", icon: Hammer },
   { title: "Heatmap", url: "/heatmap", icon: Activity },

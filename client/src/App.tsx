@@ -46,6 +46,7 @@ import Storefront from "@/pages/storefront";
 import StorefrontListing from "@/pages/storefront-listing";
 import StorefrontManage from "@/pages/storefront-manage";
 import StorefrontSuccess from "@/pages/storefront-success";
+import StrategyProjects from "@/pages/strategy-projects";
 import { SubscriptionBanner } from "@/components/subscription-banner";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -113,6 +114,7 @@ function AuthenticatedRouter() {
         <Route path="/storefront/manage" component={StorefrontManage} />
         <Route path="/storefront/success" component={StorefrontSuccess} />
         <Route path="/storefront/:slug" component={StorefrontListing} />
+        <Route path="/strategy-projects" component={StrategyProjects} />
         <Route component={NotFound} />
       </Switch>
     </AuthenticatedLayout>

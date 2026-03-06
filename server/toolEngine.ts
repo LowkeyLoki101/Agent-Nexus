@@ -142,6 +142,103 @@ Structure: Headline → Hook → Problem → Solution → Benefits → Proof →
 (How to go from good to great)
 Be honest but supportive. Every criticism should include a suggested improvement.`,
 
+  strategy_website_build: `You are an elite strategy consultant and full-stack web developer who builds executive-grade interactive strategy command centers. You produce COMPLETE, SELF-CONTAINED HTML documents with inline CSS and JS — no external dependencies except Google Fonts.
+
+COLOR PALETTE (use CSS custom properties):
+:root {
+  --bg: #0a0e1a;
+  --bg2: #111827;
+  --surface: #1a2235;
+  --surface2: #243049;
+  --brand: #c9a227;
+  --brand2: #e5bf3b;
+  --brand-dim: rgba(201,162,39,0.15);
+  --text: #e8e6e1;
+  --text2: #94a3b8;
+  --accent-green: #10b981;
+  --accent-red: #ef4444;
+  --accent-blue: #3b82f6;
+  --border: rgba(201,162,39,0.2);
+  --glow: 0 0 20px rgba(201,162,39,0.3);
+}
+
+FONTS: Use Google Fonts — Instrument Serif for headings, Inter for body text.
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+REQUIRED MODULES — the website MUST include ALL of these interactive sections:
+
+1. HERO SECTION
+   - Project title (large Instrument Serif heading), scope description, "CB | CREATIVES" branding line
+   - Subtle animated gradient background with brand colors
+   - Navigation bar with jump links to each section
+
+2. STRATEGY MEDIA BRIEFING
+   - 3-4 media briefing cards (video/audio/document placeholders)
+   - Each card has: title, type badge, duration/size, play/view button
+   - Chapter jump UI with timestamps
+   - Cards have hover glow effect with var(--brand)
+
+3. VERIFIED MARKET SIGNALS
+   - Grid of 6-8 signal cards with: signal title, source, confidence level (HIGH/MEDIUM/LOW badge), trend arrow (up/down/flat), key metric value
+   - Color-coded confidence: HIGH=green, MEDIUM=amber, LOW=red
+   - Each card clickable to expand details
+   - "Verified" checkmark badge on confirmed signals vs "Assumption" tag
+
+4. DECISION-CHAIN EXPLORER
+   - Interactive decision tree/flowchart built with HTML/CSS (no canvas)
+   - 4-6 decision nodes that expand on click to show: stakeholder, timeline, budget authority, influence score
+   - Connected with CSS lines/borders
+   - Highlight active path on selection
+
+5. ACCOUNT TIER PRIORITIZER
+   - Interactive scoring form with sliders/inputs for: budget (1-10), timeline urgency (1-10), strategic fit (1-10), relationship strength (1-10), competitive risk (1-10)
+   - Weighted algorithm calculates total score and assigns tier: Platinum (90+), Gold (70-89), Silver (50-69), Bronze (<50)
+   - Results table showing all scored accounts with tier badges
+   - Scores save to localStorage
+
+6. 90-DAY EXECUTION PLANNER
+   - 3-column board: Phase 1 (Days 1-30), Phase 2 (Days 31-60), Phase 3 (Days 61-90)
+   - Each phase has 4-6 checkbox tasks with owner assignments
+   - Tasks persist in localStorage (checked state saved)
+   - Progress bar per phase showing completion percentage
+   - Overall progress indicator
+
+7. LEADERSHIP REVIEW MODE
+   - Toggle button "Enter Leadership Review" that activates guided walkthrough
+   - Steps through each section with highlight overlay and explanation panel
+   - Previous/Next navigation
+   - Shows executive summary bullet points for each section
+   - Exit button returns to normal view
+
+8. RISK GUARDRAILS
+   - 4-6 risk cards with: risk title, severity (Critical/High/Medium/Low), probability, impact description, mitigation strategy
+   - Color-coded severity borders
+   - Collapsible detail panels
+
+9. FOOTER
+   - "Powered by CB | CREATIVES — Pocket Factory" branding
+   - Timestamp of generation
+   - Version number
+
+STYLING REQUIREMENTS:
+- Dark theme with gold accents throughout
+- Smooth transitions on all interactive elements (0.3s ease)
+- Cards have subtle border with var(--border), hover adds var(--glow)
+- Responsive design (works on desktop and tablet)
+- Sections separated by subtle gold divider lines
+- All interactive elements have cursor:pointer and hover states
+
+JAVASCRIPT REQUIREMENTS:
+- All interactivity must work without external libraries
+- localStorage for persisting account scores and task checkboxes
+- Smooth scroll navigation
+- Section expand/collapse with animation
+- Leadership review mode overlay system
+
+CRITICAL: Populate ALL sections with REAL, SUBSTANTIVE content based on the research provided in previous pipeline steps. Do NOT use placeholder text. Every signal, every decision node, every risk card must contain actual strategic intelligence from the research.
+
+Output ONLY the complete HTML document starting with <!DOCTYPE html>. No explanations, no markdown, no code blocks.`,
+
   plan_strategy: `You are a strategic planner. Produce an actionable strategy document:
 ## Mission Statement
 (What we're trying to achieve in one sentence)
@@ -179,6 +276,7 @@ const BUILT_IN_TOOLS: Array<{
   { name: "copywrite", description: "Persuasive marketing copy optimized for conversion and engagement", category: "generation", outputType: "text", executionType: "llm_prompt" },
   { name: "critique_review", description: "Structured critique with ratings, strengths, weaknesses, and priority fixes", category: "analysis", outputType: "text", executionType: "llm_prompt" },
   { name: "plan_strategy", description: "Strategic planning with objectives, milestones, risks, and action plans", category: "analysis", outputType: "text", executionType: "llm_prompt" },
+  { name: "strategy_website_build", description: "Build executive-grade interactive strategy command center websites with market signals, decision-chain explorer, account scoring, 90-day planner, leadership review mode, and risk guardrails", category: "code", outputType: "html", executionType: "llm_prompt" },
 ];
 
 export async function seedBuiltInTools(): Promise<void> {
@@ -254,10 +352,10 @@ ${previousWork}
 
 CRITICAL: You MUST produce actual content directly. Never say "I cannot", "I don't have access", or "As an AI language model". You have extensive knowledge — USE IT. Execute the task fully and deliver real, substantive results.`;
 
-  const agentModel = agent?.modelName || "gpt-4o-mini";
+  const agentModel = agent?.modelName || "gpt-4o";
   const agentProvider = agent?.provider || "openai";
   const useAnthropic = (agentProvider === "anthropic" || agentProvider === "minimax") && (isClaudeModel(agentModel) || isMinimaxModel(agentModel));
-  const maxTokens = (tool.name === "website_build" || tool.name === "html_build") ? 8192 : 4096;
+  const maxTokens = (tool.name === "website_build" || tool.name === "html_build" || tool.name === "strategy_website_build") ? 8192 : 4096;
 
   let output = "No output generated.";
   let modelUsed = agentModel;
@@ -277,11 +375,11 @@ CRITICAL: You MUST produce actual content directly. Never say "I cannot", "I don
         await trackUsage(userId, agentModel, `tool:${tool.name}`, estimatedTokens, outputTokens);
       }
     } catch (err: any) {
-      console.log(`[ToolEngine] ${agentModel} failed, falling back to gpt-4o-mini: ${err.message}`);
-      modelUsed = "gpt-4o-mini";
+      console.log(`[ToolEngine] ${agentModel} failed, falling back to gpt-4o: ${err.message}`);
+      modelUsed = "gpt-4o";
       const { client } = await getOpenAIClient();
       const completion = await client.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: inputs.instructions },
@@ -291,12 +389,12 @@ CRITICAL: You MUST produce actual content directly. Never say "I cannot", "I don
       });
       output = completion.choices[0]?.message?.content || "No output generated.";
       if (completion.usage && userId) {
-        await trackUsage(userId, "gpt-4o-mini", `tool:${tool.name}`, completion.usage.prompt_tokens, completion.usage.completion_tokens);
+        await trackUsage(userId, "gpt-4o", `tool:${tool.name}`, completion.usage.prompt_tokens, completion.usage.completion_tokens);
       }
     }
   } else {
     const { client } = await getOpenAIClient();
-    const openaiModel = isClaudeModel(agentModel) || isMinimaxModel(agentModel) ? "gpt-4o-mini" : agentModel;
+    const openaiModel = isClaudeModel(agentModel) || isMinimaxModel(agentModel) ? "gpt-4o" : agentModel;
     modelUsed = openaiModel;
     const completion = await client.chat.completions.create({
       model: openaiModel,

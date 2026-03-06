@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ProFlow Texas Data Center Command Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <header class="hero">
+      <p class="eyebrow">ProFlow Growth System</p>
+      <h1>Texas Data Center <span>Command Center</span></h1>
+      <p class="lede">Interactive operating model for winning mission-critical cooling specifications before procurement becomes a commodity event.</p>
+      <div class="hero-meta">
+        <span>Audience: Leadership + Sales Engineering</span>
+        <span>Scope Date: March 6, 2026</span>
+        <span><strong>Colby Black Powered by Emergent Intelligence</strong></span>
+      </div>
+    </header>
+
+    <main>
+      <section id="mediaSection" class="panel media-panel">
+        <div class="section-head">
+          <h2>Strategy Media Briefing</h2>
+          <p>Source walk-through assets for leadership review.</p>
+        </div>
+        <div class="media-grid">
+          <article class="media-card">
+            <h3>Video: Cracking a Market with AI</h3>
+            <video id="strategyVideo" controls preload="metadata" poster="unnamed (1).png">
+              <source src="Cracking_a_Market_with_AI.mp4" type="video/mp4" />
+              Your browser does not support the video element.
+            </video>
+            <div id="videoChapters" class="chapters"></div>
+          </article>
+          <article class="media-card">
+            <h3>Audio Brief: Winning Texas Hyperscale Contracts</h3>
+            <audio id="strategyAudio" controls preload="metadata">
+              <source src="Winning_Texas_Hyperscale_Data_Center_Contracts.m4a" type="audio/mp4" />
+              Your browser does not support the audio element.
+            </audio>
+            <p class="media-note">Use this track for leadership prep and outbound narrative calibration.</p>
+            <div id="audioChapters" class="chapters"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="reviewSection" class="panel">
+        <div class="section-head">
+          <h2>Leadership Review Mode</h2>
+          <p>Guided sequence for exec readouts and partner alignment.</p>
+        </div>
+        <article id="reviewCard" class="detail-card review-card"></article>
+        <div class="review-actions">
+          <button id="reviewNext" type="button">Next Step</button>
+          <button id="reviewReset" type="button">Restart</button>
+          <span class="credit-line">Colby Black Powered by Emergent Intelligence</span>
+        </div>
+      </section>
+
+      <section id="signalsSection" class="panel">
+        <div class="section-head">
+          <h2>Verified Market Signals</h2>
+          <p>Facts only from source pack to prevent strategy drift.</p>
+        </div>
+        <div id="signals" class="signal-grid"></div>
+      </section>
+
+      <section id="chainSection" class="panel">
+        <div class="section-head">
+          <h2>Decision-Chain Explorer</h2>
+          <p>Click each node to see influence, message, and the ask.</p>
+        </div>
+        <div class="decision-wrap">
+          <div id="chain" class="chain"></div>
+          <article id="chainDetail" class="detail-card"></article>
+        </div>
+      </section>
+
+      <section id="scoreSection" class="panel">
+        <div class="section-head">
+          <h2>Account Tier Prioritizer</h2>
+          <p>Score opportunities and rank what to pursue first.</p>
+        </div>
+        <form id="scoreForm" class="score-form">
+          <label>Account Name<input id="accountName" required placeholder="Example: Bosque County Campus" /></label>
+          <label>Spec Access (1-5)<input id="specAccess" type="number" min="1" max="5" value="3" /></label>
+          <label>Controls Alignment (1-5)<input id="controlsAlignment" type="number" min="1" max="5" value="3" /></label>
+          <label>Mechanical Path Strength (1-5)<input id="mechanicalStrength" type="number" min="1" max="5" value="3" /></label>
+          <label>Validation Confidence (1-5)<input id="validationConfidence" type="number" min="1" max="5" value="3" /></label>
+          <button type="submit">Add / Score Account</button>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Score</th>
+                <th>Tier</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="scoreRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="planSection" class="panel">
+        <div class="section-head">
+          <h2>90-Day Execution Planner</h2>
+          <p>Track weekly actions. Saved in browser local storage.</p>
+        </div>
+        <div id="planBoard" class="plan-board"></div>
+      </section>
+
+      <section id="riskSection" class="panel caution">
+        <h2>Risk Guardrails</h2>
+        <ul>
+          <li>Verify exact owner, site, GC, engineer, and mechanical contractor before committing pursuit resources.</li>
+          <li>Do not treat a late-stage bid as a spec win. Price-only competition means weak positioning.</li>
+          <li>Review liquid-cooling architecture changes monthly to avoid stale product narratives.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>ProFlow Strategic Interface | Colby Black Powered by Emergent Intelligence</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

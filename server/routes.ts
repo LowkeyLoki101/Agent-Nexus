@@ -1108,7 +1108,7 @@ export async function registerRoutes(
       const { message, history, context } = req.body;
       if (!message) return res.status(400).json({ error: "Message is required" });
 
-      const { checkSpendingLimit, trackUsage, isClaudeModel, isMinimaxModel, anthropicStream, getOpenAIClient } = await import("./lib/openai");
+      const { checkSpendingLimit, trackUsage, isClaudeModel, isMinimaxModel, isXaiModel, anthropicStream, getOpenAIClient, getXaiClient } = await import("./lib/openai");
       const { SOUL_DOCUMENT } = await import("./soulDocument");
 
       const spendCheck = await checkSpendingLimit(userId);
@@ -1139,13 +1139,28 @@ export async function registerRoutes(
       }
       messages.push({ role: "user", content: message });
 
-      const modelName = agent.modelName || "gpt-4o-mini";
+      const modelName = agent.modelName || "gpt-4o";
 
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
       let fullReply = "";
+
+      async function streamXai(xaiModel: string) {
+        const xai = getXaiClient();
+        if (!xai) throw new Error("xAI not configured");
+        const stream = await xai.chat.completions.create({
+          model: xaiModel, messages, max_completion_tokens: 1024, stream: true, stream_options: { include_usage: true },
+        });
+        let promptTokens = 0, completionTokens = 0;
+        for await (const chunk of stream) {
+          if (chunk.usage) { promptTokens = chunk.usage.prompt_tokens; completionTokens = chunk.usage.completion_tokens; }
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (content) { fullReply += content; res.write(`data: ${JSON.stringify({ content })}\n\n`); }
+        }
+        trackUsage(userId, xaiModel, "agent-chat", promptTokens, completionTokens).catch(() => {});
+      }
 
       if (isClaudeModel(modelName) || isMinimaxModel(modelName)) {
         const { stream, getUsage } = await anthropicStream(modelName, messages, 1024);
@@ -1155,47 +1170,48 @@ export async function registerRoutes(
         }
         const usage = getUsage();
         trackUsage(userId, modelName, "agent-chat", usage.inputTokens, usage.outputTokens).catch(() => {});
+      } else if (isXaiModel(modelName)) {
+        await streamXai(modelName);
       } else {
         try {
           const { client } = await getOpenAIClient(userId);
           const stream = await client.chat.completions.create({
-            model: modelName,
-            messages,
-            max_completion_tokens: 1024,
-            stream: true,
-            stream_options: { include_usage: true },
+            model: modelName, messages, max_completion_tokens: 1024, stream: true, stream_options: { include_usage: true },
           });
           let promptTokens = 0, completionTokens = 0;
           for await (const chunk of stream) {
-            if (chunk.usage) {
-              promptTokens = chunk.usage.prompt_tokens;
-              completionTokens = chunk.usage.completion_tokens;
-            }
+            if (chunk.usage) { promptTokens = chunk.usage.prompt_tokens; completionTokens = chunk.usage.completion_tokens; }
             const content = chunk.choices?.[0]?.delta?.content;
-            if (content) {
-              fullReply += content;
-              res.write(`data: ${JSON.stringify({ content })}\n\n`);
-            }
+            if (content) { fullReply += content; res.write(`data: ${JSON.stringify({ content })}\n\n`); }
           }
           trackUsage(userId, modelName, "agent-chat", promptTokens, completionTokens).catch(() => {});
         } catch (openaiErr: any) {
           if (openaiErr?.status === 429 || openaiErr?.code === "insufficient_quota") {
-            console.log(`[Chat] OpenAI 429 for ${agent.name}, falling back to Anthropic claude-haiku-4-5`);
-            const fallbackChain = ["claude-haiku-4-5", "MiniMax-M2.1"];
+            console.log(`[Chat] OpenAI 429 for ${agent.name}, falling back through xAI → Anthropic → MiniMax`);
+            const fallbackChain = [
+              { model: "grok-3", type: "xai" as const },
+              { model: "claude-sonnet-4-20250514", type: "anthropic" as const },
+              { model: "MiniMax-M2.5", type: "anthropic" as const },
+            ];
             let fallbackSucceeded = false;
-            for (const fallbackModel of fallbackChain) {
+            for (const fb of fallbackChain) {
               try {
-                const { stream: fallbackStream, getUsage: getFallbackUsage } = await anthropicStream(fallbackModel, messages, 1024);
-                for await (const text of fallbackStream) {
-                  fullReply += text;
-                  res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+                if (fb.type === "xai") {
+                  await streamXai(fb.model);
+                } else {
+                  const { stream: fallbackStream, getUsage: getFallbackUsage } = await anthropicStream(fb.model, messages, 1024);
+                  for await (const text of fallbackStream) {
+                    fullReply += text;
+                    res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+                  }
+                  const fbUsage = getFallbackUsage();
+                  trackUsage(userId, fb.model, "agent-chat-fallback", fbUsage.inputTokens, fbUsage.outputTokens).catch(() => {});
                 }
-                const fbUsage = getFallbackUsage();
-                trackUsage(userId, fallbackModel, "agent-chat-fallback", fbUsage.inputTokens, fbUsage.outputTokens).catch(() => {});
                 fallbackSucceeded = true;
+                console.log(`[Chat] Fallback to ${fb.model} succeeded for ${agent.name}`);
                 break;
               } catch (fbErr: any) {
-                console.warn(`[Chat] Fallback ${fallbackModel} failed: ${fbErr?.message?.slice(0, 120)}`);
+                console.warn(`[Chat] Fallback ${fb.model} failed: ${fbErr?.message?.slice(0, 120)}`);
                 continue;
               }
             }
@@ -1578,6 +1594,34 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching product:", error);
       res.status(500).json({ message: "Failed to fetch product" });
+    }
+  });
+
+  app.post("/api/products", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req as AuthenticatedRequest);
+      const { assemblyLineId, name, description, inputRequest } = req.body;
+      if (!assemblyLineId || !name) {
+        return res.status(400).json({ message: "assemblyLineId and name are required" });
+      }
+      const product = await storage.createProduct({
+        assemblyLineId,
+        name,
+        description: description || null,
+        inputRequest: inputRequest || null,
+        ownerId: userId,
+        status: "queued",
+      });
+
+      const { runProductThroughPipeline } = await import("./assemblyEngine");
+      runProductThroughPipeline(product.id).catch((err: any) => {
+        console.error(`[Products] Pipeline failed for ${product.id}:`, err.message);
+      });
+
+      res.json(product);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      res.status(500).json({ message: "Failed to create product" });
     }
   });
 
@@ -2293,13 +2337,16 @@ export async function registerRoutes(
       const messages = [
         { role: "user" as const, content: req.body.instructions || "Run the tool" },
       ];
-      const model = "claude-haiku-4-5";
-      const { stream, getUsage } = await anthropicStream(model, [{ role: "system" as const, content: systemPrompt }, ...messages], 1024);
-      let output = "";
-      for await (const text of stream) { output += text; }
-      const usage = getUsage();
+      const model = "grok-3";
+      const { getXaiClient } = await import("./lib/openai");
+      const xai = getXaiClient();
+      if (!xai) return res.status(500).json({ error: "No AI provider available" });
+      const completion = await xai.chat.completions.create({
+        model, messages: [{ role: "system" as const, content: systemPrompt }, ...messages], max_tokens: 1024,
+      });
+      const output = completion.choices[0]?.message?.content || "";
       const { trackUsage } = await import("./lib/openai");
-      trackUsage(userId, model, "tool-test", usage.inputTokens, usage.outputTokens).catch(() => {});
+      if (completion.usage) trackUsage(userId, model, "tool-test", completion.usage.prompt_tokens, completion.usage.completion_tokens).catch(() => {});
       await storage.incrementToolUsage(tool.id);
       res.json({ output });
     } catch (error: any) {
@@ -2658,7 +2705,7 @@ Be concise and helpful. Use factory/production metaphors when appropriate.`;
 
       if (selectedProvider === "anthropic" || selectedProvider === "minimax") {
         const { anthropicStream } = await import("./lib/openai");
-        const model = selectedProvider === "anthropic" ? "claude-haiku-4-5" : "MiniMax-M2.1";
+        const model = selectedProvider === "anthropic" ? "claude-sonnet-4-20250514" : "MiniMax-M2.5";
         const { stream: aStream, getUsage } = await anthropicStream(model, messages, 1024);
         for await (const text of aStream) {
           if (text) {
@@ -2669,7 +2716,7 @@ Be concise and helpful. Use factory/production metaphors when appropriate.`;
         await trackUsage(userId, model, usage.inputTokens, usage.outputTokens);
       } else {
         const { trackedStreamingChat } = await import("./lib/openai");
-        const model = "gpt-4o-mini";
+        const model = "gpt-4o";
         const { stream, cleanup } = await trackedStreamingChat(userId, "command-chat", {
           model,
           messages,

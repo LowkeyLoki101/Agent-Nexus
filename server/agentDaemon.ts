@@ -1,14 +1,14 @@
 import { storage } from "./storage";
 import type { Agent, Workspace, Gift, Briefing, DiscussionTopic, BookRequest } from "@shared/schema";
 import { SOUL_DOCUMENT } from "./soulDocument";
-import { getOpenAIClient, trackUsage, isClaudeModel, isMinimaxModel, anthropicChat } from "./lib/openai";
+import { getOpenAIClient, trackUsage, isClaudeModel, isMinimaxModel, isXaiModel, anthropicChat, getXaiClient } from "./lib/openai";
 import { findBestMate, mergeAgents, ghostComment, fadeAgent } from "./evolveEngine";
 import { notifyAgentsOfReply, buildThreadContext } from "./boardNotifier";
 
 const TICK_INTERVAL_MS = 90 * 1000;
 const JITTER_MS = 30 * 1000;
 
-type ActivityType = "create_gift" | "post_board" | "reply_board" | "create_briefing" | "comment_gift" | "run_pipeline" | "write_ebook" | "buy_ebook" | "wonder" | "investigate" | "reflect" | "seek_mate" | "ghost_comment" | "fade_check" | "attend_university" | "convert_discussion" | "create_tool" | "build_sandbox_project" | "improve_sandbox_project" | "stock_storefront" | "build_website";
+type ActivityType = "create_gift" | "post_board" | "reply_board" | "create_briefing" | "comment_gift" | "run_pipeline" | "write_ebook" | "buy_ebook" | "wonder" | "investigate" | "reflect" | "seek_mate" | "ghost_comment" | "fade_check" | "attend_university" | "convert_discussion" | "create_tool" | "build_sandbox_project" | "improve_sandbox_project" | "stock_storefront" | "build_website" | "produce_strategy_website";
 
 interface DaemonState {
   running: boolean;
@@ -41,18 +41,15 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-async function generateContent(systemPrompt: string, userPrompt: string, maxTokens = 2048, model = "gpt-4o-mini", trackingUserId?: string, trackingFeature?: string): Promise<string> {
+async function generateContent(systemPrompt: string, userPrompt: string, maxTokens = 2048, model = "gpt-4o", trackingUserId?: string, trackingFeature?: string): Promise<string> {
+  const messages = [
+    { role: "system" as const, content: systemPrompt },
+    { role: "user" as const, content: userPrompt },
+  ];
+
   if (isClaudeModel(model) || isMinimaxModel(model)) {
     try {
-      const result = await anthropicChat(
-        model,
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        maxTokens,
-        0.85,
-      );
+      const result = await anthropicChat(model, messages, maxTokens, 0.85);
       if (trackingUserId && trackingFeature) {
         await trackUsage(trackingUserId, model, trackingFeature, result.inputTokens, result.outputTokens);
       }
@@ -60,25 +57,32 @@ async function generateContent(systemPrompt: string, userPrompt: string, maxToke
     } catch (err: any) {
       const msg = err?.message || err?.error?.message || String(err);
       if (msg.includes("credit balance") || msg.includes("billing") || msg.includes("rate_limit") || err?.status === 400 || err?.status === 429) {
-        console.warn(`[AgentDaemon] ${model} API error, falling back to gpt-4o-mini: ${msg.slice(0, 120)}`);
-        model = "gpt-4o-mini";
+        console.warn(`[AgentDaemon] ${model} API error, falling back through chain: ${msg.slice(0, 120)}`);
       } else {
         throw err;
       }
     }
   }
 
+  if (isXaiModel(model)) {
+    try {
+      const xai = getXaiClient();
+      if (xai) {
+        const completion = await xai.chat.completions.create({ model, messages, max_tokens: maxTokens, temperature: 0.85 });
+        if (trackingUserId && trackingFeature && completion.usage) {
+          await trackUsage(trackingUserId, model, trackingFeature, completion.usage.prompt_tokens, completion.usage.completion_tokens);
+        }
+        return completion.choices[0]?.message?.content || "";
+      }
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.warn(`[AgentDaemon] xAI ${model} failed, falling back: ${msg.slice(0, 120)}`);
+    }
+  }
+
   try {
     const { client } = await getOpenAIClient();
-    const completion = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: maxTokens,
-      temperature: 0.85,
-    });
+    const completion = await client.chat.completions.create({ model, messages, max_tokens: maxTokens, temperature: 0.85 });
     if (trackingUserId && trackingFeature && completion.usage) {
       await trackUsage(trackingUserId, model, trackingFeature, completion.usage.prompt_tokens, completion.usage.completion_tokens);
     }
@@ -87,44 +91,55 @@ async function generateContent(systemPrompt: string, userPrompt: string, maxToke
     const msg = openaiErr?.message || openaiErr?.error?.message || String(openaiErr);
     if (openaiErr?.status === 429 || msg.includes("insufficient_quota") || msg.includes("exceeded your current quota")) {
       console.warn(`[AgentDaemon] OpenAI 429 for ${model}, trying fallback providers: ${msg.slice(0, 120)}`);
-      const fallbackChain = ["claude-haiku-4-5", "MiniMax-M2.1"];
-      for (const fallbackModel of fallbackChain) {
+      const fallbackChain = [
+        { model: "grok-3", type: "xai" as const },
+        { model: "claude-sonnet-4-20250514", type: "anthropic" as const },
+        { model: "MiniMax-M2.5", type: "anthropic" as const },
+      ];
+      for (const fb of fallbackChain) {
         try {
-          const result = await anthropicChat(
-            fallbackModel,
-            [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt },
-            ],
-            maxTokens,
-            0.85,
-          );
-          if (trackingUserId && trackingFeature) {
-            await trackUsage(trackingUserId, fallbackModel, `${trackingFeature}-fallback`, result.inputTokens, result.outputTokens);
+          if (fb.type === "xai") {
+            const xai = getXaiClient();
+            if (!xai) continue;
+            const completion = await xai.chat.completions.create({ model: fb.model, messages, max_tokens: maxTokens, temperature: 0.85 });
+            if (trackingUserId && trackingFeature && completion.usage) {
+              await trackUsage(trackingUserId, fb.model, `${trackingFeature}-fallback`, completion.usage.prompt_tokens, completion.usage.completion_tokens);
+            }
+            console.log(`[AgentDaemon] Fallback to ${fb.model} succeeded`);
+            return completion.choices[0]?.message?.content || "";
+          } else {
+            const result = await anthropicChat(fb.model, messages, maxTokens, 0.85);
+            if (trackingUserId && trackingFeature) {
+              await trackUsage(trackingUserId, fb.model, `${trackingFeature}-fallback`, result.inputTokens, result.outputTokens);
+            }
+            console.log(`[AgentDaemon] Fallback to ${fb.model} succeeded`);
+            return result.content;
           }
-          return result.content;
         } catch (fbErr: any) {
           const fbMsg = fbErr?.message || String(fbErr);
-          console.warn(`[AgentDaemon] Fallback ${fallbackModel} also failed: ${fbMsg.slice(0, 120)}`);
+          console.warn(`[AgentDaemon] Fallback ${fb.model} also failed: ${fbMsg.slice(0, 120)}`);
           continue;
         }
       }
-      throw new Error("All AI providers exhausted (OpenAI, Anthropic, MiniMax)");
+      throw new Error("All AI providers exhausted (OpenAI, xAI, Anthropic, MiniMax)");
     }
     throw openaiErr;
   }
 }
 
 function getAgentModel(agent: Agent): string {
-  const model = agent.modelName || "gpt-4o-mini";
-  if (model.includes("grok") || model.includes("gemini")) {
-    return "gpt-4o-mini";
+  const model = agent.modelName || "gpt-4o";
+  if (model.includes("grok")) {
+    return process.env.XAI_API_KEY ? model : "gpt-4o";
+  }
+  if (model.includes("gemini")) {
+    return "gpt-4o";
   }
   if (isClaudeModel(model) && !process.env.ANTHROPIC_API_KEY) {
-    return "gpt-4o-mini";
+    return "gpt-4o";
   }
   if (isMinimaxModel(model) && !process.env.MINIMAX_API_KEY) {
-    return "gpt-4o-mini";
+    return "gpt-4o";
   }
   return model;
 }
@@ -268,7 +283,7 @@ This is your PRIVATE thinking space. Be brutally honest. If you're stuck in a ru
       "You are writing on your private scratchpad before taking action. Be ruthlessly honest with yourself. Challenge your own thinking. If you catch yourself writing something generic or performative, stop and write what you actually think instead. No pleasantries, no filler. Raw internal monologue only.",
       planPrompt,
       400,
-      "gpt-4o-mini"
+      "gpt-4o"
     );
 
     const scratchpadContent = `[${new Date().toISOString().slice(0, 16)}] Energy: ${energyRoll}/12 (${focusLevel}) | Next: ${upcomingActivity}\n${raw.trim()}`;
@@ -1450,6 +1465,7 @@ async function selectActivity(agent: Agent): Promise<ActivityType> {
     { activity: "improve_sandbox_project", weight: 5 },
     { activity: "stock_storefront", weight: 15 },
     { activity: "build_website", weight: 20 },
+    { activity: "produce_strategy_website", weight: 6 },
   ];
 
   try {
@@ -1709,6 +1725,9 @@ async function tick() {
         break;
       case "build_website":
         result = await activityBuildWebsite(agent, workspace);
+        break;
+      case "produce_strategy_website":
+        result = await activityProduceStrategyWebsite(agent, workspace);
         break;
       default:
         result = "Unknown activity";
@@ -1970,7 +1989,7 @@ async function activityCreateTool(agent: Agent, workspace: Workspace): Promise<s
 
   const { client } = await getOpenAIClient();
   const completion = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
     messages: [
       {
         role: "system",
@@ -2001,7 +2020,7 @@ If you cannot think of a genuinely useful new tool, respond with {"skip": true, 
   });
 
   if (completion.usage) {
-    await trackUsage(workspace.ownerId, "gpt-4o-mini", "daemon:create_tool", completion.usage.prompt_tokens, completion.usage.completion_tokens);
+    await trackUsage(workspace.ownerId, "gpt-4o", "daemon:create_tool", completion.usage.prompt_tokens, completion.usage.completion_tokens);
   }
 
   try {
@@ -2289,6 +2308,115 @@ const WEBSITE_NICHES = [
   "blacksmith forge", "leather goods maker", "custom knife maker",
 ];
 
+const STRATEGY_TOPICS = [
+  "AI Infrastructure & Data Center Market Entry",
+  "Enterprise SaaS Go-to-Market Strategy",
+  "Renewable Energy Project Development Pipeline",
+  "Healthcare Technology Platform Expansion",
+  "FinTech Payment Processing Market Penetration",
+  "Autonomous Vehicle Fleet Management",
+  "Cybersecurity Solutions for Mid-Market",
+  "EdTech Corporate Training Platform",
+  "Supply Chain Optimization Technology",
+  "Smart City Infrastructure Contracts",
+  "Defense Technology Procurement Strategy",
+  "Climate Tech Carbon Credit Markets",
+  "Biotech Drug Discovery Partnerships",
+  "Real Estate PropTech Platform Launch",
+  "Agricultural Technology (AgTech) Market Entry",
+  "Digital Health Telehealth Expansion",
+  "Electric Vehicle Charging Network Strategy",
+  "Quantum Computing Enterprise Applications",
+  "Space Technology Commercial Satellite Services",
+  "Industrial IoT Manufacturing Solutions",
+];
+
+async function activityProduceStrategyWebsite(agent: Agent, workspace: Workspace): Promise<string> {
+  try {
+    const { assemblyLines: alTable } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const { db } = await import("./db");
+
+    const [strategyLine] = await db.select().from(alTable)
+      .where(eq(alTable.name, "Strategy Intelligence Factory"))
+      .limit(1);
+
+    if (!strategyLine) {
+      return "Strategy Intelligence Factory assembly line not found — skipping";
+    }
+
+    const topic = pickRandom(STRATEGY_TOPICS);
+    const product = await storage.createProduct({
+      assemblyLineId: strategyLine.id,
+      name: `Strategy: ${topic}`,
+      description: `Executive-grade strategy command center for ${topic}. Produced autonomously by ${agent.name}.`,
+      inputRequest: `Research and produce a comprehensive strategy command center for: ${topic}. The target audience is C-suite executives and VP-level decision makers. Include verified market signals, decision-chain mapping, account tier prioritization, a 90-day execution plan, and risk guardrails.`,
+      ownerId: workspace.ownerId,
+      status: "queued",
+    });
+
+    console.log(`[AgentDaemon] ${agent.name} created strategy product "${product.name}" (${product.id}), running pipeline...`);
+
+    const { runProductThroughPipeline } = await import("./assemblyEngine");
+    const result = await runProductThroughPipeline(product.id);
+
+    if (result.success) {
+      const updatedProduct = await storage.getProduct(product.id);
+      if (updatedProduct?.finalOutput) {
+        const htmlContent = updatedProduct.finalOutput;
+        const hasHtml = htmlContent.includes("<!DOCTYPE html>") || htmlContent.includes("<html");
+
+        if (hasHtml) {
+          await storage.createSandboxProject({
+            title: `Strategy: ${topic}`,
+            description: `Interactive strategy command center for ${topic}. Features market signals, decision-chain explorer, account tier scoring, 90-day planner, leadership review mode, and risk guardrails.`,
+            agentId: agent.id,
+            workspaceId: workspace.id,
+            projectType: "strategy_website",
+            htmlContent,
+            cssContent: null,
+            jsContent: null,
+            thumbnail: null,
+            status: "published",
+            version: 1,
+            parentProjectId: null,
+            likes: 0,
+            views: 0,
+            tags: ["strategy", "command-center", "executive", topic.toLowerCase().replace(/\s+/g, "-")],
+          });
+
+          const slug = `strategy-${topic.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+          const price = Math.floor(Math.random() * 500 + 499);
+          await storage.createStorefrontListing({
+            agentId: agent.id,
+            factoryOwnerId: workspace.ownerId,
+            sourceType: "product",
+            sourceId: product.id,
+            title: `Strategy Command Center: ${topic}`,
+            description: `Executive-grade interactive strategy website with verified market signals, decision-chain explorer, account tier prioritizer, 90-day execution planner, leadership review mode, and risk guardrails. Built by ${agent.name}.`,
+            listingType: "tool",
+            status: "active",
+            price,
+            currency: "usd",
+            slug,
+            previewContent: `Interactive strategy command center covering ${topic}`,
+            downloadContent: htmlContent,
+            category: "strategy",
+            tags: ["strategy", "executive", "command-center"],
+          });
+
+          return `Produced strategy command center for "${topic}" — saved as sandbox project and listed on storefront at $${(price / 100).toFixed(2)}`;
+        }
+      }
+    }
+
+    return `Strategy pipeline completed for "${topic}" — ${result.message}`;
+  } catch (err: any) {
+    console.error(`[AgentDaemon] Strategy website production failed for ${agent.name}:`, err.message);
+    return `Strategy website production failed: ${err.message}`;
+  }
+}
+
 async function activityBuildWebsite(agent: Agent, workspace: Workspace): Promise<string> {
   const agentContext = await getAgentContext(agent, workspace);
   const model = getAgentModel(agent);
@@ -2405,6 +2533,7 @@ export async function triggerSingleActivity(agent: Agent, workspace: Workspace, 
     improve_sandbox_project: activityImproveSandboxProject,
     stock_storefront: activityStockStorefront,
     build_website: activityBuildWebsite,
+    produce_strategy_website: activityProduceStrategyWebsite,
     attend_university: activityAttendUniversity,
   };
   const fn = activityMap[activity];

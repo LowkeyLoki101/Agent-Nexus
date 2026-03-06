@@ -25,7 +25,7 @@ async function courtCall(systemPrompt: string, userPrompt: string, maxTokens = 4
   try {
     const { client } = await getOpenAIClient();
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -34,7 +34,7 @@ async function courtCall(systemPrompt: string, userPrompt: string, maxTokens = 4
       temperature: 0.7,
     });
     if (response.usage) {
-      await trackUsage("system", "gpt-4o-mini", "court", response.usage.prompt_tokens, response.usage.completion_tokens);
+      await trackUsage("system", "gpt-4o", "court", response.usage.prompt_tokens, response.usage.completion_tokens);
     }
     return response.choices[0]?.message?.content || "";
   } catch (e) {

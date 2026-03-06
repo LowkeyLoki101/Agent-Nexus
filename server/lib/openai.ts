@@ -13,6 +13,8 @@ const COST_PER_MILLION: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4-20250514": { input: 300, output: 1500 },
   "claude-haiku-4-5": { input: 80, output: 400 },
   "claude-3-5-haiku-20241022": { input: 80, output: 400 },
+  "grok-3": { input: 300, output: 1500 },
+  "grok-3-mini": { input: 30, output: 50 },
   "MiniMax-M2.5": { input: 100, output: 400 },
   "MiniMax-M2.5-highspeed": { input: 100, output: 400 },
   "MiniMax-M2.1": { input: 80, output: 300 },
@@ -74,6 +76,19 @@ function getMinimaxClient(): Anthropic | null {
   return minimaxClient;
 }
 
+let xaiClient: OpenAI | null = null;
+
+function getXaiClient(): OpenAI | null {
+  if (!process.env.XAI_API_KEY) return null;
+  if (!xaiClient) {
+    xaiClient = new OpenAI({
+      apiKey: process.env.XAI_API_KEY,
+      baseURL: "https://api.x.ai/v1",
+    });
+  }
+  return xaiClient;
+}
+
 export function isClaudeModel(model: string): boolean {
   return model.startsWith("claude");
 }
@@ -81,6 +96,12 @@ export function isClaudeModel(model: string): boolean {
 export function isMinimaxModel(model: string): boolean {
   return model.startsWith("MiniMax");
 }
+
+export function isXaiModel(model: string): boolean {
+  return model.startsWith("grok");
+}
+
+export { getXaiClient };
 
 export async function getOpenAIClient(userId?: string): Promise<{ client: OpenAI; isOwnKey: boolean }> {
   if (userId) {

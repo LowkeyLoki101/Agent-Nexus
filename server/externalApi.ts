@@ -222,7 +222,7 @@ export function registerExternalApi(app: Express) {
       });
 
       const completion = await openai.chat.completions.create({
-        model: agent.modelName || "gpt-4o-mini",
+        model: agent.modelName || "gpt-4o",
         messages,
         max_completion_tokens: 1024,
       });
@@ -230,7 +230,7 @@ export function registerExternalApi(app: Express) {
       const reply = completion.choices[0]?.message?.content || "";
       const promptTokens = completion.usage?.prompt_tokens || 0;
       const completionTokens = completion.usage?.completion_tokens || 0;
-      trackUsage(userId, agent.modelName || "gpt-4o-mini", "api-agent-chat", promptTokens, completionTokens).catch(() => {});
+      trackUsage(userId, agent.modelName || "gpt-4o", "api-agent-chat", promptTokens, completionTokens).catch(() => {});
 
       res.json({ reply, agentId, agentName: agent.name, tokensUsed: promptTokens + completionTokens });
     } catch (e: any) {
