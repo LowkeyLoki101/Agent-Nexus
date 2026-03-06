@@ -1,6 +1,7 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, cp } from "fs/promises";
+import { existsSync } from "fs";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -60,6 +61,11 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  if (existsSync("public/proflow-demo")) {
+    console.log("copying proflow-demo assets...");
+    await cp("public/proflow-demo", "dist/public/proflow-demo", { recursive: true });
+  }
 }
 
 buildAll().catch((err) => {
