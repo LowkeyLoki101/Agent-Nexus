@@ -28,6 +28,7 @@ export default function StrategyProjects() {
   const [searchQuery, setSearchQuery] = useState("");
   const [previewProject, setPreviewProject] = useState<SandboxProjectWithAgent | null>(null);
   const [showProflowDemo, setShowProflowDemo] = useState(false);
+  const [showFortheaDemo, setShowFortheaDemo] = useState(false);
 
   const { data: projects = [], isLoading } = useQuery<SandboxProjectWithAgent[]>({
     queryKey: ["/api/sandbox-projects"],
@@ -112,32 +113,61 @@ export default function StrategyProjects() {
         </Button>
       </div>
 
-      <Card
-        className="cursor-pointer hover-elevate"
-        onClick={() => setShowProflowDemo(true)}
-        data-testid="card-proflow-featured"
-      >
-        <CardContent className="flex items-center gap-4 p-4">
-          <div className="flex items-center justify-center h-14 w-14 rounded-md bg-primary/10 shrink-0">
-            <Star className="h-7 w-7 text-primary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-semibold" data-testid="text-featured-title">
-                ProFlow Command Center
-              </h3>
-              <Badge variant="default" data-testid="badge-featured">Featured</Badge>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card
+          className="cursor-pointer hover-elevate"
+          onClick={() => setShowProflowDemo(true)}
+          data-testid="card-proflow-featured"
+        >
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex items-center justify-center h-14 w-14 rounded-md bg-primary/10 shrink-0">
+              <Star className="h-7 w-7 text-primary" />
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5" data-testid="text-featured-description">
-              Cracking the Texas Hyperscale Data Center market — full executive strategy briefing with video, audio, verified signals, decision-chain explorer, and 90-day execution planner.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" className="shrink-0" data-testid="button-view-proflow">
-            <ExternalLink className="h-4 w-4 mr-1" />
-            View Demo
-          </Button>
-        </CardContent>
-      </Card>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold" data-testid="text-featured-title">
+                  ProFlow Command Center
+                </h3>
+                <Badge variant="default" data-testid="badge-featured">Featured</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground mt-0.5" data-testid="text-featured-description">
+                Texas Hyperscale Data Center market strategy — video, audio, verified signals, decision-chain explorer, and 90-day execution planner.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" className="shrink-0" data-testid="button-view-proflow">
+              <ExternalLink className="h-4 w-4 mr-1" />
+              View Demo
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="cursor-pointer hover-elevate"
+          onClick={() => setShowFortheaDemo(true)}
+          data-testid="card-forthea-featured"
+        >
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex items-center justify-center h-14 w-14 rounded-md bg-primary/10 shrink-0">
+              <Star className="h-7 w-7 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold" data-testid="text-forthea-title">
+                  Forthea Command Center
+                </h3>
+                <Badge variant="default" data-testid="badge-forthea-featured">Featured</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground mt-0.5" data-testid="text-forthea-description">
+                Forthea digital marketing growth strategy — market signals, decision-chain mapping, account prioritizer, and 90-day execution planner.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" className="shrink-0" data-testid="button-view-forthea">
+              <ExternalLink className="h-4 w-4 mr-1" />
+              View Demo
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="flex items-center gap-4 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -320,6 +350,45 @@ export default function StrategyProjects() {
               className="w-full h-full min-h-[500px]"
               title="ProFlow Command Center Demo"
               data-testid="iframe-proflow-demo"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showFortheaDemo}
+        onOpenChange={(open) => {
+          if (!open) setShowFortheaDemo(false);
+        }}
+      >
+        <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <DialogTitle data-testid="text-forthea-title-dialog">Forthea Digital Marketing Command Center</DialogTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                data-testid="button-open-forthea-tab"
+              >
+                <a
+                  href="/proflow-demo/forthea/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  Open Full Screen
+                </a>
+              </Button>
+            </div>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 border rounded-md overflow-hidden">
+            <iframe
+              src="/proflow-demo/forthea/"
+              sandbox="allow-scripts allow-forms allow-same-origin"
+              className="w-full h-full min-h-[500px]"
+              title="Forthea Digital Marketing Command Center"
+              data-testid="iframe-forthea-demo"
             />
           </div>
         </DialogContent>

@@ -130,7 +130,7 @@ async function generateContent(systemPrompt: string, userPrompt: string, maxToke
 function getAgentModel(agent: Agent): string {
   const model = agent.modelName || "gpt-4o";
   if (model.includes("grok")) {
-    return process.env.XAI_API_KEY ? model : "gpt-4o";
+    return process.env.XAI_API_KEY ? "grok-3" : "gpt-4o";
   }
   if (model.includes("gemini")) {
     return "gpt-4o";

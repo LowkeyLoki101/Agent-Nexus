@@ -144,7 +144,7 @@ app.use((req, res, next) => {
   const proflowPath = process.env.NODE_ENV === "production"
     ? path.resolve(__dirname, "public/proflow-demo")
     : path.resolve(process.cwd(), "public/proflow-demo");
-  app.use("/proflow-demo", express.static(proflowPath));
+  app.use("/proflow-demo", express.static(proflowPath, { index: "index.html" }));
 
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
