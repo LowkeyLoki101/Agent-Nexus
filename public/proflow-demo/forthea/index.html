@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ProFlow Forthea Digital Marketing Command Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <header class="hero">
+      <p class="eyebrow">ProFlow Growth System</p>
+      <h1>Forthea Digital Marketing <span>Command Center</span></h1>
+      <p class="lede">Interactive strategy operating model for accelerating Forthea's market position in performance digital marketing across Houston and the Texas mid-market corridor.</p>
+      <div class="hero-meta">
+        <span>Audience: Leadership + Growth Strategy</span>
+        <span>Scope Date: March 2026</span>
+        <span><strong>Colby Black Powered by Emergent Intelligence</strong></span>
+      </div>
+    </header>
+
+    <main>
+      <section id="reviewSection" class="panel">
+        <div class="section-head">
+          <h2>Leadership Review Mode</h2>
+          <p>Guided sequence for exec readouts and strategy alignment.</p>
+        </div>
+        <article id="reviewCard" class="detail-card review-card"></article>
+        <div class="review-actions">
+          <button id="reviewNext" type="button">Next Step</button>
+          <button id="reviewReset" type="button">Restart</button>
+          <span class="credit-line">Colby Black Powered by Emergent Intelligence</span>
+        </div>
+      </section>
+
+      <section id="signalsSection" class="panel">
+        <div class="section-head">
+          <h2>Verified Market Signals</h2>
+          <p>Facts and trends shaping Forthea's competitive landscape.</p>
+        </div>
+        <div id="signals" class="signal-grid"></div>
+      </section>
+
+      <section id="chainSection" class="panel">
+        <div class="section-head">
+          <h2>Decision-Chain Explorer</h2>
+          <p>Click each node to see influence, message, and the ask.</p>
+        </div>
+        <div class="decision-wrap">
+          <div id="chain" class="chain"></div>
+          <article id="chainDetail" class="detail-card"></article>
+        </div>
+      </section>
+
+      <section id="scoreSection" class="panel">
+        <div class="section-head">
+          <h2>Account Tier Prioritizer</h2>
+          <p>Score prospects and rank pursuit priority.</p>
+        </div>
+        <form id="scoreForm" class="score-form">
+          <label>Account Name<input id="accountName" required placeholder="Example: Acme Corp" /></label>
+          <label>Budget Fit (1-5)<input id="budgetFit" type="number" min="1" max="5" value="3" /></label>
+          <label>Digital Maturity (1-5)<input id="digitalMaturity" type="number" min="1" max="5" value="3" /></label>
+          <label>Growth Intent (1-5)<input id="growthIntent" type="number" min="1" max="5" value="3" /></label>
+          <label>Decision Timeline (1-5)<input id="decisionTimeline" type="number" min="1" max="5" value="3" /></label>
+          <button type="submit">Add / Score Account</button>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Score</th>
+                <th>Tier</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="scoreRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="planSection" class="panel">
+        <div class="section-head">
+          <h2>90-Day Execution Planner</h2>
+          <p>Track weekly actions. Saved in browser local storage.</p>
+        </div>
+        <div id="planBoard" class="plan-board"></div>
+      </section>
+
+      <section id="riskSection" class="panel caution">
+        <h2>Risk Guardrails</h2>
+        <ul>
+          <li>Never expand into new paid channels before proving positive ROAS on core campaigns. Premature diversification dilutes budget and obscures attribution.</li>
+          <li>Do not present vanity metrics (impressions, clicks) without connecting them to pipeline and revenue outcomes. CFOs reject unanchored data.</li>
+          <li>Validate lead quality with sales team before scaling campaigns. High volume with low close rates burns credibility faster than low volume.</li>
+          <li>Review competitive positioning monthly. If a competitor launches an aggressive pricing model, respond with value differentiation, not price matching.</li>
+          <li>Document all AI-assisted campaign optimizations for client transparency. Black-box automation erodes trust with sophisticated buyers.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>ProFlow Strategic Interface | Colby Black Powered by Emergent Intelligence</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
