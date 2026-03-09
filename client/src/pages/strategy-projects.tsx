@@ -18,6 +18,10 @@ import {
   ExternalLink,
   X,
   BarChart3,
+  Share2,
+  Copy,
+  Check,
+  Link,
 } from "lucide-react";
 import type { SandboxProject, AssemblyLine } from "@shared/schema";
 
@@ -79,6 +83,30 @@ export default function StrategyProjects() {
       (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()))
     );
   });
+
+  const [copiedProjectId, setCopiedProjectId] = useState<string | null>(null);
+
+  const handleShare = async (project: SandboxProjectWithAgent, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    try {
+      let slug = project.shareSlug;
+      if (!slug) {
+        const res = await apiRequest("GET", `/api/sandbox-projects/${project.id}/share`);
+        const data = await res.json();
+        slug = data.shareSlug;
+        queryClient.invalidateQueries({ queryKey: ["/api/sandbox-projects"] });
+      }
+      const publicUrl = `${window.location.origin}/s/${slug}`;
+      await navigator.clipboard.writeText(publicUrl);
+      setCopiedProjectId(project.id);
+      toast({ title: "Link copied", description: "Public share link copied to clipboard." });
+      setTimeout(() => setCopiedProjectId(null), 2000);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to generate share link", variant: "destructive" });
+    }
+  };
 
   const handleCommission = () => {
     const topic = prompt("Enter a market or topic for the strategy report:");
@@ -243,6 +271,19 @@ export default function StrategyProjects() {
                         <Eye className="h-3 w-3" />
                         {project.views}
                       </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={(e) => handleShare(project, e)}
+                        data-testid={`button-share-${project.id}`}
+                      >
+                        {copiedProjectId === project.id ? (
+                          <Check className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <Share2 className="h-3 w-3" />
+                        )}
+                      </Button>
                     </div>
                   </div>
                   {project.tags && project.tags.length > 0 && (
@@ -280,26 +321,59 @@ export default function StrategyProjects() {
                   <DialogTitle className="flex items-center gap-2" data-testid="text-preview-title">
                     {previewProject.title}
                   </DialogTitle>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    asChild
-                    data-testid="button-open-new-tab"
-                  >
-                    <a
-                      href={`/sandbox/projects/${previewProject.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleShare(previewProject)}
+                      data-testid="button-share-preview"
                     >
-                      <ExternalLink className="h-4 w-4 mr-1" />
-                      Open Full Screen
-                    </a>
-                  </Button>
+                      {copiedProjectId === previewProject.id ? (
+                        <Check className="h-4 w-4 mr-1 text-green-500" />
+                      ) : (
+                        <Share2 className="h-4 w-4 mr-1" />
+                      )}
+                      {copiedProjectId === previewProject.id ? "Copied" : "Share"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      data-testid="button-open-new-tab"
+                    >
+                      <a
+                        href={`/sandbox/projects/${previewProject.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-1" />
+                        Open Full Screen
+                      </a>
+                    </Button>
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground" data-testid="text-preview-agent">
                   By {agentMap.get(previewProject.agentId) || previewProject.agentName || "Unknown Agent"}
                   {previewProject.createdAt && ` — ${new Date(previewProject.createdAt).toLocaleDateString()}`}
                 </p>
+                {previewProject.shareSlug && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1" data-testid="text-share-url">
+                    <Link className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{window.location.origin}/s/{previewProject.shareSlug}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleShare(previewProject)}
+                      data-testid="button-copy-share-url"
+                    >
+                      {copiedProjectId === previewProject.id ? (
+                        <Check className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <Copy className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                )}
               </DialogHeader>
 
               <div className="flex-1 min-h-0 border rounded-md overflow-hidden">

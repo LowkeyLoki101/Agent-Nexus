@@ -2363,50 +2363,69 @@ async function activityProduceStrategyWebsite(agent: Agent, workspace: Workspace
     if (result.success) {
       const updatedProduct = await storage.getProduct(product.id);
       if (updatedProduct?.finalOutput) {
-        const htmlContent = updatedProduct.finalOutput;
+        let htmlContent = updatedProduct.finalOutput;
         const hasHtml = htmlContent.includes("<!DOCTYPE html>") || htmlContent.includes("<html");
 
-        if (hasHtml) {
-          await storage.createSandboxProject({
-            title: `Strategy: ${topic}`,
-            description: `Interactive strategy command center for ${topic}. Features market signals, decision-chain explorer, account tier scoring, 90-day planner, leadership review mode, and risk guardrails.`,
-            agentId: agent.id,
-            workspaceId: workspace.id,
-            projectType: "strategy_website",
-            htmlContent,
-            cssContent: null,
-            jsContent: null,
-            thumbnail: null,
-            status: "published",
-            version: 1,
-            parentProjectId: null,
-            likes: 0,
-            views: 0,
-            tags: ["strategy", "command-center", "executive", topic.toLowerCase().replace(/\s+/g, "-")],
-          });
-
-          const slug = `strategy-${topic.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
-          const price = Math.floor(Math.random() * 500 + 499);
-          await storage.createStorefrontListing({
-            agentId: agent.id,
-            factoryOwnerId: workspace.ownerId,
-            sourceType: "product",
-            sourceId: product.id,
-            title: `Strategy Command Center: ${topic}`,
-            description: `Executive-grade interactive strategy website with verified market signals, decision-chain explorer, account tier prioritizer, 90-day execution planner, leadership review mode, and risk guardrails. Built by ${agent.name}.`,
-            listingType: "tool",
-            status: "active",
-            price,
-            currency: "usd",
-            slug,
-            previewContent: `Interactive strategy command center covering ${topic}`,
-            downloadContent: htmlContent,
-            category: "strategy",
-            tags: ["strategy", "executive", "command-center"],
-          });
-
-          return `Produced strategy command center for "${topic}" — saved as sandbox project and listed on storefront at $${(price / 100).toFixed(2)}`;
+        if (!hasHtml) {
+          const htmlMatch = htmlContent.match(/(<!DOCTYPE html>[\s\S]*<\/html>)/i) ||
+            htmlContent.match(/(<html[\s\S]*<\/html>)/i);
+          if (htmlMatch) {
+            htmlContent = htmlMatch[1];
+          } else {
+            console.log(`[AgentDaemon] Strategy output for "${topic}" is not valid HTML — marking product as failed`);
+            await storage.updateProduct(product.id, { status: "failed" } as any);
+            return `Strategy pipeline produced non-HTML output for "${topic}" — output was not a valid website`;
+          }
         }
+
+        if (htmlContent.startsWith("```")) {
+          htmlContent = htmlContent.replace(/^```[a-z]*\n?/i, "").replace(/\n?```\s*$/, "");
+        }
+
+        const shareSlug = `strategy-${topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")}-${Date.now().toString(36)}`;
+
+        const sandboxProject = await storage.createSandboxProject({
+          title: `Strategy: ${topic}`,
+          description: `Interactive strategy command center for ${topic}. Features market signals, decision-chain explorer, account tier scoring, 90-day planner, leadership review mode, and risk guardrails.`,
+          agentId: agent.id,
+          workspaceId: workspace.id,
+          projectType: "strategy_website",
+          htmlContent,
+          cssContent: null,
+          jsContent: null,
+          thumbnail: null,
+          status: "published",
+          version: 1,
+          parentProjectId: null,
+          likes: 0,
+          views: 0,
+          tags: ["strategy", "command-center", "executive", topic.toLowerCase().replace(/\s+/g, "-")],
+          shareSlug,
+        });
+
+        const storefrontSlug = `strategy-${topic.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+        const price = Math.floor(Math.random() * 500 + 499);
+        await storage.createStorefrontListing({
+          agentId: agent.id,
+          factoryOwnerId: workspace.ownerId,
+          sourceType: "product",
+          sourceId: product.id,
+          title: `Strategy Command Center: ${topic}`,
+          description: `Executive-grade interactive strategy website with verified market signals, decision-chain explorer, account tier prioritizer, 90-day execution planner, leadership review mode, and risk guardrails. Built by ${agent.name}.`,
+          listingType: "tool",
+          status: "active",
+          price,
+          currency: "usd",
+          slug: storefrontSlug,
+          previewContent: `Interactive strategy command center covering ${topic}`,
+          downloadContent: htmlContent,
+          category: "strategy",
+          tags: ["strategy", "executive", "command-center"],
+        });
+
+        const shareUrl = `/s/${shareSlug}`;
+        console.log(`[AgentDaemon] Strategy command center for "${topic}" published — shareable at ${shareUrl}`);
+        return `Produced strategy command center for "${topic}" — saved as sandbox project (shareable: ${shareUrl}) and listed on storefront at $${(price / 100).toFixed(2)}`;
       }
     }
 

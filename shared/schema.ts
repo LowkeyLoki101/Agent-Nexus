@@ -966,6 +966,7 @@ export const sandboxProjects = pgTable("sandbox_projects", {
   status: sandboxProjectStatusEnum("status").notNull().default("published"),
   version: integer("version").notNull().default(1),
   parentProjectId: varchar("parent_project_id"),
+  shareSlug: varchar("share_slug").unique(),
   likes: integer("likes").notNull().default(0),
   views: integer("views").notNull().default(0),
   tags: text("tags").array(),

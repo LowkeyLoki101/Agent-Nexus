@@ -2098,6 +2098,74 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/sandbox-projects/:id/share", isAuthenticated, async (req, res) => {
+    try {
+      const project = await storage.getSandboxProject(req.params.id);
+      if (!project) return res.status(404).json({ message: "Project not found" });
+
+      if (project.shareSlug) {
+        return res.json({ shareSlug: project.shareSlug });
+      }
+
+      const baseSlug = project.title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80);
+
+      let slug = baseSlug || "project";
+      let suffix = 0;
+      while (true) {
+        const candidate = suffix === 0 ? slug : `${slug}-${suffix}`;
+        const existing = await storage.getSandboxProjectByShareSlug(candidate);
+        if (!existing) {
+          slug = candidate;
+          break;
+        }
+        suffix++;
+      }
+
+      const updated = await storage.updateSandboxProject(req.params.id, { shareSlug: slug } as any);
+      res.json({ shareSlug: slug });
+    } catch (error) {
+      console.error("Error generating share slug:", error);
+      res.status(500).json({ message: "Failed to generate share link" });
+    }
+  });
+
+  app.get("/s/:slug", async (req, res) => {
+    try {
+      const project = await storage.getSandboxProjectByShareSlug(req.params.slug);
+      if (!project) return res.status(404).send("Project not found");
+
+      storage.incrementProjectViews(project.id).catch(() => {});
+
+      let content = project.htmlContent;
+      if (project.cssContent && !content.includes("<style")) {
+        content = content.replace("</head>", `<style>${project.cssContent}</style></head>`);
+        if (!content.includes("</head>")) {
+          content = `<style>${project.cssContent}</style>${content}`;
+        }
+      }
+      if (project.jsContent && !content.includes("<script")) {
+        content = content.replace("</body>", `<script>${project.jsContent}</script></body>`);
+        if (!content.includes("</body>")) {
+          content = `${content}<script>${project.jsContent}</script>`;
+        }
+      }
+
+      res.setHeader("Content-Type", "text/html");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.send(content);
+    } catch (error) {
+      console.error("Error serving shared project:", error);
+      res.status(500).send("Failed to load project");
+    }
+  });
+
   app.get("/sandbox/projects/:id", async (req, res) => {
     try {
       const project = await storage.getSandboxProject(req.params.id);

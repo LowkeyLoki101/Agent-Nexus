@@ -311,6 +311,7 @@ export interface IStorage {
 
   createSandboxProject(project: InsertSandboxProject): Promise<SandboxProject>;
   getSandboxProject(id: string): Promise<SandboxProject | undefined>;
+  getSandboxProjectByShareSlug(slug: string): Promise<SandboxProject | undefined>;
   getSandboxProjects(filters?: { agentId?: string; projectType?: string; workspaceId?: string; status?: string }): Promise<SandboxProject[]>;
   updateSandboxProject(id: string, updates: Partial<InsertSandboxProject>): Promise<SandboxProject | undefined>;
   getSandboxProjectsByAgent(agentId: string): Promise<SandboxProject[]>;
@@ -1486,6 +1487,11 @@ export class DatabaseStorage implements IStorage {
 
   async getSandboxProject(id: string): Promise<SandboxProject | undefined> {
     const [project] = await db.select().from(sandboxProjects).where(eq(sandboxProjects.id, id));
+    return project;
+  }
+
+  async getSandboxProjectByShareSlug(slug: string): Promise<SandboxProject | undefined> {
+    const [project] = await db.select().from(sandboxProjects).where(eq(sandboxProjects.shareSlug, slug));
     return project;
   }
 
