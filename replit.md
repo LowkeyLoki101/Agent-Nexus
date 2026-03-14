@@ -57,7 +57,7 @@ Authentication includes user upsert on login and persistent sessions with secure
 ### Key Features
 - **Actionable Agent Chat**: AI detects user instructions, offering structured actions via chat buttons for agents to execute tasks.
 - **Autonomous Agent Daemon**: Background process (`agentDaemon.ts`) enabling agents to perform activities like creating gifts, posting on boards, writing briefings, and managing assembly lines. Includes a Factory Health Scanner for automated bottleneck resolution.
-- **Multi-Provider AI Fallback**: Chat and daemon automatically fall back through OpenAI gpt-4o → xAI grok-3 → Anthropic claude-sonnet-4-20250514 → MiniMax-M2.5 when providers return 429/quota errors.
+- **Multi-Provider AI Fallback**: Chat, daemon, and Command Center Chat all automatically fall back through OpenAI gpt-4o → xAI grok-3 → Anthropic claude-sonnet-4-20250514 → MiniMax-M2.5 when any provider is unavailable (429/quota/auth/config errors).
 - **Tool Registry**: Agents and users can create, browse, and test tools. Routes: `/api/tools`, `/api/tools/:id/test`.
 - **Storefront**: Marketplace for agent-created products. Routes: `/api/storefront/listings`, `/api/storefront/my-listings`, `/api/storefront/analytics`, `/api/storefront/factory-settings`, `/api/storefront/price-adjustments`.
 - **Chronicle**: Factory history/lore system. Routes: `/api/chronicle`.

@@ -2769,35 +2769,80 @@ Be concise and helpful. Use factory/production metaphors when appropriate.`;
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      const selectedProvider = provider || "openai";
+      const { trackedStreamingChat, anthropicStream, getXaiClient } = await import("./lib/openai");
 
-      if (selectedProvider === "anthropic" || selectedProvider === "minimax") {
-        const { anthropicStream } = await import("./lib/openai");
-        const model = selectedProvider === "anthropic" ? "claude-sonnet-4-20250514" : "MiniMax-M2.5";
-        const { stream: aStream, getUsage } = await anthropicStream(model, messages, 1024);
-        for await (const text of aStream) {
-          if (text) {
-            res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
-          }
+      const providerChain: Array<{ name: string; run: () => Promise<void> }> = [
+        {
+          name: "openai/gpt-4o",
+          run: async () => {
+            const { stream, cleanup } = await trackedStreamingChat(userId, "command-chat", {
+              model: "gpt-4o",
+              messages,
+              max_tokens: 1024,
+              stream: true,
+            });
+            for await (const chunk of stream) {
+              const text = chunk.choices?.[0]?.delta?.content;
+              if (text) res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+            }
+            await cleanup();
+          },
+        },
+        {
+          name: "xai/grok-3",
+          run: async () => {
+            const xai = getXaiClient();
+            if (!xai) throw new Error("xAI not configured (skip)");
+            const stream = await xai.chat.completions.create({ model: "grok-3", messages, max_tokens: 1024, stream: true });
+            for await (const chunk of stream as any) {
+              const text = chunk.choices?.[0]?.delta?.content;
+              if (text) res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+            }
+            await trackUsage(userId, "grok-3", "command-chat-fallback", 0, 0);
+          },
+        },
+        {
+          name: "anthropic/claude-sonnet-4-20250514",
+          run: async () => {
+            const { stream: aStream, getUsage } = await anthropicStream("claude-sonnet-4-20250514", messages, 1024);
+            for await (const text of aStream) {
+              if (text) res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+            }
+            const usage = getUsage();
+            await trackUsage(userId, "claude-sonnet-4-20250514", "command-chat-fallback", usage.inputTokens, usage.outputTokens);
+          },
+        },
+        {
+          name: "minimax/MiniMax-M2.5",
+          run: async () => {
+            const { stream: aStream, getUsage } = await anthropicStream("MiniMax-M2.5", messages, 1024);
+            for await (const text of aStream) {
+              if (text) res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+            }
+            const usage = getUsage();
+            await trackUsage(userId, "MiniMax-M2.5", "command-chat-fallback", usage.inputTokens, usage.outputTokens);
+          },
+        },
+      ];
+
+      let succeeded = false;
+      for (const prov of providerChain) {
+        try {
+          await prov.run();
+          succeeded = true;
+          break;
+        } catch (provErr: any) {
+          const msg = provErr?.message || String(provErr);
+          console.log(`[CommandChat] ${prov.name} failed: ${msg.slice(0, 120)}, trying next provider...`);
+          continue;
         }
-        const usage = getUsage();
-        await trackUsage(userId, model, usage.inputTokens, usage.outputTokens);
-      } else {
-        const { trackedStreamingChat } = await import("./lib/openai");
-        const model = "gpt-4o";
-        const { stream, cleanup } = await trackedStreamingChat(userId, "command-chat", {
-          model,
-          messages,
-          max_tokens: 1024,
-          stream: true,
-        });
-        for await (const chunk of stream) {
-          const text = chunk.choices?.[0]?.delta?.content;
-          if (text) {
-            res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
-          }
+      }
+
+      if (!succeeded) {
+        if (!res.headersSent) {
+          return res.status(503).json({ message: "All AI providers are currently unavailable. Please try again later." });
         }
-        await cleanup();
+        res.write(`data: ${JSON.stringify({ error: "All AI providers are currently unavailable. Please try again later." })}\n\n`);
       }
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
